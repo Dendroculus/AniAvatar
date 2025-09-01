@@ -14,7 +14,6 @@ It helps users save time by automating anime-related searches — no more manual
 ## Roadmap (Planned Features)  
 
 ### Profile Cog  
-- [ ] Add bio + favorite anime/character fields  
 - [ ] Implement leveling system (XP from chatting)  
 - [ ] Display a profile card with avatar, bio, and stats  
 
