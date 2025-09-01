@@ -1,0 +1,518 @@
+[
+  {
+    "question": "What is the name of the pirate crew Luffy leads in One Piece?",
+    "options": ["Straw Hat Pirates", "Blackbeard Pirates", "Red Hair Pirates", "Heart Pirates"],
+    "answer": "Straw Hat Pirates"
+  },
+  {
+    "question": "Which anime features a notebook that kills anyone whose name is written in it?",
+    "options": ["Death Note", "Code Geass", "Tokyo Ghoul", "Attack on Titan"],
+    "answer": "Death Note"
+  },
+  {
+    "question": "What is Sailor Moon’s real name?",
+    "options": ["Usagi Tsukino", "Rei Hino", "Ami Mizuno", "Makoto Kino"],
+    "answer": "Usagi Tsukino"
+  },
+  {
+    "question": "In Attack on Titan, what is the name of the main protagonist?",
+    "options": ["Eren Yeager", "Armin Arlert", "Mikasa Ackerman", "Levi"],
+    "answer": "Eren Yeager"
+  },
+  {
+    "question": "Which anime features a girl who can see ghosts and spirits, and exorcises them?",
+    "options": ["Noragami", "Bleach", "Inuyasha", "Natsume Yuujinchou"],
+    "answer": "Natsume Yuujinchou"
+  },
+  {
+    "question": "Who is the strongest hero in One Punch Man?",
+    "options": ["Saitama", "Genos", "Tatsumaki", "Bang"],
+    "answer": "Saitama"
+  },
+  {
+    "question": "Which anime character says the line: 'I’ll take a potato chip… AND EAT IT!'?",
+    "options": ["Light Yagami", "Luffy", "Naruto", "Ichigo Kurosaki"],
+    "answer": "Light Yagami"
+  },
+  {
+    "question": "What is the signature weapon of Mikasa Ackerman in Attack on Titan?",
+    "options": ["Vertical Maneuvering Gear", "Sword", "Gun", "Bow and Arrow"],
+    "answer": "Vertical Maneuvering Gear"
+  },
+   {
+    "question": "Who is the main protagonist of Tate no Yuusha no Nariagari?",
+    "options": ["Naofumi Iwatani", "Raphtalia", "Motoyasu Kitamura", "Ren Amaki"],
+    "answer": "Naofumi Iwatani"
+  },
+  {
+    "question": "What weapon does Naofumi wield?",
+    "options": ["Shield", "Sword", "Bow", "Spear"],
+    "answer": "Shield"
+  },
+  {
+    "question": "Who is Naofumi's first companion?",
+    "options": ["Raphtalia", "Filo", "Motoyasu", "Myne"],
+    "answer": "Raphtalia"
+  },
+  {
+    "question": "Which kingdom summons the Shield Hero?",
+    "options": ["Melromarc", "Fitoria", "Q'Thry", "Kano"],
+    "answer": "Melromarc"
+  },
+  {
+    "question": "What is Filo's true form?",
+    "options": ["Filolial Queen", "Dragon", "Elf", "Demon"],
+    "answer": "Filolial Queen"
+  },
+  {
+    "question": "Who betrays the heroes in Melromarc?",
+    "options": ["Myne", "Motoyasu", "Ren", "Raphtalia"],
+    "answer": "Myne"
+  },
+  {
+    "question": "Which item allows Naofumi to heal Raphtalia?",
+    "options": ["Divine Bow", "Holy Water", "Healing Staff", "Shield Power"],
+    "answer": "Shield Power"
+  },
+  {
+    "question": "What race is Raphtalia?",
+    "options": ["Raccoon demi-human", "Elf", "Human", "Dragonkin"],
+    "answer": "Raccoon demi-human"
+  },
+  {
+    "question": "Who is the second summoned hero?",
+    "options": ["Motoyasu Kitamura", "Naofumi", "Ren Amaki", "Itsuki Kawasumi"],
+    "answer": "Motoyasu Kitamura"
+  },
+  {
+    "question": "Which organization protects the kingdom from monsters?",
+    "options": ["Heroes", "Church", "Knights", "Merchants"],
+    "answer": "Heroes"
+  },
+
+  {
+    "question": "Who is Subaru Natsuki's first ally in Re:Zero?",
+    "options": ["Emilia", "Rem", "Ram", "Beatrice"],
+    "answer": "Emilia"
+  },
+  {
+    "question": "What ability does Subaru have?",
+    "options": ["Return by Death", "Time Stop", "Telepathy", "Teleportation"],
+    "answer": "Return by Death"
+  },
+  {
+    "question": "What is the name of Rem's twin?",
+    "options": ["Ram", "Beatrice", "Emilia", "Crusch"],
+    "answer": "Ram"
+  },
+  {
+    "question": "Who is the spirit that lives in the mansion?",
+    "options": ["Beatrice", "Roswaal", "Felt", "Subaru"],
+    "answer": "Beatrice"
+  },
+  {
+    "question": "What is Subaru's favorite food?",
+    "options": ["Cup Noodles", "Bread", "Steak", "Fish"],
+    "answer": "Cup Noodles"
+  },
+  {
+    "question": "Who kills Subaru in his first death?",
+    "options": ["Petelgeuse", "Rem", "Roswaal", "Emilia"],
+    "answer": "Petelgeuse"
+  },
+  {
+    "question": "Which character is the Sword Saint of Lugnica in Black Clover?",
+    "options": ["Yuno", "Asta", "Noelle", "Julius"],
+    "answer": "Yuno"
+  },
+  {
+    "question": "What magic does Asta wield?",
+    "options": ["Anti-Magic", "Fire", "Water", "Wind"],
+    "answer": "Anti-Magic"
+  },
+  {
+    "question": "Who is Asta's rival and childhood friend?",
+    "options": ["Yuno", "Noelle", "Finral", "Magna"],
+    "answer": "Yuno"
+  },
+  {
+    "question": "Which squad is Yuno part of?",
+    "options": ["Golden Dawn", "Black Bulls", "Silver Eagles", "Crimson Lion Kings"],
+    "answer": "Golden Dawn"
+  },
+
+  {
+    "question": "Who is Kazuma's partner in Konosuba?",
+    "options": ["Aqua", "Megumin", "Darkness", "Yunyun"],
+    "answer": "Aqua"
+  },
+  {
+    "question": "Which magic does Megumin specialize in?",
+    "options": ["Explosion Magic", "Water Magic", "Healing Magic", "Wind Magic"],
+    "answer": "Explosion Magic"
+  },
+  {
+    "question": "Who is the masochistic crusader in Kazuma's party?",
+    "options": ["Darkness", "Aqua", "Megumin", "Wiz"],
+    "answer": "Darkness"
+  },
+  {
+    "question": "What is Kazuma's signature skill?",
+    "options": ["Steal", "Explosion", "Swordsmanship", "Healing"],
+    "answer": "Steal"
+  },
+  {
+    "question": "Which demon lord does the group fight first?",
+    "options": ["Verdia", "Vanir", "Dullahan", "Krauser"],
+    "answer": "Vanir"
+  },
+  {
+    "question": "Who is the archwizard that owns a magic shop?",
+    "options": ["Wiz", "Yunyun", "Aqua", "Megumin"],
+    "answer": "Wiz"
+  },
+  {
+    "question": "What is Darkness's real name?",
+    "options": ["Lalatina Dustiness Ford", "Mitsurugi", "Kazuma", "Megumin"],
+    "answer": "Lalatina Dustiness Ford"
+  },
+  {
+    "question": "Which town do they frequently visit for quests?",
+    "options": ["Axel", "Lagos", "Ragnarok", "Frostgard"],
+    "answer": "Axel"
+  },
+  {
+    "question": "Who has a crush on Yunyun?",
+    "options": ["Kazuma", "Megumin", "Aqua", "Darkness"],
+    "answer": "Kazuma"
+  },
+
+  {
+    "question": "Who is the male lead in Horimiya?",
+    "options": ["Izumi Miyamura", "Kyoko Hori", "Tooru Ishikawa", "Sota Hori"],
+    "answer": "Izumi Miyamura"
+  },
+  {
+    "question": "What is Kyoko Hori's younger brother's name?",
+    "options": ["Sota", "Tooru", "Izumi", "Kakeru"],
+    "answer": "Sota"
+  },
+  {
+    "question": "What color is Miyamura's hair before school?",
+    "options": ["Black", "Brown", "Blue", "Purple"],
+    "answer": "Black"
+  },
+  {
+    "question": "Who is Miyamura's close friend at school?",
+    "options": ["Tooru Ishikawa", "Kyoko Hori", "Sota Hori", "Rem"],
+    "answer": "Tooru Ishikawa"
+  },
+  {
+    "question": "Where do Hori and Miyamura frequently meet after school?",
+    "options": ["Miyamura's house", "School", "Cafe", "Park"],
+    "answer": "Miyamura's house"
+  },
+  {
+    "question": "Which club is Tooru Ishikawa part of?",
+    "options": ["Soccer Club", "Art Club", "Drama Club", "Music Club"],
+    "answer": "Soccer Club"
+  },
+  {
+    "question": "What is Hori's favorite snack?",
+    "options": ["Chocolate", "Candy", "Chips", "Ice Cream"],
+    "answer": "Chocolate"
+  },
+  {
+    "question": "Who helps Miyamura with his piercings?",
+    "options": ["Kyoko Hori", "Tooru Ishikawa", "Sota Hori", "Rem"],
+    "answer": "Kyoko Hori"
+  },
+  {
+    "question": "What is the theme of Horimiya?",
+    "options": ["Romance", "Action", "Comedy", "Horror"],
+    "answer": "Romance"
+  },
+    {
+    "question": "What is the full name of the Sin Archbishops’ leader, Petelgeuse?",
+    "options": ["Petelgeuse Romanee-Conti", "Petelgeuse van Astrea", "Petelgeuse Mathers", "Petelgeuse Lugnica"],
+    "answer": "Petelgeuse Romanee-Conti"
+  },
+  {
+    "question": "Which magical construct maintains the library in Roswaal’s mansion?",
+    "options": ["Beatrice", "Puck", "Subaru", "Crusch"],
+    "answer": "Beatrice"
+  },
+  {
+    "question": "What is the specific time Subaru first discovers the ability 'Return by Death'?",
+    "options": ["After dying in the capital", "After dying in the mansion", "After fighting Petelgeuse", "After meeting Rem"],
+    "answer": "After dying in the capital"
+  },
+  {
+    "question": "Which cult member is known for using surgical precision and a scalpel as a weapon?",
+    "options": ["Lye Batenkaitos", "Regulus Corneas", "Petelgeuse Romanee-Conti", "Elsa Granhiert"],
+    "answer": "Lye Batenkaitos"
+  },
+  {
+    "question": "Who becomes the temporary ruler of the Crusch faction after her absence?",
+    "options": ["Priscilla", "Reinhard", "Subaru", "Felt"],
+    "answer": "Reinhard"
+  },
+  {
+    "question": "What is the name of the dragon spirit sealed in the Roswaal mansion?",
+    "options": ["Puck", "Flora", "Felt", "Crusch"],
+    "answer": "Puck"
+  },
+  {
+    "question": "What is the significance of the insignia on Rem’s maid uniform?",
+    "options": ["It marks her as a Rem clan member", "It symbolizes loyalty to Roswaal", "It denotes magical power", "It represents her twin bond"],
+    "answer": "It symbolizes loyalty to Roswaal"
+  },
+  {
+    "question": "Which character kills Subaru multiple times in the first arc to test 'Return by Death'?",
+    "options": ["Elsa Granhiert", "Petelgeuse Romanee-Conti", "Regulus Corneas", "Wilhelm van Astrea"],
+    "answer": "Petelgeuse Romanee-Conti"
+  },
+  {
+    "question": "Which of these is NOT a member of the Witch Cult's Sin Archbishops?",
+    "options": ["Echidna", "Petelgeuse", "Regulus", "Lye"],
+    "answer": "Echidna"
+  },
+  {
+    "question": "Which character has a powerful curse on them that affects everyone around them?",
+    "options": ["Satella", "Emilia", "Subaru", "Beatrice"],
+    "answer": "Satella"
+  },
+  {
+    "question": "What is the true name of Rem’s twin sister, Ram?",
+    "options": ["Ram", "Ramiel", "Ramona", "Remilia"],
+    "answer": "Ram"
+  },
+  {
+    "question": "Which arc introduces the Sanctuary and the Archbishop Regulus?",
+    "options": ["Arc 4", "Arc 2", "Arc 3", "Arc 5"],
+    "answer": "Arc 4"
+  },
+  {
+    "question": "What object does Subaru repeatedly use to communicate past events to himself?",
+    "options": ["Diary", "Letter", "Signet Ring", "Magic Scroll"],
+    "answer": "Diary"
+  },
+  {
+    "question": "Which character possesses the 'Witch Factor' allowing her to manipulate life and death?",
+    "options": ["Echidna", "Satella", "Beatrice", "Crusch"],
+    "answer": "Echidna"
+  },
+  {
+    "question": "What is the first name of Crusch's loyal knight, often seen protecting her?",
+    "options": ["Reinhard", "Wilhelm", "Garfield", "Felt"],
+    "answer": "Wilhelm"
+  },
+  {
+    "question": "Which of these events triggers Subaru’s initial memory reset?",
+    "options": ["His death in the royal capital", "Emilia’s kidnapping", "Meeting Beatrice", "The Witch Cult attack on the mansion"],
+    "answer": "His death in the royal capital"
+  },
+  {
+    "question": "Which character is known for carrying a giant axe and being extremely protective of Crusch?",
+    "options": ["Garfield", "Wilhelm", "Reinhard", "Petelgeuse"],
+    "answer": "Garfield"
+  },
+  {
+    "question": "What food does Subaru frequently crave, becoming a running gag?",
+    "options": ["Pocky", "Rice Balls", "Onigiri", "Sandwiches"],
+    "answer": "Onigiri"
+  },
+  {
+    "question": "Who ultimately defeats the Archbishop of Greed, Regulus Corneas?",
+    "options": ["Subaru and Reinhard", "Emilia alone", "Beatrice", "Rem and Ram"],
+    "answer": "Subaru and Reinhard"
+  },
+  {
+    "question": "Which character has the ability to nullify magic using their sword?",
+    "options": ["Reinhard", "Wilhelm", "Garfield", "Petelgeuse"],
+    "answer": "Wilhelm"
+  },
+    {
+    "question": "In 'Attack on Titan', what is the original name of the Founding Titan?",
+    "options": ["Ymir Fritz", "Eren Yeager", "Historia Reiss", "Levi Ackerman"],
+    "answer": "Ymir Fritz"
+  },
+  {
+    "question": "In 'Death Note', what is the full name of L?",
+    "options": ["L Lawliet", "Light Yagami", "Ryuk", "Near"],
+    "answer": "L Lawliet"
+  },
+  {
+    "question": "In 'Steins;Gate', what gadget does Okabe Rintarou use to send messages to the past?",
+    "options": ["Phone Microwave", "Time Turner", "Chrono Trigger", "Future Gadget 101"],
+    "answer": "Phone Microwave"
+  },
+  {
+    "question": "In 'Fullmetal Alchemist: Brotherhood', who is the Father of the Homunculi?",
+    "options": ["Father", "Father Cornello", "Lust", "Envy"],
+    "answer": "Father"
+  },
+  {
+    "question": "In 'One Piece', which Devil Fruit did Nico Robin eat?",
+    "options": ["Hana Hana no Mi", "Gomu Gomu no Mi", "Mera Mera no Mi", "Tori Tori no Mi"],
+    "answer": "Hana Hana no Mi"
+  },
+  {
+    "question": "In 'Code Geass', what is the Geass power given to Lelouch?",
+    "options": ["Power of Absolute Obedience", "Time Travel", "Mind Reading", "Invincibility"],
+    "answer": "Power of Absolute Obedience"
+  },
+  {
+    "question": "In 'Tokyo Ghoul', what is the name of Kaneki's ghoul mask designer?",
+    "options": ["Uta", "Touka", "Nishiki", "Yoshimura"],
+    "answer": "Uta"
+  },
+  {
+    "question": "In 'Naruto', who was the first person to awaken the Mangekyō Sharingan?",
+    "options": ["Indra Ōtsutsuki", "Itachi Uchiha", "Sasuke Uchiha", "Madara Uchiha"],
+    "answer": "Indra Ōtsutsuki"
+  },
+  {
+    "question": "In 'Re:Zero', which witch's cult worships the Witch of Envy?",
+    "options": ["Witch Cult", "Sanctuary Order", "Church of Lugnica", "Crusch Faction"],
+    "answer": "Witch Cult"
+  },
+  {
+    "question": "In 'Demon Slayer', what is the total number of forms in Tanjiro's Water Breathing techniques?",
+    "options": ["10", "12", "15", "8"],
+    "answer": "10"
+  },
+    {
+    "question": "In 'Steins;Gate', what is Kurisu Makise's nickname?",
+    "options": ["Christina", "Kuricha", "Makisen", "Kurisu-chan"],
+    "answer": "Kurisu-chan"
+  },
+  {
+    "question": "Who is the Demon Slayer Corps’ pillar known as the Flame Hashira?",
+    "options": ["Kyojuro Rengoku", "Giyu Tomioka", "Sanemi Shinazugawa", "Tengen Uzui"],
+    "answer": "Kyojuro Rengoku"
+  },
+  {
+    "question": "In 'Attack on Titan', who inherits the Armored Titan from Reiner?",
+    "options": ["Porco Galliard", "Eren Yeager", "Annie Leonhart", "Pieck Finger"],
+    "answer": "Porco Galliard"
+  },
+  {
+    "question": "In 'One Piece', which Marine Admiral is nicknamed 'Akainu'?",
+    "options": ["Sakazuki", "Borsalino", "Kuzan", "Fujitora"],
+    "answer": "Sakazuki"
+  },
+  {
+    "question": "What is the true identity of the 'Black Reaper' in 'Black Clover'?",
+    "options": ["Yami Sukehiro", "Luck Voltia", "Asta", "Noelle Silva"],
+    "answer": "Yami Sukehiro"
+  },
+  {
+    "question": "In 'My Hero Academia', what is Shoto Todoroki's quirk?",
+    "options": ["Half-Cold Half-Hot", "Explosion", "One For All", "Acid"],
+    "answer": "Half-Cold Half-Hot"
+  },
+  {
+    "question": "Who manipulates memories in 'Re:Zero' using the Witch Factor?",
+    "options": ["Echidna", "Satella", "Beatrice", "Crusch"],
+    "answer": "Echidna"
+  },
+  {
+    "question": "Which character is the creator of the Death Scythe in 'Soul Eater'?",
+    "options": ["Spirit Albarn", "Maka Albarn", "Death", "Black☆Star"],
+    "answer": "Spirit Albarn"
+  },
+  {
+    "question": "In 'Konosuba', what is Aqua’s official title?",
+    "options": ["Goddess of Water", "Archwizard", "Saint", "Crusader"],
+    "answer": "Goddess of Water"
+  },
+   {
+    "question": "What is the title of the anime where the main character travels back in time to save his friends?",
+    "answer": "Erased (Boku dake ga Inai Machi)"
+  },
+  {
+    "question": "In which anime do characters collect Dragon Balls to summon a wish-granting dragon?",
+    "answer": "Dragon Ball"
+  },
+  {
+    "question": "Which anime features a group of ninjas including Naruto, Sasuke, and Sakura?",
+    "answer": "Naruto"
+  },
+  {
+    "question": "What is the name of the school attended by the characters in My Hero Academia?",
+    "answer": "U.A. High School"
+  },
+  {
+    "question": "What is the main theme of Attack on Titan?",
+    "answer": "Humanity's battle against giant humanoid creatures known as Titans."
+  },
+  {
+    "question": "In Sword Art Online, what virtual reality game do the characters get trapped in?",
+    "answer": "Sword Art Online"
+  },
+  {
+    "question": "What is the name of the cat-like creature that accompanies the main character in My Neighbor Totoro?",
+    "answer": "Totoro"
+  },
+  {
+    "question": "Which anime follows the adventures of Edward and Alphonse Elric as they seek the Philosopher's Stone?",
+    "answer": "Fullmetal Alchemist"
+  },
+  {
+    "question": "What is the name of the organization that opposes the main characters in Fairy Tail?",
+    "answer": "Grimoire Heart"
+  },
+  {
+    "question": "In One Punch Man, what is Saitama's main issue with being a hero?",
+    "answer": "He is too strong and defeats every enemy with one punch."
+  },
+  {
+    "question": "What is the primary occupation of the characters in the anime Cowboy Bebop?",
+    "answer": "Bounty Hunters"
+  },
+  {
+    "question": "In Demon Slayer, what is the name of the main character's sister who is turned into a demon?",
+    "answer": "Nezuko Kamado"
+  },
+  {
+    "question": "What is the name of the group of students in Assassination Classroom tasked with killing their teacher?",
+    "answer": "Class 3-E"
+  },
+  {
+    "question": "In the anime Steins;Gate, what is the main character's profession?",
+    "answer": "A self-proclaimed mad scientist"
+  },
+  {
+    "question": "Which anime features a love story between a high school girl and a boy who can see ghosts?",
+    "answer": "Another"
+  },
+  {
+    "question": "In the anime Your Lie in April, what instrument does the main character play?",
+    "answer": "Piano"
+  },
+  {
+    "question": "What is the main character's goal in the anime Hunter x Hunter?",
+    "answer": "To become a Hunter and find his father."
+  },
+  {
+    "question": "In the anime Code Geass, what is the name of the protagonist who gains the power of Geass?",
+    "answer": "Lelouch vi Britannia"
+  },
+  {
+    "question": "What is the main setting of the anime No Game No Life?",
+    "answer": "A fantasy world where all disputes are resolved through games."
+  },
+  {
+    "question": "In the anime The Seven Deadly Sins, what sin does Meliodas represent?",
+    "answer": "The Dragon's Sin of Wrath"
+  },
+  {
+    "question": "Which anime revolves around a group of friends who play a virtual reality MMORPG?",
+    "answer": "Sword Art Online"
+  },
+  {
+    "question": "In the anime Tokyo Ghoul, what is the name of the main character who becomes a half-ghoul?",
+    "answer": "Ken Kaneki"
+  }
+]
