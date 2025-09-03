@@ -16,7 +16,7 @@ class Events(commands.Cog):
             self.status_task.start()
         print(f"🟣 Presence rotation started as {self.bot.user}")
 
-    @tasks.loop(seconds=60)  # rotates/60s
+    @tasks.loop(seconds=1200)  # rotates/60s
     async def status_task(self):
         anime = random.choice(self.anime_list)
         await self.bot.change_presence(activity=discord.Activity(type=discord.ActivityType.watching, name=anime))
