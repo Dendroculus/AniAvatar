@@ -24,55 +24,73 @@ class Games(commands.Cog):
         app_commands.Choice(name="20", value=20),
     ])
     async def animequiz(self, ctx, questions: app_commands.Choice[int]):
-        """Start an anime trivia quiz."""
         num_questions = questions.value
-
         quiz_questions = random.sample(self.trivia_list, min(num_questions, len(self.trivia_list)))
         score = 0
 
         for idx, question in enumerate(quiz_questions, 1):
-            options_list = question["options"].copy()
+            other_answers = [q["answer"] for q in self.trivia_list if q["answer"] != question["answer"]]
+            fake_options = random.sample(other_answers, k=min(3, len(other_answers)))
+            options_list = fake_options + [question["answer"]]
             random.shuffle(options_list)
             options = [discord.SelectOption(label=opt, value=opt) for opt in options_list]
 
-            async def callback(interaction: discord.Interaction):
-                nonlocal score
-                selected = interaction.data["values"][0]
-                if selected == question["answer"]:
-                    score += 1
-                    await interaction.response.send_message(
-                        f"✅ Correct! The answer is **{question['answer']}**.", ephemeral=True
-                    )
-                else:
-                    await interaction.response.send_message(
-                        f"❌ Wrong! The correct answer is **{question['answer']}**.", ephemeral=True
-                    )
-                select.disabled = True
-                await message.edit(view=view)
+            embed = discord.Embed(title=f"Question {idx}/{num_questions}", description=question["question"])
+            view = discord.ui.View()
+            future = asyncio.get_event_loop().create_future()
 
             select = discord.ui.Select(placeholder="Choose an answer...", options=options)
+
+            async def callback(interaction: discord.Interaction):
+                if interaction.user != ctx.author:
+                    await interaction.response.send_message("This is not your game!", ephemeral=True)
+                    return
+                future.set_result(interaction.data["values"][0])
+                select.disabled = True
+                await interaction.response.edit_message(view=view)
+
             select.callback = callback
-            view = discord.ui.View()
             view.add_item(select)
-
-            message = await ctx.send(f"Question {idx}/{num_questions}: `{question['question']}`", view=view)
-
-            def check(i):
-                return i.message.id == message.id and i.user == ctx.author
+            message = await ctx.send(embed=embed, view=view)
 
             try:
-                await self.bot.wait_for("interaction", check=check, timeout=15)
+                selected = await asyncio.wait_for(future, timeout=15)
+                profile_cog = self.bot.get_cog("Profile")
+
+                if selected == question["answer"]:
+                    score += 1
+                    if profile_cog:
+                        level, new_exp, leveled_up = profile_cog.add_exp(ctx.author.id, ctx.guild.id, 10)
+
+                        next_level = level + 1
+                        exp_needed = next_level * 100
+                        exp_left = exp_needed - new_exp
+
+                        embed_correct = discord.Embed(
+                            title=f"✅ Correct! +10 EXP",
+                            description = (
+                                f"```\n"
+                                f"You have {new_exp} EXP at level {level}.\n"
+                                f"{exp_left} EXP left to level {next_level}!\n"
+                                f"```"
+                            ),
+                            color=discord.Color.green()
+                        )
+                        embed_correct.set_thumbnail(url=ctx.author.display_avatar.url)
+                    else:
+                        await ctx.send(f"✅ Correct! The answer is **{question['answer']}**.")
+                else:
+                    await ctx.send(f"❌ Wrong! The correct answer is **{question['answer']}**.")
             except asyncio.TimeoutError:
                 select.disabled = True
                 await message.edit(view=view)
                 await ctx.send(f"⏰ Time's up! The correct answer was `{question['answer']}`.")
 
         await ctx.send(f"🏁 Quiz finished! You scored **{score}/{num_questions}**.")
-   
+
     @commands.hybrid_command(name="guesscharacter", description="Guess a random popular anime character")
     async def guesscharacter(self, ctx):
         """Guess a random popular anime character from AniList with multiple choice."""
-        
         query = '''
         query ($page: Int, $perPage: Int) {
             Page(page: $page, perPage: $perPage) {
@@ -106,6 +124,7 @@ class Games(commands.Cog):
 
         other_characters = [c["name"]["full"] for c in characters if c["name"]["full"] != correct_name]
         fake_options = random.sample(other_characters, k=min(3, len(other_characters)))
+
         options_list = fake_options + [correct_name]
         random.shuffle(options_list)
         options = [discord.SelectOption(label=opt, value=opt) for opt in options_list]
@@ -115,21 +134,39 @@ class Games(commands.Cog):
         view = discord.ui.View()
         select = discord.ui.Select(placeholder="Choose the correct character...", options=options)
         view.add_item(select)
+        message = await ctx.send(embed=embed, view=view)
 
         async def callback(interaction: discord.Interaction):
             if interaction.user != ctx.author:
                 await interaction.response.send_message("This is not your game!", ephemeral=True)
                 return
             selected = interaction.data["values"][0]
+            profile_cog = self.bot.get_cog("Profile")
             if selected == correct_name:
-                await interaction.response.send_message(f"✅ Correct! It was **{correct_name}** from **{anime_title}**!")
+                if profile_cog:
+                    level, new_exp, leveled_up = profile_cog.add_exp(ctx.author.id, ctx.guild.id, 10)
+                    embed = discord.Embed(
+                        title=f"✅ Correct! +10 EXP",
+                        description=f"You have {new_exp} EXP at level {level}.",
+                        color=discord.Color.green()
+                    )
+                    embed.set_thumbnail(url=ctx.author.display_avatar.url)
+                    if leveled_up:
+                        embed.title = f"🎉 Congratulations {ctx.author.display_name}!"
+                        embed.description += f"\nYou reached level {level}!"
+                    await interaction.response.send_message(embed=embed)
+                else:
+                    await interaction.response.send_message(
+                        f"✅ Correct! It was **{correct_name}** from **{anime_title}**!", ephemeral=True
+                    )
             else:
-                await interaction.response.send_message(f"❌ Wrong! The correct answer was **{correct_name}** from **{anime_title}**.")
+                await interaction.response.send_message(
+                    f"❌ Wrong! The correct answer was **{correct_name}** from **{anime_title}**.", ephemeral=True
+                )
             select.disabled = True
             await message.edit(view=view)
 
         select.callback = callback
-        message = await ctx.send(embed=embed, view=view)
 
 async def setup(bot):
     await bot.add_cog(Games(bot))
