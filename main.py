@@ -19,6 +19,7 @@ class AniAvatar(commands.Bot):
             "cogs.events",
             "cogs.games",
             "cogs.fun",
+            "cogs.profile",
         ]
         for ext in extensions:  
             try:    
