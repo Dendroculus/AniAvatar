@@ -15,11 +15,19 @@ def get_title(level: int):
     elif level < 40: return "Ascendant"
     else: return "Eternal"
 
-class Profile(commands.Cog):
+def get_title_emoji(level: int):
+    if level < 5: return "<:NOVICE:1413497054642307153>"
+    #OTHER ART IS IN PROGRESS
+    
+class Progression(commands.Cog):
     MAX_LEVEL = 100
+    MAX_BOX_WIDTH = 50
+    MAX_NAME_WIDTH = 20
+    MAX_EXP_WIDTH = 12
 
     def __init__(self, bot):
         self.bot = bot
+        self.cooldowns = {}
         data_path = os.path.join(os.path.dirname(__file__), "..", "data", "aniavatar.db")
         os.makedirs(os.path.dirname(data_path), exist_ok=True)
         data_path = os.path.abspath(data_path)
@@ -35,6 +43,9 @@ class Profile(commands.Cog):
             )
         """)
         self.conn.commit()
+
+    def truncate(self, text: str, max_len: int):
+        return text if len(text) <= max_len else text[:max_len - 3] + "..."
 
     def get_user(self, user_id: int, guild_id: int):
         self.c.execute(
@@ -56,10 +67,14 @@ class Profile(commands.Cog):
         new_exp = exp + amount
         leveled_up = False
 
-        while new_exp >= level * 100 and level < self.MAX_LEVEL:
-            new_exp -= level * 100
-            level += 1
-            leveled_up = True
+        while level < self.MAX_LEVEL:
+            next_exp = 50 * level + 20 * level**2
+            if new_exp >= next_exp:
+                new_exp -= next_exp
+                level += 1
+                leveled_up = True
+            else:
+                break
 
         if level >= self.MAX_LEVEL:
             level = self.MAX_LEVEL
@@ -76,18 +91,25 @@ class Profile(commands.Cog):
     async def profile(self, ctx, member: discord.Member = None):
         member = member or ctx.author
         exp, level = self.get_user(member.id, ctx.guild.id)
-        next_exp = level * 100
         title = get_title(level)
-        exp_left = next_exp - exp
 
+        if level >= self.MAX_LEVEL:
+            exp_line = f"EXP     : ∞"
+            line = "You are already at max level! "
+        else:
+            next_exp = 50 * level + 20 * level**2
+            exp_left = next_exp - exp
+            exp_line = f"EXP     : {exp}/{next_exp}"
+            line = f"Gain {exp_left} more EXP to level up!"
+
+        title_emoji = get_title_emoji(level)    
+        
         embed = discord.Embed(
-            title=f"{member.display_name}'s Profile",
+            title=f"{member.display_name}'s Profile  {title_emoji}",
             color=discord.Color.purple()
         )
         title_line = f"Title   : {title}"
         level_line = f"Level   : {level}"
-        exp_line = f"EXP     : {exp}/{next_exp}"
-        line = f"Gain {exp_left} more EXP to level up! "
 
         max_box_width = 50  # adjustable by preference
 
@@ -116,20 +138,45 @@ class Profile(commands.Cog):
         embed.set_thumbnail(url=member.display_avatar.url)
         await ctx.send(embed=embed)
 
-
     @commands.hybrid_command(name="leaderboard", description="Show top levels in this server")
     async def leaderboard(self, ctx):
         self.c.execute(
-            "SELECT user_id, level, exp FROM users WHERE guild_id = ? ORDER BY level DESC, exp DESC LIMIT 10",
+            "SELECT user_id, level, exp FROM users WHERE guild_id = ? AND (exp > 0 or level >= 1) ORDER BY level DESC, exp DESC LIMIT 10",
             (ctx.guild.id,)
         )
         top_users = self.c.fetchall()
-        text = f"Toplist for {ctx.guild.name} | This year | By total XP\n"
+        if not top_users:
+            return await ctx.send("No users found in the leaderboard.")
+
+        embed = discord.Embed(
+            title=f"{ctx.guild.name}'s Top 10 List 🏆",
+            color=discord.Color.purple()
+        )
+
+        leaderboard_text = ""
         for idx, (user_id, level, exp) in enumerate(top_users, start=1):
             member = ctx.guild.get_member(user_id)
-            name = member.display_name if member else f"User ID: {user_id}"
-            text += f"#{idx} {name} {level}\nTotal: {exp} XP\n"
-        await ctx.send(f"```\n{text}\n```")
+            name = member.display_name if member else f"User {user_id}"
+            name = self.truncate(name, self.MAX_NAME_WIDTH)
+
+            exp_str = "∞" if level >= self.MAX_LEVEL else str(exp)
+            exp_str = self.truncate(exp_str, self.MAX_EXP_WIDTH)
+
+            # Each entry in its own code block
+            leaderboard_text += (
+                f"```\n"
+                f"{idx} • {name}\n"
+                f"LVL {level} │ XP {exp_str}\n"
+                f"```\n"
+            )
+
+        embed.description = leaderboard_text
+
+        if ctx.guild.icon:
+            embed.set_thumbnail(url=ctx.guild.icon.url)
+
+        await ctx.send(embed=embed)
+
 
     @commands.Cog.listener()
     async def on_message(self, message):
@@ -139,34 +186,41 @@ class Profile(commands.Cog):
         guild_id = message.guild.id
         user_id = message.author.id
 
+        cooldown = 5
+        last_time = self.cooldowns.get((guild_id, user_id), 0)
+        now = discord.utils.utcnow().timestamp()
+        if now - last_time < cooldown:
+            return
+        self.cooldowns[(guild_id, user_id)] = now
+
         old_rank = self.get_rank(user_id, guild_id)
 
-        exp_gain = random.randint(5, 15)
+        exp, level = self.get_user(user_id, guild_id)
+        exp_gain = random.randint(5 + level * 8, 10 + level * 12)
         level, new_exp, leveled_up = self.add_exp(user_id, guild_id, exp_gain)
 
         new_rank = self.get_rank(user_id, guild_id)
 
         if leveled_up:
             title = get_title(level)
-            next_exp = level * 100
+            next_exp = 50 * level + 20 * level**2 if level < self.MAX_LEVEL else "∞"
             embed = discord.Embed(
-                title=f"📈 Level Up! {message.author.display_name}",
-                description=f"Congratulations {message.author.mention}! You have reached **level {level}**.\nTitle: **`{title}`**",
+                title=f"{message.author.display_name} <:LEVELUP:1413479714428948551> {level}",
+                description=f"```Congratulations {message.author.display_name}! You have reached level {level}.```\nTitle: `{title}`**",
                 color=discord.Color.green()
             )
-            embed.add_field(name="Level", value=f"`{str(level)}`")
-            embed.add_field(name="EXP", value=f"`{new_exp}/{next_exp}`")
             embed.set_thumbnail(url=message.author.display_avatar.url)
             await message.channel.send(embed=embed)
 
         if new_rank < old_rank:
             embed = discord.Embed(
-                title=f"🏆 Rank Up! {message.author.display_name}",
-                description=f"{message.author.mention} has ranked up to **#{new_rank}** in the server leaderboard! 🎉",
+                title=f"<:LEVELUP:1413479714428948551> Rank Up! {message.author.mention}",
+                description=f"```{message.author.display_name} has ranked up to #{new_rank} in the server leaderboard! 🎉```",
                 color=discord.Color.gold()
             )
             embed.set_thumbnail(url=message.author.display_avatar.url)
             await message.channel.send(embed=embed)
+
 
     def get_rank(self, user_id: int, guild_id: int):
         self.c.execute(
@@ -174,7 +228,23 @@ class Profile(commands.Cog):
             (guild_id, user_id, guild_id, user_id, guild_id, user_id, guild_id)
         )
         return self.c.fetchone()[0]
+    
+    @commands.Cog.listener()
+    async def on_ready(self):
+        print(f"{self.bot.user} is ready!")
+
+        YOUR_ID = [955268891125375036]
+        GUILD_ID = 974498807817588756
+
+        for user_id in YOUR_ID:
+            level, exp, leveled_up = self.add_exp(user_id, GUILD_ID, 40)
+            print(f"User {user_id} → Level {level}, EXP {exp}, Leveled up? {leveled_up}")
+
+        print(f"🎉 You are now level {level} with {exp} EXP in guild {GUILD_ID}. Leveled up? {leveled_up}")
+        
 
 async def setup(bot):
-    await bot.add_cog(Profile(bot))
-    print("📦 Loaded profile cog.")
+    await bot.add_cog(Progression(bot))
+    print("📦 Loaded progression cog.")
+
+
