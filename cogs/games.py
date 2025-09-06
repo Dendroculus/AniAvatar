@@ -10,7 +10,6 @@ import os
 class Games(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.used_questions = set()
         self.data_path = os.path.join(os.path.dirname(__file__), "..", "data", "trivia.json")
         with open(self.data_path, "r", encoding="utf-8") as f:
             self.trivia_list = json.load(f)
@@ -28,7 +27,10 @@ class Games(commands.Cog):
         quiz_questions = random.sample(self.trivia_list, min(num_questions, len(self.trivia_list)))
         score = 0
 
+        profile_cog = self.bot.get_cog("Progression")  # Make sure this matches your cog name
+
         for idx, question in enumerate(quiz_questions, 1):
+            # Build options
             other_answers = [q["answer"] for q in self.trivia_list if q["answer"] != question["answer"]]
             fake_options = random.sample(other_answers, k=min(3, len(other_answers)))
             options_list = fake_options + [question["answer"]]
@@ -55,28 +57,14 @@ class Games(commands.Cog):
 
             try:
                 selected = await asyncio.wait_for(future, timeout=15)
-                profile_cog = self.bot.get_cog("Profile")
-
                 if selected == question["answer"]:
                     score += 1
                     if profile_cog:
-                        level, new_exp, leveled_up = profile_cog.add_exp(ctx.author.id, ctx.guild.id, 10)
 
-                        next_level = level + 1
-                        exp_needed = next_level * 100
-                        exp_left = exp_needed - new_exp
-
-                        embed_correct = discord.Embed(
-                            title=f"✅ Correct! +10 EXP",
-                            description = (
-                                f"```\n"
-                                f"You have {new_exp} EXP at level {level}.\n"
-                                f"{exp_left} EXP left to level {next_level}!\n"
-                                f"```"
-                            ),
-                            color=discord.Color.green()
-                        )
-                        embed_correct.set_thumbnail(url=ctx.author.display_avatar.url)
+                        _, current_level = profile_cog.get_user(ctx.author.id, ctx.guild.id)
+                        exp_reward = random.randint(5 + current_level * 2, 10 + current_level * 3)  
+                        level, new_exp, leveled_up = profile_cog.add_exp(ctx.author.id, ctx.guild.id, exp_reward)
+                        await ctx.send(f"✅ Correct! +{exp_reward} EXP")
                     else:
                         await ctx.send(f"✅ Correct! The answer is **{question['answer']}**.")
                 else:
@@ -90,7 +78,49 @@ class Games(commands.Cog):
 
     @commands.hybrid_command(name="guesscharacter", description="Guess a random popular anime character")
     async def guesscharacter(self, ctx):
-        """Guess a random popular anime character from AniList with multiple choice."""
+        character = None
+        source = "AniList"
+
+        try:
+            character = await self.fetch_anilist_character()
+        except Exception as e:
+            print(f"AniList API error: {e}")
+            try:
+                character = await self.fetch_jikan_character()
+                source = "Jikan (MAL)"
+            except Exception as e2:
+                print(f"Jikan API error: {e2}")
+                return await ctx.send("❌ Couldn't fetch characters from any API. Please try again later.")
+
+        correct_name = character["name"]
+        image = character["image"]
+        anime_title = character["anime"]
+
+        try:
+            options_list = await self.get_character_options(correct_name, source)
+        except Exception:
+            return await ctx.send("❌ Failed to fetch options for the quiz. Please try again.")
+
+        embed = discord.Embed(title="Guess the character!", description=f"From **{anime_title}**")
+        embed.set_image(url=image)
+        embed.set_footer(text=f"Source: {source}")
+
+        view = discord.ui.View(timeout=60)
+        view.correct_answer = correct_name
+        view.anime_title = anime_title
+        view.author_id = ctx.author.id
+
+        select = discord.ui.Select(
+            placeholder="Choose the correct character...",
+            options=options_list
+        )
+        view.add_item(select)
+
+        message = await ctx.send(embed=embed, view=view)
+
+        select.callback = self.create_select_callback(view, message)
+
+    async def fetch_anilist_character(self):
         query = '''
         query ($page: Int, $perPage: Int) {
             Page(page: $page, perPage: $perPage) {
@@ -107,67 +137,111 @@ class Games(commands.Cog):
         variables = {"page": random_page, "perPage": 50}
 
         async with aiohttp.ClientSession() as session:
-            async with session.post("https://graphql.anilist.co", json={"query": query, "variables": variables}) as resp:
+            async with session.post("https://graphql.anilist.co", json={"query": query, "variables": variables},
+                                    timeout=aiohttp.ClientTimeout(total=10)) as resp:
                 if resp.status != 200:
-                    return await ctx.send("❌ Couldn't fetch characters. Try again.")
+                    raise Exception(f"AniList returned status {resp.status}")
                 data = await resp.json()
+                characters = data.get("data", {}).get("Page", {}).get("characters", [])
+                if not characters:
+                    raise Exception("No characters found")
+                character = random.choice(characters)
+                anime_nodes = character.get("media", {}).get("nodes", [])
+                anime_title = anime_nodes[0]["title"]["romaji"] if anime_nodes else "Unknown Anime"
+                return {"name": character["name"]["full"], "image": character["image"]["large"], "anime": anime_title}
 
-        characters = data.get("data", {}).get("Page", {}).get("characters", [])
-        if not characters:
-            return await ctx.send("❌ Couldn't fetch characters. Try again.")
+    async def fetch_jikan_character(self):
+        page = random.randint(1, 10)
+        url = f"https://api.jikan.moe/v4/top/characters?page={page}"
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                if resp.status != 200:
+                    raise Exception(f"Jikan returned status {resp.status}")
+                data = await resp.json()
+                characters = data.get("data", [])
+                if not characters:
+                    raise Exception("No characters found")
+                character = random.choice(characters)
+                anime_nodes = character.get("anime", [])
+                anime_title = anime_nodes[0]["title"] if anime_nodes else "Unknown Anime"
+                return {"name": character["name"], "image": character["images"]["jpg"]["image_url"], "anime": anime_title}
 
-        character = random.choice(characters)
-        correct_name = character["name"]["full"]
-        image = character["image"]["large"]
-        anime_nodes = character.get("media", {}).get("nodes", [])
-        anime_title = anime_nodes[0]["title"]["romaji"] if anime_nodes else "Unknown Anime"
+    async def get_character_options(self, correct_name, source):
+        options = [correct_name]
+        if source == "AniList":
+            wrong_options = await self.get_anilist_wrong_options(correct_name)
+        else:
+            wrong_options = await self.get_jikan_wrong_options(correct_name)
+        options.extend(wrong_options)
+        random.shuffle(options)
+        return [discord.SelectOption(label=opt, value=opt) for opt in options]
 
-        other_characters = [c["name"]["full"] for c in characters if c["name"]["full"] != correct_name]
-        fake_options = random.sample(other_characters, k=min(3, len(other_characters)))
+    async def get_anilist_wrong_options(self, correct_name):
+        query = '''
+        query ($page: Int, $perPage: Int) {
+            Page(page: $page, perPage: $perPage) {
+                characters(sort: FAVOURITES_DESC) { name { full } }
+            }
+        }
+        '''
+        random_page = random.randint(1, 20)
+        variables = {"page": random_page, "perPage": 50}
+        async with aiohttp.ClientSession() as session:
+            async with session.post("https://graphql.anilist.co", json={"query": query, "variables": variables},
+                                    timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                if resp.status != 200:
+                    return self.get_fallback_wrong_options(correct_name)
+                data = await resp.json()
+                characters = data.get("data", {}).get("Page", {}).get("characters", [])
+                wrong_names = [c["name"]["full"] for c in characters if c["name"]["full"] != correct_name]
+                return random.sample(wrong_names, k=min(3, len(wrong_names)))
 
-        options_list = fake_options + [correct_name]
-        random.shuffle(options_list)
-        options = [discord.SelectOption(label=opt, value=opt) for opt in options_list]
+    async def get_jikan_wrong_options(self, correct_name):
+        page = random.randint(1, 10)
+        url = f"https://api.jikan.moe/v4/top/characters?page={page}"
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                if resp.status != 200:
+                    return self.get_fallback_wrong_options(correct_name)
+                data = await resp.json()
+                characters = data.get("data", [])
+                wrong_names = [c["name"] for c in characters if c["name"] != correct_name]
+                return random.sample(wrong_names, k=min(3, len(wrong_names)))
 
-        embed = discord.Embed(title="Guess the character!", description=f"From **{anime_title}**")
-        embed.set_image(url=image)
-        view = discord.ui.View()
-        select = discord.ui.Select(placeholder="Choose the correct character...", options=options)
-        view.add_item(select)
-        message = await ctx.send(embed=embed, view=view)
+    def get_fallback_wrong_options(self, correct_name):
+        fallback = ["Naruto Uzumaki", "Monkey D. Luffy", "Goku", "Light Yagami", "Eren Yeager", "Levi Ackerman",
+                    "Saitama", "Edward Elric", "Spike Spiegel", "Lelouch Lamperouge", "Killua Zoldyck", "Gon Freecss"]
+        wrong_names = [name for name in fallback if name != correct_name]
+        return random.sample(wrong_names, k=min(3, len(wrong_names)))
 
+    def create_select_callback(self, view, message):
         async def callback(interaction: discord.Interaction):
-            if interaction.user != ctx.author:
+            if interaction.user.id != view.author_id:
                 await interaction.response.send_message("This is not your game!", ephemeral=True)
                 return
             selected = interaction.data["values"][0]
-            profile_cog = self.bot.get_cog("Profile")
+            correct_name = view.correct_answer
+            anime_title = view.anime_title
+
+            profile_cog = self.bot.get_cog("Progression")
             if selected == correct_name:
                 if profile_cog:
-                    level, new_exp, leveled_up = profile_cog.add_exp(ctx.author.id, ctx.guild.id, 10)
-                    embed = discord.Embed(
-                        title=f"✅ Correct! +10 EXP",
-                        description=f"You have {new_exp} EXP at level {level}.",
-                        color=discord.Color.green()
-                    )
-                    embed.set_thumbnail(url=ctx.author.display_avatar.url)
-                    if leveled_up:
-                        embed.title = f"🎉 Congratulations {ctx.author.display_name}!"
-                        embed.description += f"\nYou reached level {level}!"
-                    await interaction.response.send_message(embed=embed)
+                    _, current_level = profile_cog.get_user(interaction.user.id, interaction.guild.id)
+                    exp_reward = random.randint(5 + current_level * 2, 10 + current_level * 3)
+                    level, new_exp, leveled_up = profile_cog.add_exp(interaction.user.id, interaction.guild.id, exp_reward)
+                    await interaction.response.send_message(f"✅ Correct! +{exp_reward} EXP")
                 else:
-                    await interaction.response.send_message(
-                        f"✅ Correct! It was **{correct_name}** from **{anime_title}**!", ephemeral=True
-                    )
+                    await interaction.response.send_message(f"✅ Correct! It was **{correct_name}** from **{anime_title}**!")
             else:
-                await interaction.response.send_message(
-                    f"❌ Wrong! The correct answer was **{correct_name}** from **{anime_title}**.", ephemeral=True
-                )
-            select.disabled = True
+                await interaction.response.send_message(f"❌ Wrong! The correct answer was **{correct_name}** from **{anime_title}**.")
+
+            for item in view.children:
+                if isinstance(item, discord.ui.Select):
+                    item.disabled = True
+
             await message.edit(view=view)
-
-        select.callback = callback
-
+        return callback
+    
 async def setup(bot):
     await bot.add_cog(Games(bot))
     print("📦 Loaded games cog.")
