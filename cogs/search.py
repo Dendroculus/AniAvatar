@@ -6,6 +6,7 @@ import random
 from urllib.parse import quote
 import os
 from dotenv import load_dotenv
+import re
 
 sent_image_cache = {}
 load_dotenv()
@@ -22,7 +23,7 @@ class Search(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    @commands.hybrid_command(name="anime", help="Search for an anime by name (AniList)")
+    @commands.hybrid_command(name="anime", description="Search for an anime by name")
     @commands.guild_only()
     async def anime(self, ctx: commands.Context, *, query: str):
         """Fetch anime info from AniList GraphQL API"""
@@ -78,7 +79,6 @@ class Search(commands.Cog):
         if not results:
             return await ctx.send(f"❌ No results found for `{query}`.")
 
-        # Build select menu options
         options = []
         for anime in results:
             title = anime["title"]["english"] or anime["title"]["romaji"]
@@ -108,19 +108,15 @@ class Search(commands.Cog):
                 color=discord.Color.blurple()
             )
 
-            # Small thumbnail
             if anime_data.get("coverImage", {}).get("medium"):
                 embed.set_thumbnail(url=anime_data["coverImage"]["medium"])
 
-            # Banner image
             if anime_data.get("bannerImage"):
                 embed.set_image(url=anime_data["bannerImage"])
 
-            # Fields (AniList style)
             embed.add_field(name="Episodes", value=anime_data.get("episodes", "N/A"), inline=True)
             embed.add_field(name="Status", value=anime_data.get("status", "N/A").title(), inline=True)
 
-            # Dates
             start = anime_data.get("startDate", {})
             end = anime_data.get("endDate", {})
             start_str = f"{start.get('year','N/A')}-{start.get('month','??')}-{start.get('day','??')}" if start.get("year") else "N/A"
@@ -136,7 +132,6 @@ class Search(commands.Cog):
             embed.add_field(name="Popularity", value=str(anime_data.get("popularity", "N/A")), inline=True)
             embed.add_field(name="Favourites", value=str(anime_data.get("favourites", "N/A")), inline=True)
 
-            # Genres
             genres = anime_data.get("genres", [])
             if genres:
                 genres = " ".join(f"`{g}`" for g in genres)
@@ -145,7 +140,6 @@ class Search(commands.Cog):
 
             embed.add_field(name="Genres", value=genres, inline=False)
 
-            # Credits
             embed.set_footer(
                 text="Provided by AniList",
                 icon_url="https://anilist.co/img/icons/android-chrome-512x512.png"
@@ -164,7 +158,16 @@ class Search(commands.Cog):
     @commands.hybrid_command(name="animepfp", description="Get anime character PFP")
     @commands.guild_only()
     async def animepfp(self, ctx: commands.Context, *, name: str):
-        query = quote(name + " anime pfp")
+        name = name.strip()
+        if not name:
+            return await ctx.send("❌ Please provide a character name.")
+
+        if "anime" not in name.lower():
+            search_query = f"{name} anime character pfp"
+        else:
+            search_query = f"{name} pfp"
+        
+        query = quote(search_query)
         url = (
             f"https://www.googleapis.com/customsearch/v1?"
             f"key={GOOGLE_API_KEY}&cx={SEARCH_ENGINE_ID}&searchType=image&q={query}"
@@ -172,21 +175,35 @@ class Search(commands.Cog):
 
         async with aiohttp.ClientSession() as session:
             async with session.get(url) as resp:
-                data = await resp.json()
+                try:
+                    data = await resp.json()
+                except Exception:
+                    return await ctx.send("❌ Failed to fetch data from Google API.")
 
-        # Check for API errors
         if "error" in data:
             return await ctx.send(f"❌ Google API Error: {data['error'].get('message','Unknown error')}")
 
-        images = [item["link"] for item in data.get("items", []) if "link" in item]
-        if not images:
-            return await ctx.send(f"❌ No images found for `{name}`.")
+        items = data.get("items", [])
+        images = [item.get("link") for item in items if item.get("link", "").startswith("http")]
 
-        key = name.lower().strip()
+        if not images:
+            return await ctx.send(
+                f"❌ No valid images found for `{name}`.\n"
+                "Try using the full character name or check spelling.\n"
+                "Tip: Include the series name for better results (e.g., 'iuno wuwa' instead of just 'iuno')."
+            )
+
+        key = re.sub(r'\b(anime|pfp|character|photo|image|picture)\b', '', name.lower())
+        key = re.sub(r'[^a-z0-9]', '', key).strip()
+        
+        if not key:
+            key = name.lower()
+        
         if key not in sent_image_cache:
             sent_image_cache[key] = []
 
         unsent = [img for img in images if img not in sent_image_cache[key]]
+
         if not unsent:
             sent_image_cache[key] = []
             unsent = images
@@ -194,8 +211,12 @@ class Search(commands.Cog):
         selected_image = random.choice(unsent)
         sent_image_cache[key].append(selected_image)
 
-        embed = discord.Embed(color=discord.Color.purple())
+        if len(sent_image_cache[key]) > 20:
+            sent_image_cache[key] = sent_image_cache[key][-10:]
+
+        embed = discord.Embed(title=f"Anime PFP for {name}", color=discord.Color.purple())
         embed.set_image(url=selected_image)
+        embed.set_footer(text="Tip: Use more specific terms for better results")
         await ctx.send(embed=embed)
 
 
