@@ -40,6 +40,26 @@ def get_title_emoji(level: int):
     elif level < 125: return "<:ETERNAL:1413824371994136598>"
     else: return "<:ENLIGHTENED:1413866534605951079>"
     
+TITLE_COLORS = {
+    "Novice": discord.Color.light_gray(),
+    "Warrior": discord.Color.red(),
+    "Elite": discord.Color.orange(),
+    "Champion": discord.Color.gold(),
+    "Hero": discord.Color.green(),
+    "Legend": discord.Color.blue(),
+    "Mythic": discord.Color.purple(),
+    "Ascendant": discord.Color.teal(),
+    "Immortal": discord.Color.dark_red(),
+    "Celestial": discord.Color.dark_blue(),
+    "Transcendent": discord.Color.dark_purple(),
+    "Aetherborn": discord.Color.dark_teal(),
+    "Cosmic": discord.Color.dark_magenta(),
+    "Divine": discord.Color.green(),
+    "Eternal": discord.Color.red(),
+    "Enlightened": discord.Color.blue(),
+}
+
+    
 class Progression(commands.Cog):
     MAX_LEVEL = 150
     MAX_BOX_WIDTH = 50
@@ -162,8 +182,15 @@ class Progression(commands.Cog):
     @commands.hybrid_command(name="leaderboard", description="Show top levels in this server")
     async def leaderboard(self, ctx):
         self.c.execute(
-            "SELECT user_id, level, exp FROM users WHERE guild_id = ? AND (exp > 0 and level >= 1) ORDER BY level DESC, exp DESC LIMIT 10",
-            (ctx.guild.id,)
+            """
+            SELECT user_id, level, exp
+            FROM users
+            WHERE guild_id = ?
+            AND ((exp > 0 AND level >= 1) OR level = ?)
+            ORDER BY level DESC, exp DESC
+            LIMIT 10
+            """,
+            (ctx.guild.id, self.MAX_LEVEL)
         )
         top_users = self.c.fetchall()
         if not top_users:
@@ -234,7 +261,12 @@ class Progression(commands.Cog):
             )
             embed.set_thumbnail(url=message.author.display_avatar.url)
             await message.channel.send(embed=embed)
-
+      
+            
+            role_manager = self.bot.get_cog("Roles")
+            if role_manager:
+                await role_manager.update_roles(message.author, level)
+                
         # Rank-up message
         if new_rank < old_rank:
             embed = discord.Embed(
@@ -244,7 +276,8 @@ class Progression(commands.Cog):
             )
             embed.set_thumbnail(url=message.author.display_avatar.url)
             await message.channel.send(embed=embed)
-
+            
+        await self.bot.process_commands(message)
 
     def get_rank(self, user_id: int, guild_id: int):
         self.c.execute(
@@ -257,11 +290,11 @@ class Progression(commands.Cog):
     # async def on_ready(self):
     #     print(f"{self.bot.user} is ready!")
 
-    #     YOUR_ID = [955268891125375036]
+    #     YOUR_ID = [696616303917531166]
     #     GUILD_ID = 974498807817588756
 
     #     for user_id in YOUR_ID:
-    #         level, exp, leveled_up = self.add_exp(user_id, GUILD_ID, 400)
+    #         level, exp, leveled_up = self.add_exp(user_id, GUILD_ID, 430)
     #         print(f"User {user_id} → Level {level}, EXP {exp}, Leveled up? {leveled_up}")
 
     #     print(f"🎉 You are now level {level} with {exp} EXP in guild {GUILD_ID}. Leveled up? {leveled_up}")
