@@ -170,7 +170,7 @@ class Search(commands.Cog):
         query = quote(search_query)
         url = (
             f"https://www.googleapis.com/customsearch/v1?"
-            f"key={GOOGLE_API_KEY}&cx={SEARCH_ENGINE_ID}&searchType=image&q={query}"
+            f"key={GOOGLE_API_KEY}&cx={SEARCH_ENGINE_ID}&searchType=image&q={query}" 
         )
 
         async with aiohttp.ClientSession() as session:
@@ -184,29 +184,38 @@ class Search(commands.Cog):
             return await ctx.send(f"❌ Google API Error: {data['error'].get('message','Unknown error')}")
 
         items = data.get("items", [])
-        images = [item.get("link") for item in items if item.get("link", "").startswith("http")]
+        valid_items = []
+        for item in items:
+            link = item.get("link", "")
+            title = item.get("title", "").lower()
+            snippet = item.get("snippet", "").lower()
 
-        if not images:
+            if not link.startswith("http"):
+                continue
+            
+            if not link.lower().endswith((".png", ".jpg", ".jpeg", ".webp")):
+                continue
+            if any(keyword in title or keyword in snippet for keyword in ["anime", "manga", "waifu", "weeb", "otaku"]):
+                valid_items.append(link)
+
+        if not valid_items:
             return await ctx.send(
-                f"❌ No valid images found for `{name}`.\n"
-                "Try using the full character name or check spelling.\n"
-                "Tip: Include the series name for better results (e.g., 'iuno wuwa' instead of just 'iuno')."
+                f"❌ `{name}` doesn’t seem to be an anime character.\n"
             )
 
         key = re.sub(r'\b(anime|pfp|character|photo|image|picture)\b', '', name.lower())
         key = re.sub(r'[^a-z0-9]', '', key).strip()
-        
         if not key:
             key = name.lower()
         
         if key not in sent_image_cache:
             sent_image_cache[key] = []
 
-        unsent = [img for img in images if img not in sent_image_cache[key]]
+        unsent = [img for img in valid_items if img not in sent_image_cache[key]]
 
         if not unsent:
             sent_image_cache[key] = []
-            unsent = images
+            unsent = valid_items
 
         selected_image = random.choice(unsent)
         sent_image_cache[key].append(selected_image)
