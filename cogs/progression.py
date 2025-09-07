@@ -201,20 +201,22 @@ class Progression(commands.Cog):
             color=discord.Color.purple()
         )
 
+        max_level_len = max(len(str(lvl)) for _, lvl, _ in top_users)
+        max_exp_len = max(len(str(xp)) for _, _, xp in top_users if xp is not None)
+        
         leaderboard_text = ""
         for idx, (user_id, level, exp) in enumerate(top_users, start=1):
             member = ctx.guild.get_member(user_id)
             name = member.display_name if member else f"User {user_id}"
             name = self.truncate(name, self.MAX_NAME_WIDTH)
 
-            exp_str = "∞" if level >= self.MAX_LEVEL else str(exp)
-            exp_str = self.truncate(exp_str, self.MAX_EXP_WIDTH)
+            lvl_str = str(level).rjust(max_level_len)
+            xp_str = "∞".rjust(max_exp_len) if level >= self.MAX_LEVEL else str(exp).rjust(max_exp_len)
 
-            # Each entry in its own code block
             leaderboard_text += (
                 f"```\n"
                 f"{idx} • {name}\n"
-                f"LVL {level} │ XP {exp_str}\n"
+                f"LVL {lvl_str} │ XP {xp_str}\n"
                 f"```\n"
             )
 
@@ -245,28 +247,44 @@ class Progression(commands.Cog):
 
         # Scaled EXP gain (random 5-15)
         exp, level = self.get_user(user_id, guild_id)
+        
+        old_level = level
+        old_title = get_title(old_level)
+        
         exp_gain = random.randint(5 + level * 8, 10 + level * 12)
         level, new_exp, leveled_up = self.add_exp(user_id, guild_id, exp_gain)
 
         new_rank = self.get_rank(user_id, guild_id)
+        new_title = get_title(level)
 
         # Level-up message
         if leveled_up:
-            title = get_title(level)
-            next_exp = 50 * level + 20 * level**2 if level < self.MAX_LEVEL else "∞"
+            old_emoji = get_title_emoji(old_level)
+            new_emoji = get_title_emoji(level)
+            new_title = get_title(level)
+
+            if new_title != old_title:  # Ascension happened
+                embed_title = f"{message.author.display_name} <:LEVELUP:1413479714428948551> {level}    {old_emoji} <:RIGHTWARDARROW:1414227272302334062> {new_emoji}"
+                embed_description = (
+                    f"```Congratulations {message.author.display_name}! You have reached level {level} and ascended to {new_title}. ```\n"
+                    f"Title: `{new_title}`"
+                )
+            else:  # Normal level-up
+                embed_title = f"{message.author.display_name} <:LEVELUP:1413479714428948551> {level}"
+                embed_description = (
+                    f"```Congratulations {message.author.display_name}! You have reached level {level}.```\n"
+                    f"Title: `{new_title}`"
+                )
+
             embed = discord.Embed(
-                title=f"{message.author.display_name} <:LEVELUP:1413479714428948551> {level}",
-                description=f"```Congratulations {message.author.display_name}! You have reached level {level}.```\nTitle: `{title}`",
+                title=embed_title,
+                description=embed_description,
                 color=discord.Color.green()
             )
             embed.set_thumbnail(url=message.author.display_avatar.url)
             await message.channel.send(embed=embed)
-      
-            
-            role_manager = self.bot.get_cog("Roles")
-            if role_manager:
-                await role_manager.update_roles(message.author, level)
-                
+
+
         # Rank-up message
         if new_rank < old_rank:
             embed = discord.Embed(
@@ -278,7 +296,7 @@ class Progression(commands.Cog):
             await message.channel.send(embed=embed)
             
         await self.bot.process_commands(message)
-
+        
     def get_rank(self, user_id: int, guild_id: int):
         self.c.execute(
             "SELECT COUNT(*)+1 FROM users WHERE guild_id = ? AND (level > (SELECT level FROM users WHERE user_id = ? AND guild_id = ?) OR (level = (SELECT level FROM users WHERE user_id = ? AND guild_id = ?) AND exp > (SELECT exp FROM users WHERE user_id = ? AND guild_id = ?)))",
@@ -286,21 +304,23 @@ class Progression(commands.Cog):
         )
         return self.c.fetchone()[0]
     
-    # @commands.Cog.listener()
-    # async def on_ready(self):
-    #     print(f"{self.bot.user} is ready!")
+    @commands.Cog.listener()
+    async def on_ready(self):
+        print(f"{self.bot.user} is ready!")
 
-    #     YOUR_ID = [696616303917531166]
-    #     GUILD_ID = 974498807817588756
+        YOUR_ID = [955268891125375036]
+        GUILD_ID = 974498807817588756
 
-    #     for user_id in YOUR_ID:
-    #         level, exp, leveled_up = self.add_exp(user_id, GUILD_ID, 430)
-    #         print(f"User {user_id} → Level {level}, EXP {exp}, Leveled up? {leveled_up}")
+        for user_id in YOUR_ID:
+            level, exp, leveled_up = self.add_exp(user_id, GUILD_ID, 9999999999)
+            print(f"User {user_id} → Level {level}, EXP {exp}, Leveled up? {leveled_up}")
 
-    #     print(f"🎉 You are now level {level} with {exp} EXP in guild {GUILD_ID}. Leveled up? {leveled_up}")
+        print(f"🎉 You are now level {level} with {exp} EXP in guild {GUILD_ID}. Leveled up? {leveled_up}")
         
+
 
 async def setup(bot):
     await bot.add_cog(Progression(bot))
     print("📦 Loaded progression cog.")
+
 
