@@ -26,7 +26,6 @@ class Search(commands.Cog):
     @commands.hybrid_command(name="anime", description="Search for an anime by name")
     @commands.guild_only()
     async def anime(self, ctx: commands.Context, *, query: str):
-        """Fetch anime info from AniList GraphQL API"""
 
         query_str = """
         query ($search: String) {
@@ -162,6 +161,7 @@ class Search(commands.Cog):
         if not name:
             return await ctx.send("❌ Please provide a character name.")
 
+        # Build search query
         if "anime" not in name.lower():
             search_query = f"{name} anime character pfp"
         else:
@@ -170,7 +170,7 @@ class Search(commands.Cog):
         query = quote(search_query)
         url = (
             f"https://www.googleapis.com/customsearch/v1?"
-            f"key={GOOGLE_API_KEY}&cx={SEARCH_ENGINE_ID}&searchType=image&q={query}" 
+            f"key={GOOGLE_API_KEY}&cx={SEARCH_ENGINE_ID}&searchType=image&q={query}"
         )
 
         async with aiohttp.ClientSession() as session:
@@ -181,10 +181,19 @@ class Search(commands.Cog):
                     return await ctx.send("❌ Failed to fetch data from Google API.")
 
         if "error" in data:
-            return await ctx.send(f"❌ Google API Error: {data['error'].get('message','Unknown error')}")
+            return await ctx.send(
+                f"❌ Google API Error: {data['error'].get('message','Unknown error')}"
+            )
 
         items = data.get("items", [])
-        valid_items = []
+        if not items:
+            return await ctx.send(f"❌ No results found for `{name}`.")
+
+        anime_keywords = ["anime", "manga", "waifu", "weeb", "otaku", "character", "fanart"]
+
+        anime_like = []
+        others = []
+
         for item in items:
             link = item.get("link", "")
             title = item.get("title", "").lower()
@@ -192,22 +201,24 @@ class Search(commands.Cog):
 
             if not link.startswith("http"):
                 continue
-            
             if not link.lower().endswith((".png", ".jpg", ".jpeg", ".webp")):
                 continue
-            if any(keyword in title or keyword in snippet for keyword in ["anime", "manga", "waifu", "weeb", "otaku"]):
-                valid_items.append(link)
+
+            if any(keyword in title or keyword in snippet for keyword in anime_keywords):
+                anime_like.append(link)
+            else:
+                others.append(link)
+
+        valid_items = anime_like if anime_like else others
 
         if not valid_items:
-            return await ctx.send(
-                f"❌ `{name}` doesn’t seem to be an anime character.\n"
-            )
+            return await ctx.send(f"❌ `{name}` doesn’t seem to be an anime character.")
 
         key = re.sub(r'\b(anime|pfp|character|photo|image|picture)\b', '', name.lower())
         key = re.sub(r'[^a-z0-9]', '', key).strip()
         if not key:
             key = name.lower()
-        
+
         if key not in sent_image_cache:
             sent_image_cache[key] = []
 
@@ -223,7 +234,10 @@ class Search(commands.Cog):
         if len(sent_image_cache[key]) > 20:
             sent_image_cache[key] = sent_image_cache[key][-10:]
 
-        embed = discord.Embed(title=f"Anime PFP for {name}", color=discord.Color.purple())
+        embed = discord.Embed(
+            title=f"Anime PFP for {name}",
+            color=discord.Color.purple()
+        )
         embed.set_image(url=selected_image)
         embed.set_footer(text="Tip: Use more specific terms for better results")
         await ctx.send(embed=embed)
@@ -231,3 +245,4 @@ class Search(commands.Cog):
 
 async def setup(bot):
     await bot.add_cog(Search(bot))
+    print("📦 Loaded search cog.")
