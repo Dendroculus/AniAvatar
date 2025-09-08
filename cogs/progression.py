@@ -47,9 +47,23 @@ def render_profile_image(
         mask_draw = ImageDraw.Draw(mask)
         mask_draw.rounded_rectangle([0, 0, width, height], radius=corner_radius, fill=255)
 
-        # paste background color through mask
-        bg = Image.new("RGBA", (width, height), (54, 57, 63, 255))
-        img.paste(bg, (0, 0), mask)
+
+        # solid light purple background
+        base_bg = Image.new("RGBA", (width, height), (167, 139, 250, 255))  # dark purple
+
+        # triangle overlay (darker purple at top-right corner)
+        overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+        overlay_draw = ImageDraw.Draw(overlay)
+
+        # triangle coordinates (cover top-right corner)
+        triangle = [(width//2, 0), (width, 0), (width, height//2)]
+        overlay_draw.polygon(triangle, fill=(216, 180, 254, 255))  # light purple
+
+        # combine background + triangle
+        base_bg.alpha_composite(overlay)
+
+        # apply rounded rectangle mask
+        img.paste(base_bg, (0, 0), mask)
 
         draw = ImageDraw.Draw(img)
 
@@ -505,7 +519,7 @@ class Progression(commands.Cog):
         GUILD_ID = 974498807817588756
 
         for user_id in YOUR_ID:
-            level, exp, leveled_up = self.add_exp(user_id, GUILD_ID, 10000)
+            level, exp, leveled_up = self.add_exp(user_id, GUILD_ID, 0)
             print(f"User {user_id} → Level {level}, EXP {exp}, Leveled up? {leveled_up}")
 
         print(f"🎉 You are now level {level} with {exp} EXP in guild {GUILD_ID}. Leveled up? {leveled_up}")
