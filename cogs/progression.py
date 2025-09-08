@@ -15,8 +15,23 @@ FONT_DIR = os.path.join(ROOT_PATH, "assets", "fonts")
 EMOJI_PATH = os.path.join(ROOT_PATH, "assets", "emojis", "RANK ICONS")
 BG_PATH = os.path.join(ROOT_PATH, "assets", "backgrounds")
 
-THEMES = ["Galaxy", "Cyberpunk", "Minimal", "Sakura", "Nature"]
-
+def get_readable_font_color(bg_path):
+    try:
+        bg = Image.open(bg_path).convert("RGB")
+        small = bg.resize((10, 10))
+        pixels = list(small.getdata())
+        avg_brightness = sum((r*0.299 + g*0.587 + b*0.114) for r, g, b in pixels) / len(pixels)
+        # Instead of pure black/white, use slightly softer shades
+        if avg_brightness < 100:
+            return (255, 255, 255)  # bright text on dark bg
+        elif avg_brightness > 200:
+            return (40, 40, 40)     # dark text on very light bg
+        else:
+            # mid-tone background, use soft white
+            return (245, 245, 245)
+    except Exception:
+        return (255, 255, 255)
+    
 def render_profile_image(
     avatar_bytes: bytes,
     display_name: str,
@@ -28,7 +43,7 @@ def render_profile_image(
     title_emoji_files: dict,
     bg_file: str = "GALAXY.PNG",
     theme_name: str = "galaxy",
-    font_color: str = "white",
+    font_color: tuple = None,
 ) -> bytes:
     try:
         def _load_font(path, size):
@@ -37,90 +52,108 @@ def render_profile_image(
             except Exception:
                 return ImageFont.load_default()
 
+        def get_adaptive_font_color(bg_path):
+            try:
+                bg = Image.open(bg_path).convert("RGB")
+                small = bg.resize((10, 10))
+                pixels = list(small.getdata())
+                avg_r = sum(p[0] for p in pixels)/len(pixels)
+                avg_g = sum(p[1] for p in pixels)/len(pixels)
+                avg_b = sum(p[2] for p in pixels)/len(pixels)
+
+                # relative luminance
+                def lum(c):
+                    c = c/255
+                    return c/12.92 if c <= 0.03928 else ((c+0.055)/1.055)**2.4
+
+                L_bg = 0.2126*lum(avg_r) + 0.7152*lum(avg_g) + 0.0722*lum(avg_b)
+
+                L_white = 1
+                L_black = 0
+                contrast_white = (max(L_bg, L_white)+0.05)/(min(L_bg, L_white)+0.05)
+                contrast_black = (max(L_bg, L_black)+0.05)/(min(L_bg, L_black)+0.05)
+
+                return (255,255,255) if contrast_white >= contrast_black else (0,0,0)
+            except:
+                return (255,255,255)
+
         font_username = _load_font(fonts["bold"], 32)
-        font_medium = _load_font(fonts["medium"], 24)
+        font_medium = _load_font(fonts["medium"], 25.5)
         font_small = _load_font(fonts["regular"], 20)
 
         width, height = 600, 260
         corner_radius = 35
 
-        img = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+        img = Image.new("RGBA", (width, height), (0,0,0,0))
         mask = Image.new("L", (width, height), 0)
         mask_draw = ImageDraw.Draw(mask)
-        mask_draw.rounded_rectangle([0, 0, width, height], radius=corner_radius, fill=255)
+        mask_draw.rounded_rectangle([0,0,width,height], radius=corner_radius, fill=255)
 
-        # Use user-selected theme folder dynamically
         bg_path = os.path.join(BG_PATH, theme_name.lower(), bg_file)
         if os.path.exists(bg_path):
             bg = Image.open(bg_path).convert("RGBA").resize((width, height))
         else:
-            bg = Image.new("RGBA", (width, height), (167, 139, 250, 255))
+            bg = Image.new("RGBA", (width, height), (167,139,250,255))
 
-        img.paste(bg, (0, 0), mask)
+        # Optional overlay for busy backgrounds
+        overlay = Image.new("RGBA", (width, height), (0,0,0,60))
+        bg = Image.alpha_composite(bg, overlay)
 
+        img.paste(bg, (0,0), mask)
         draw = ImageDraw.Draw(img)
 
+        if font_color is None:
+            font_color = get_adaptive_font_color(bg_path)
+
         # Avatar
-        avatar = Image.open(io.BytesIO(avatar_bytes)).convert("RGBA").resize((100, 100))
-        img.paste(avatar, (20, 30), avatar)
+        avatar = Image.open(io.BytesIO(avatar_bytes)).convert("RGBA").resize((100,100))
+        img.paste(avatar, (20,30), avatar)
 
         x, y = 140, 30
-        draw.text((x, y), display_name, font=font_username, fill=font_color)
+        shadow_offset = 2
+
+        # Helper function for drawing text with stroke + shadow
+        def draw_text(pos, text, font, fill):
+            draw.text((pos[0]+shadow_offset, pos[1]+shadow_offset), text, font=font, fill=(0,0,0,180))
+            draw.text(pos, text, font=font, fill=fill, stroke_width=2, stroke_fill=(0,0,0,180))
+
+        draw_text((x, y), display_name, font_username, font_color)
         y += 40
 
-        title_label = "Title    :" 
-        level_label = "Level  :" 
+        title_label = "Title    :"
+        level_label = "Level  :"
         exp_label   = "EXP    :"
 
-        draw.text((x, y), title_label, font=font_medium, fill=font_color)
-        label_width = draw.textlength(title_label, font=font_medium)
-        value_x = x + label_width + 10
-        draw.text((value_x, y), title_name, font=font_medium, fill=font_color)
-        text_width = draw.textlength(title_name, font=font_medium)
+        for label, value in [(title_label, title_name), (level_label, str(level)), (exp_label, f"{exp:,} / {next_exp:,}" if next_exp>0 else f"{exp:,}")]:
+            draw_text((x, y), label, font_medium, font_color)
+            label_width = draw.textlength(label, font=font_medium)
+            value_x = x + label_width + 10
+            draw_text((value_x, y), value, font_medium, font_color)
 
-        # Badge
-        emoji_path = title_emoji_files.get(title_name)
-        if emoji_path and os.path.exists(emoji_path):
-            try:
-                badge = Image.open(emoji_path).convert("RGBA").resize((26, 26))
-                bx = int(value_x + text_width + 10)
-                by = int(y + 5)
-                img.paste(badge, (bx, by), badge)
-            except Exception as e:
-                print("❌ Badge paste failed:", e)
-                traceback.print_exc()
+            if label == title_label:
+                emoji_path = title_emoji_files.get(title_name)
+                if emoji_path and os.path.exists(emoji_path):
+                    try:
+                        badge = Image.open(emoji_path).convert("RGBA").resize((26,26))
+                        bx = int(value_x + draw.textlength(value, font=font_medium) + 10)
+                        by = int(y + 5)
+                        img.paste(badge, (bx, by), badge)
+                    except:
+                        pass
+            y += 32
 
-        y += 32
-        draw.text((x, y), level_label, font=font_medium, fill=font_color)
-        label_width = draw.textlength(level_label, font=font_medium)
-        value_x = x + label_width + 10
-        draw.text((value_x, y), str(level), font=font_medium, fill=font_color)
-        y += 32
-
-        exp_text = (
-            "∞" if next_exp == exp and next_exp != 0
-            else f"{exp:,} / {next_exp:,}" if next_exp > 0
-            else f"{exp:,}"
-        )
-        draw.text((x, y), exp_label, font=font_medium, fill=font_color)
-        label_width = draw.textlength(exp_label, font=font_medium)
-        value_x = x + label_width + 10
-        draw.text((value_x, y), exp_text, font=font_medium, fill=font_color)
-        y += 32
-
-        next_line = f"Gain {max(0, next_exp - exp):,} more EXP to level up!" if next_exp > 0 else "You are at max level!"
-        draw.text((x, y), next_line, font=font_small, fill=(200, 200, 200))
+        next_line = f"Gain {max(0, next_exp - exp):,} more EXP to level up!" if next_exp>0 else "You are at max level!"
+        draw_text((x, y), next_line, font_small, font_color)
         y += 40
 
         bar_x, bar_y = x, y
         bar_width, bar_height = width - bar_x - 40, 24
-        progress = min(exp / next_exp, 1) if next_exp > 0 else 1
+        progress = min(exp/next_exp,1) if next_exp>0 else 1
+        draw.rounded_rectangle([bar_x, bar_y, bar_x+bar_width, bar_y+bar_height], radius=12, fill=(30,30,30))
+        if progress>0:
+            draw.rounded_rectangle([bar_x, bar_y, bar_x+int(bar_width*progress), bar_y+bar_height], radius=12, fill=(0,200,120))
 
-        draw.rounded_rectangle([bar_x, bar_y, bar_x + bar_width, bar_y + bar_height], radius=12, fill=(30, 30, 30))
-        if progress > 0:
-            draw.rounded_rectangle([bar_x, bar_y, bar_x + int(bar_width * progress), bar_y + bar_height], radius=12, fill=(0, 200, 120))
-
-        final_img = img.resize((360, 165), Image.Resampling.LANCZOS)
+        final_img = img.resize((360,155), Image.Resampling.LANCZOS)
         out = io.BytesIO()
         final_img.save(out, format="PNG")
         return out.getvalue()
@@ -577,18 +610,18 @@ class Progression(commands.Cog):
         )
         return self.c.fetchone()[0]
     
-    @commands.Cog.listener()
-    async def on_ready(self):
-        print(f"{self.bot.user} is ready!")
+    # @commands.Cog.listener()
+    # async def on_ready(self):
+    #     print(f"{self.bot.user} is ready!")
 
-        YOUR_ID = [1257852423918190675]
-        GUILD_ID = 974498807817588756
+    #     YOUR_ID = [1257852423918190675]
+    #     GUILD_ID = 974498807817588756
 
-        for user_id in YOUR_ID:
-            level, exp, leveled_up = self.add_exp(user_id, GUILD_ID, 10000)
-            print(f"User {user_id} → Level {level}, EXP {exp}, Leveled up? {leveled_up}")
+    #     for user_id in YOUR_ID:
+    #         level, exp, leveled_up = self.add_exp(user_id, GUILD_ID, 10000)
+    #         print(f"User {user_id} → Level {level}, EXP {exp}, Leveled up? {leveled_up}")
 
-        print(f"🎉 You are now level {level} with {exp} EXP in guild {GUILD_ID}. Leveled up? {leveled_up}")
+    #     print(f"🎉 You are now level {level} with {exp} EXP in guild {GUILD_ID}. Leveled up? {leveled_up}")
         
 
 
