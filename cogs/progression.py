@@ -120,21 +120,34 @@ def render_profile_image(
         draw_text((x, y), display_name, font_username, font_color)
         y += 40
 
-        title_label = "Title    :"
-        level_label = "Level  :"
-        exp_label   = "EXP    :"
+        labels = ["Title ", "Level ", "EXP "]
+        values = [
+            title_name,
+            str(level),
+            f"{exp:,} / {next_exp:,}" if next_exp > 0 else f"{exp:,}"
+        ]
 
-        for label, value in [(title_label, title_name), (level_label, str(level)), (exp_label, f"{exp:,} / {next_exp:,}" if next_exp>0 else f"{exp:,}")]:
+        # Calculate max label width (without colon)
+        label_width = max(draw.textlength(lbl, font=font_medium) for lbl in labels)
+
+        for label, value in zip(labels, values):
+            # Draw label
             draw_text((x, y), label, font_medium, font_color)
-            label_width = draw.textlength(label, font=font_medium)
-            value_x = x + label_width + 10
+
+            # Colon position (with a fixed padding)
+            colon_x = x + label_width + 8
+            draw_text((colon_x, y), ":", font_medium, font_color)
+
+            # Value aligned after colon
+            value_x = colon_x + 12
             draw_text((value_x, y), value, font_medium, font_color)
 
-            if label == title_label:
+            # Badge for title
+            if label.strip() == "Title":
                 emoji_path = title_emoji_files.get(title_name)
                 if emoji_path and os.path.exists(emoji_path):
                     try:
-                        badge = Image.open(emoji_path).convert("RGBA").resize((26,26))
+                        badge = Image.open(emoji_path).convert("RGBA").resize((26, 26))
                         bx = int(value_x + draw.textlength(value, font=font_medium) + 10)
                         by = int(y + 5)
                         img.paste(badge, (bx, by), badge)
@@ -628,6 +641,7 @@ class Progression(commands.Cog):
 async def setup(bot):
     await bot.add_cog(Progression(bot))
     print("📦 Loaded progression cog.")
+
 
 
 
