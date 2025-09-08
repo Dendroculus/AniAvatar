@@ -37,7 +37,7 @@ def render_profile_image(
 
         # base canvas with rounded rectangle
         width, height = 600, 260
-        corner_radius = 30
+        corner_radius = 35
 
         # transparent base
         img = Image.new("RGBA", (width, height), (0, 0, 0, 0))
@@ -47,23 +47,17 @@ def render_profile_image(
         mask_draw = ImageDraw.Draw(mask)
         mask_draw.rounded_rectangle([0, 0, width, height], radius=corner_radius, fill=255)
 
-
-        # solid light purple background
-        base_bg = Image.new("RGBA", (width, height), (167, 139, 250, 255))  # dark purple
-
-        # triangle overlay (darker purple at top-right corner)
-        overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
-        overlay_draw = ImageDraw.Draw(overlay)
-
-        # triangle coordinates (cover top-right corner)
-        triangle = [(width//2, 0), (width, 0), (width, height//2)]
-        overlay_draw.polygon(triangle, fill=(216, 180, 254, 255))  # light purple
-
-        # combine background + triangle
-        base_bg.alpha_composite(overlay)
+        # background from galaxy image
+        bg_path = os.path.join(ROOT_PATH, "assets", "backgrounds", "galaxy", "GALAXY1.PNG")
+        if os.path.exists(bg_path):
+            bg = Image.open(bg_path).convert("RGBA").resize((width, height))
+        else:
+            # fallback solid purple if missing
+            bg = Image.new("RGBA", (width, height), (167, 139, 250, 255))
 
         # apply rounded rectangle mask
-        img.paste(base_bg, (0, 0), mask)
+        img.paste(bg, (0, 0), mask)
+
 
         draw = ImageDraw.Draw(img)
 
@@ -152,7 +146,7 @@ def render_profile_image(
             )
 
         # resize smaller (optional tweak)
-        final_img = img.resize((390, 169), Image.Resampling.LANCZOS)
+        final_img = img.resize((360, 165), Image.Resampling.LANCZOS)
 
         # export as PNG bytes
         out = io.BytesIO()
@@ -515,11 +509,11 @@ class Progression(commands.Cog):
     async def on_ready(self):
         print(f"{self.bot.user} is ready!")
 
-        YOUR_ID = [955268891125375036]
+        YOUR_ID = [1257852423918190675]
         GUILD_ID = 974498807817588756
 
         for user_id in YOUR_ID:
-            level, exp, leveled_up = self.add_exp(user_id, GUILD_ID, 0)
+            level, exp, leveled_up = self.add_exp(user_id, GUILD_ID, 10000)
             print(f"User {user_id} → Level {level}, EXP {exp}, Leveled up? {leveled_up}")
 
         print(f"🎉 You are now level {level} with {exp} EXP in guild {GUILD_ID}. Leveled up? {leveled_up}")
