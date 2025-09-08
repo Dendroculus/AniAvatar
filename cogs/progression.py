@@ -35,9 +35,22 @@ def render_profile_image(
         font_medium = _load_font(fonts["medium"], 24)
         font_small = _load_font(fonts["regular"], 20)
 
-        # base canvas
+        # base canvas with rounded rectangle
         width, height = 600, 260
-        img = Image.new("RGBA", (width, height), (54, 57, 63, 255))
+        corner_radius = 30
+
+        # transparent base
+        img = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+
+        # mask for rounded rectangle
+        mask = Image.new("L", (width, height), 0)
+        mask_draw = ImageDraw.Draw(mask)
+        mask_draw.rounded_rectangle([0, 0, width, height], radius=corner_radius, fill=255)
+
+        # paste background color through mask
+        bg = Image.new("RGBA", (width, height), (54, 57, 63, 255))
+        img.paste(bg, (0, 0), mask)
+
         draw = ImageDraw.Draw(img)
 
         # avatar
