@@ -13,6 +13,9 @@ ROOT_PATH = os.path.dirname(COG_PATH)                   # ...\AniAvatar
 
 FONT_DIR = os.path.join(ROOT_PATH, "assets", "fonts")
 EMOJI_PATH = os.path.join(ROOT_PATH, "assets", "emojis", "RANK ICONS")
+BG_PATH = os.path.join(ROOT_PATH, "assets", "backgrounds")
+
+THEMES = ["Galaxy", "Cyberpunk", "Minimal", "Sakura", "Nature"]
 
 def render_profile_image(
     avatar_bytes: bytes,
@@ -23,6 +26,9 @@ def render_profile_image(
     next_exp: int,
     fonts: dict,
     title_emoji_files: dict,
+    bg_file: str = "GALAXY.PNG",
+    theme_name: str = "galaxy",
+    font_color: str = "white",
 ) -> bytes:
     try:
         def _load_font(path, size):
@@ -35,56 +41,44 @@ def render_profile_image(
         font_medium = _load_font(fonts["medium"], 24)
         font_small = _load_font(fonts["regular"], 20)
 
-        # base canvas with rounded rectangle
         width, height = 600, 260
         corner_radius = 35
 
-        # transparent base
         img = Image.new("RGBA", (width, height), (0, 0, 0, 0))
-
-        # mask for rounded rectangle
         mask = Image.new("L", (width, height), 0)
         mask_draw = ImageDraw.Draw(mask)
         mask_draw.rounded_rectangle([0, 0, width, height], radius=corner_radius, fill=255)
 
-        # background from galaxy image
-        bg_path = os.path.join(ROOT_PATH, "assets", "backgrounds", "galaxy", "GALAXY1.PNG")
+        # Use user-selected theme folder dynamically
+        bg_path = os.path.join(BG_PATH, theme_name.lower(), bg_file)
         if os.path.exists(bg_path):
             bg = Image.open(bg_path).convert("RGBA").resize((width, height))
         else:
-            # fallback solid purple if missing
             bg = Image.new("RGBA", (width, height), (167, 139, 250, 255))
 
-        # apply rounded rectangle mask
         img.paste(bg, (0, 0), mask)
-
 
         draw = ImageDraw.Draw(img)
 
-        # avatar
+        # Avatar
         avatar = Image.open(io.BytesIO(avatar_bytes)).convert("RGBA").resize((100, 100))
         img.paste(avatar, (20, 30), avatar)
 
-        # starting position
         x, y = 140, 30
-
-        # username
-        draw.text((x, y), display_name, font=font_username, fill="white")
+        draw.text((x, y), display_name, font=font_username, fill=font_color)
         y += 40
 
-        # aligned labels
         title_label = "Title    :" 
         level_label = "Level  :" 
-        exp_label   = "EXP    :"  
+        exp_label   = "EXP    :"
 
-        # Title
-        draw.text((x, y), title_label, font=font_medium, fill="white")
+        draw.text((x, y), title_label, font=font_medium, fill=font_color)
         label_width = draw.textlength(title_label, font=font_medium)
         value_x = x + label_width + 10
-        draw.text((value_x, y), title_name, font=font_medium, fill="white")
+        draw.text((value_x, y), title_name, font=font_medium, fill=font_color)
         text_width = draw.textlength(title_name, font=font_medium)
 
-        # Badge after title
+        # Badge
         emoji_path = title_emoji_files.get(title_name)
         if emoji_path and os.path.exists(emoji_path):
             try:
@@ -95,60 +89,38 @@ def render_profile_image(
             except Exception as e:
                 print("❌ Badge paste failed:", e)
                 traceback.print_exc()
-        else:
-            print("⚠️ No badge file found for:", title_name)
 
         y += 32
-
-        # Level
-        draw.text((x, y), level_label, font=font_medium, fill="white")
+        draw.text((x, y), level_label, font=font_medium, fill=font_color)
         label_width = draw.textlength(level_label, font=font_medium)
         value_x = x + label_width + 10
-        draw.text((value_x, y), str(level), font=font_medium, fill="white")
+        draw.text((value_x, y), str(level), font=font_medium, fill=font_color)
         y += 32
 
-        # EXP
         exp_text = (
             "∞" if next_exp == exp and next_exp != 0
             else f"{exp:,} / {next_exp:,}" if next_exp > 0
             else f"{exp:,}"
         )
-        draw.text((x, y), exp_label, font=font_medium, fill="white")
+        draw.text((x, y), exp_label, font=font_medium, fill=font_color)
         label_width = draw.textlength(exp_label, font=font_medium)
         value_x = x + label_width + 10
-        draw.text((value_x, y), exp_text, font=font_medium, fill="white")
+        draw.text((value_x, y), exp_text, font=font_medium, fill=font_color)
         y += 32
 
-        # message line
-        if next_exp > 0:
-            exp_left = max(0, next_exp - exp)
-            next_line = f"Gain {exp_left:,} more EXP to level up!"
-        else:
-            next_line = "You are at max level!"
+        next_line = f"Gain {max(0, next_exp - exp):,} more EXP to level up!" if next_exp > 0 else "You are at max level!"
         draw.text((x, y), next_line, font=font_small, fill=(200, 200, 200))
         y += 40
 
-        # progress bar
         bar_x, bar_y = x, y
         bar_width, bar_height = width - bar_x - 40, 24
         progress = min(exp / next_exp, 1) if next_exp > 0 else 1
 
-        draw.rounded_rectangle(
-            [bar_x, bar_y, bar_x + bar_width, bar_y + bar_height],
-            radius=12,
-            fill=(30, 30, 30)
-        )
+        draw.rounded_rectangle([bar_x, bar_y, bar_x + bar_width, bar_y + bar_height], radius=12, fill=(30, 30, 30))
         if progress > 0:
-            draw.rounded_rectangle(
-                [bar_x, bar_y, bar_x + int(bar_width * progress), bar_y + bar_height],
-                radius=12,
-                fill=(0, 200, 120)
-            )
+            draw.rounded_rectangle([bar_x, bar_y, bar_x + int(bar_width * progress), bar_y + bar_height], radius=12, fill=(0, 200, 120))
 
-        # resize smaller (optional tweak)
         final_img = img.resize((360, 165), Image.Resampling.LANCZOS)
-
-        # export as PNG bytes
         out = io.BytesIO()
         final_img.save(out, format="PNG")
         return out.getvalue()
@@ -246,6 +218,73 @@ def load_font(path, size):
         print(f"Font load failed for {path}: {e}")
         return ImageFont.load_default()
     
+class MainThemeSelect(discord.ui.Select):
+    def __init__(self, user_id, cog):
+        self.user_id = user_id
+        self.cog = cog
+        self.folders = [folder for folder in os.listdir(BG_PATH) if os.path.isdir(os.path.join(BG_PATH, folder))]
+        options = [
+            discord.SelectOption(label=folder.capitalize(), description=f"Choose {folder.capitalize()} theme")
+            for folder in self.folders
+        ]
+        super().__init__(placeholder="Select a theme...", min_values=1, max_values=1, options=options)
+
+    async def callback(self, interaction: discord.Interaction):
+        idx = self.values[0].lower()  # label selected by user
+        selected_theme = next(f for f in self.folders if f.lower() == idx)
+        await interaction.response.send_message(
+            f"✅ You selected **{selected_theme.capitalize()}**! Now pick a background:",
+            view=SubThemeView(self.user_id, selected_theme, self.cog),
+            ephemeral=True
+        )
+
+        
+class MainThemeView(discord.ui.View):
+    def __init__(self, user_id, cog):
+        super().__init__()
+        self.cog = cog
+        self.add_item(MainThemeSelect(user_id, cog))
+
+class SubThemeSelect(discord.ui.Select):
+    def __init__(self, user_id, theme, cog):
+        self.theme = theme
+        self.cog = cog
+        theme_path = os.path.join(BG_PATH, theme)
+
+        # List all image files
+        files = [f for f in os.listdir(theme_path) if f.lower().endswith((".png", ".jpg", ".jpeg"))]
+
+        # Map them to Theme 1, Theme 2, ...
+        self.file_map = {f"Theme {i+1}": file for i, file in enumerate(files)}
+
+        options = [
+            discord.SelectOption(label=name, description=f"Select {name}")
+            for name in self.file_map.keys()
+        ]
+
+        super().__init__(placeholder="Select a background...", min_values=1, max_values=1, options=options)
+        self.user_id = user_id
+
+    async def callback(self, interaction: discord.Interaction):
+        selected_label = self.values[0]  # Theme 1, Theme 2, etc.
+        bg_file = self.file_map[selected_label]  # actual filename
+        theme_name = self.theme
+        font_color = "white"  # or fetch from DB
+
+        self.cog.set_user_theme(self.user_id, theme_name, bg_file, font_color)
+
+        await interaction.response.send_message(
+            f"✅ Your profile background has been set to **{theme_name} / {selected_label}**!",
+            ephemeral=True
+        )
+
+
+class SubThemeView(discord.ui.View):
+    def __init__(self, user_id, theme, cog):
+        super().__init__()
+        self.cog = cog  # store cog reference
+        self.add_item(SubThemeSelect(user_id, theme, cog))
+    
 class Progression(commands.Cog):
     MAX_LEVEL = 150
     MAX_BOX_WIDTH = 50
@@ -269,8 +308,36 @@ class Progression(commands.Cog):
                 PRIMARY KEY (user_id, guild_id)
             )
         """)
+        self.c.execute("""
+        CREATE TABLE IF NOT EXISTS profile_theme (
+            user_id INTEGER PRIMARY KEY,
+            theme_name TEXT DEFAULT 'galaxy',
+            bg_file TEXT DEFAULT 'GALAXY.PNG',
+            font_color TEXT DEFAULT 'white'
+        )
+    """)
+
         self.conn.commit()
 
+    def get_user_theme(self, user_id: int):
+        self.c.execute("SELECT theme_name, bg_file, font_color FROM profile_theme WHERE user_id = ?", (user_id,))
+        result = self.c.fetchone()
+        if not result:
+            # insert default
+            self.c.execute(
+                "INSERT INTO profile_theme (user_id) VALUES (?)", (user_id,)
+            )
+            self.conn.commit()
+            return "galaxy", "GALAXY.PNG", "white"
+        return result
+
+    def set_user_theme(self, user_id: int, theme_name: str, bg_file: str, font_color: str = "white"):
+        self.c.execute(
+            "INSERT OR REPLACE INTO profile_theme (user_id, theme_name, bg_file, font_color) VALUES (?, ?, ?, ?)",
+            (user_id, theme_name, bg_file, font_color)
+        )
+        self.conn.commit()
+    
     def truncate(self, text: str, max_len: int):
         return text if len(text) <= max_len else text[:max_len - 3] + "..."
 
@@ -325,25 +392,25 @@ class Progression(commands.Cog):
     @commands.guild_only()
     async def profile(self, ctx, member: discord.Member = None):
         member = member or ctx.author
-
         try:
+            # Get EXP and level
             exp, level = self.get_user(member.id, ctx.guild.id)
             title_name = get_title(level)
 
-            # compute next_exp etc
-            if level >= self.MAX_LEVEL:
-                next_exp = exp
-            else:
-                next_exp = 50 * level + 20 * level**2
+            # Next EXP
+            next_exp = 50 * level + 20 * level**2 if level < self.MAX_LEVEL else exp
 
-            # fetch avatar bytes (async)
+            # Fetch avatar bytes
             avatar_asset = member.display_avatar.with_size(128)
             buffer_avatar = io.BytesIO()
-            await avatar_asset.save(buffer_avatar)   # this is async API
+            await avatar_asset.save(buffer_avatar)
             buffer_avatar.seek(0)
             avatar_bytes = buffer_avatar.getvalue()
 
-            # call the blocking render in a thread
+            # Fetch user theme from DB
+            theme_name, bg_file, font_color = self.get_user_theme(member.id)
+
+            # Render profile image in a thread
             img_bytes = await asyncio.to_thread(
                 render_profile_image,
                 avatar_bytes,
@@ -354,16 +421,18 @@ class Progression(commands.Cog):
                 next_exp,
                 FONTS,
                 TITLE_EMOJI_FILES,
+                bg_file=bg_file,
+                theme_name=theme_name,
+                font_color=font_color
             )
 
-            # if rendering failed, report error and fallback to text embed (safe)
             if not img_bytes:
                 await ctx.send("❌ Failed to generate profile image — check bot logs.")
                 return
 
             file = discord.File(io.BytesIO(img_bytes), filename="profile.png")
 
-            # If badge PNG doesn't exist, attach emoji in message content (so user still sees it)
+            # Badge fallback if PNG missing
             badge_path = TITLE_EMOJI_FILES.get(title_name)
             badge_text = ""
             if not (badge_path and os.path.exists(badge_path)):
@@ -373,10 +442,8 @@ class Progression(commands.Cog):
             await ctx.send(content=content if badge_text else None, file=file)
 
         except Exception:
-            # catch unexpected errors, log to console, notify user
             traceback.print_exc()
             await ctx.send("❌ Unexpected error while generating profile. Check console/logs.")
-
 
 
     @commands.hybrid_command(name="leaderboard", description="Show top levels in this server")
@@ -427,6 +494,11 @@ class Progression(commands.Cog):
             embed.set_thumbnail(url=ctx.guild.icon.url)
 
         await ctx.send(embed=embed)
+
+    @commands.hybrid_command(name="profiletheme", description="Choose your profile card background theme")
+    async def profiletheme(self, ctx):
+        view = MainThemeView(ctx.author.id, cog=self)  # pass the cog
+        await ctx.send("Select your profile theme:", view=view)
 
 
     @commands.Cog.listener()
