@@ -21,7 +21,6 @@ def get_readable_font_color(bg_path):
         small = bg.resize((10, 10))
         pixels = list(small.getdata())
         avg_brightness = sum((r*0.299 + g*0.587 + b*0.114) for r, g, b in pixels) / len(pixels)
-        # Instead of pure black/white, use slightly softer shades
         if avg_brightness < 100:
             return (255, 255, 255)  # bright text on dark bg
         elif avg_brightness > 200:
@@ -82,7 +81,7 @@ def render_profile_image(
         font_small = _load_font(fonts["regular"], 20)
 
         width, height = 600, 260
-        corner_radius = 35
+        corner_radius = 40
 
         img = Image.new("RGBA", (width, height), (0,0,0,0))
         mask = Image.new("L", (width, height), 0)
@@ -124,7 +123,7 @@ def render_profile_image(
         values = [
             title_name,
             str(level),
-            f"{exp:,} / {next_exp:,}" if next_exp > 0 else f"{exp:,}"
+            f"{exp:,} / {next_exp:,}" if next_exp else "∞"
         ]
 
         # Calculate max label width (without colon)
@@ -155,16 +154,61 @@ def render_profile_image(
                         pass
             y += 32
 
-        next_line = f"Gain {max(0, next_exp - exp):,} more EXP to level up!" if next_exp>0 else "You are at max level!"
+        if next_exp is not None:
+            next_line = f"Gain {max(0, next_exp - exp):,} more EXP to level up!"
+        else:
+            next_line = "You are at max level!"
         draw_text((x, y), next_line, font_small, font_color)
         y += 40
 
         bar_x, bar_y = x, y
         bar_width, bar_height = width - bar_x - 40, 24
-        progress = min(exp/next_exp,1) if next_exp>0 else 1
-        draw.rounded_rectangle([bar_x, bar_y, bar_x+bar_width, bar_y+bar_height], radius=12, fill=(30,30,30))
-        if progress>0:
-            draw.rounded_rectangle([bar_x, bar_y, bar_x+int(bar_width*progress), bar_y+bar_height], radius=12, fill=(0,200,120))
+        progress = (exp / next_exp) if next_exp is not None else 1
+       # EXP bar background
+        draw.rounded_rectangle(
+            [bar_x, bar_y, bar_x + bar_width, bar_y + bar_height],
+            radius=12,
+            fill=(30, 30, 30)
+        )
+
+        # EXP bar fill with gradient + segment lines
+        if progress > 0:
+            progress_width = int(bar_width * progress)
+
+            # Gradient foreground
+            gradient = Image.new("RGBA", (progress_width, bar_height), (0, 0, 0, 0))
+            grad_draw = ImageDraw.Draw(gradient)
+
+            for i in range(progress_width):
+                # Teal → Lime gradient
+                r = int(0 + (80 - 0) * (i / progress_width))
+                g = int(180 + (255 - 180) * (i / progress_width))
+                b = int(120 + (60 - 120) * (i / progress_width))
+                grad_draw.line([(i, 0), (i, bar_height)], fill=(r, g, b, 255))
+
+           # Create a mask with rounded corners for the progress bar
+            mask = Image.new("L", (progress_width, bar_height), 0)
+            mask_draw = ImageDraw.Draw(mask)
+            mask_draw.rounded_rectangle(
+                [0, 0, progress_width, bar_height],
+                radius=12,
+                fill=255
+            )
+
+            # Paste gradient using the rounded mask
+            img.paste(gradient, (bar_x, bar_y), mask)
+
+            # Add RPG-style segment lines
+            num_segments = 10  # number of divisions
+            segment_width = bar_width // num_segments
+            for i in range(1, num_segments):
+                line_x = bar_x + i * segment_width
+                if line_x < bar_x + progress_width:
+                    draw.line(
+                        [(line_x, bar_y + 2), (line_x, bar_y + bar_height - 2)],
+                        fill=(255, 255, 255, 100),  # faint white lines
+                        width=1
+                    )
 
         final_img = img.resize((360,155), Image.Resampling.LANCZOS)
         out = io.BytesIO()
@@ -444,7 +488,13 @@ class Progression(commands.Cog):
             title_name = get_title(level)
 
             # Next EXP
-            next_exp = 50 * level + 20 * level**2 if level < self.MAX_LEVEL else exp
+            
+            if level >= self.MAX_LEVEL:
+                exp_text = "∞"
+                next_exp = None  # skip progress bar logic
+            else:
+                exp_text = exp
+                next_exp = 50 * level + 20 * level**2
 
             # Fetch avatar bytes
             avatar_asset = member.display_avatar.with_size(128)
@@ -542,6 +592,7 @@ class Progression(commands.Cog):
         await ctx.send(embed=embed)
 
     @commands.hybrid_command(name="profiletheme", description="Choose your profile card background theme")
+    @commands.guild_only()
     async def profiletheme(self, ctx):
         view = MainThemeView(ctx.author.id, cog=self)  # pass the cog
         await ctx.send("Select your profile theme:", view=view)
