@@ -1,6 +1,6 @@
 import discord
 from discord.ext import commands
-from discord.ui import View, Select
+from discord.ui import View, Select, Button
 import aiohttp
 import random
 from urllib.parse import quote
@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 import re
 
 sent_image_cache = {}
+anilist_cache = {}  # cache for characters
 load_dotenv()
 
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
@@ -161,88 +162,96 @@ class Search(commands.Cog):
         if not name:
             return await ctx.send("❌ Please provide a character name.")
 
-        # Build search query
-        if "anime" not in name.lower():
-            search_query = f"{name} anime character pfp"
-        else:
-            search_query = f"{name} pfp"
-        
-        query = quote(search_query)
-        url = (
-            f"https://www.googleapis.com/customsearch/v1?"
-            f"key={GOOGLE_API_KEY}&cx={SEARCH_ENGINE_ID}&searchType=image&q={query}"
-        )
+        # Step 1: validate with AniList
+        query_str = """
+        query ($search: String) {
+            Character(search: $search) {
+                id
+                name { full }
+                image {
+                    large
+                    medium
+                }
+            }
+        }
+        """
+        variables = {"search": name}
 
         async with aiohttp.ClientSession() as session:
-            async with session.get(url) as resp:
-                try:
-                    data = await resp.json()
-                except Exception:
-                    return await ctx.send("❌ Failed to fetch data from Google API.")
+            async with session.post(ANILIST_API, json={"query": query_str, "variables": variables}) as resp:
+                if resp.status != 200:
+                    return await ctx.send("❌ Could not verify character right now.")
+                data = await resp.json()
 
-        if "error" in data:
-            return await ctx.send(
-                f"❌ Google API Error: {data['error'].get('message','Unknown error')}"
+        char = data.get("data", {}).get("Character")
+        if not char:
+            return await ctx.send("❌ That is not an anime character.")
+
+        character_name = char["name"]["full"]
+        official_image = char.get("image", {}).get("large") or char.get("image", {}).get("medium")
+
+        # Step 2: prepare cache key
+        key = re.sub(r'[^a-z0-9]', '', character_name.lower())
+        if not key:
+            key = character_name.lower()
+
+        if key not in anilist_cache:
+            anilist_cache[key] = {"anilist": False, "google": []}
+
+        # Step 3: decide whether to use AniList or Google
+        if not anilist_cache[key]["anilist"] and official_image:
+            # First time → use AniList image
+            selected_image = official_image
+            anilist_cache[key]["anilist"] = True
+            source = "AniList"
+        else:
+            # Fallback → Google images
+            search_query = f"{character_name} anime pfp"
+            query = quote(search_query)
+            url = (
+                f"https://www.googleapis.com/customsearch/v1?"
+                f"key={GOOGLE_API_KEY}&cx={SEARCH_ENGINE_ID}&searchType=image&q={query}"
             )
 
-        items = data.get("items", [])
-        if not items:
-            return await ctx.send(f"❌ No results found for `{name}`.")
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url) as resp:
+                    try:
+                        data = await resp.json()
+                    except Exception:
+                        return await ctx.send("❌ Failed to fetch from Google API.")
 
-        anime_keywords = ["anime", "manga", "waifu", "weeb", "otaku", "character", "fanart"]
+            items = data.get("items", [])
+            if not items:
+                return await ctx.send(f"❌ No extra PFPs found for `{character_name}`.")
 
-        anime_like = []
-        others = []
+            # Filter usable images
+            valid_items = [
+                item["link"] for item in items
+                if item.get("link", "").lower().endswith((".png", ".jpg", ".jpeg", ".webp"))
+            ]
+            if not valid_items:
+                return await ctx.send(f"❌ No valid images found for `{character_name}`.")
 
-        for item in items:
-            link = item.get("link", "")
-            title = item.get("title", "").lower()
-            snippet = item.get("snippet", "").lower()
+            # avoid repeats
+            unsent = [img for img in valid_items if img not in anilist_cache[key]["google"]]
+            if not unsent:
+                anilist_cache[key]["google"] = []
+                unsent = valid_items
 
-            if not link.startswith("http"):
-                continue
-            if not link.lower().endswith((".png", ".jpg", ".jpeg", ".webp")):
-                continue
+            selected_image = random.choice(unsent)
+            anilist_cache[key]["google"].append(selected_image)
+            source = "Google API"
 
-            if any(keyword in title or keyword in snippet for keyword in anime_keywords):
-                anime_like.append(link)
-            else:
-                others.append(link)
-
-        valid_items = anime_like if anime_like else others
-
-        if not valid_items:
-            return await ctx.send(f"❌ `{name}` doesn’t seem to be an anime character.")
-
-        key = re.sub(r'\b(anime|pfp|character|photo|image|picture)\b', '', name.lower())
-        key = re.sub(r'[^a-z0-9]', '', key).strip()
-        if not key:
-            key = name.lower()
-
-        if key not in sent_image_cache:
-            sent_image_cache[key] = []
-
-        unsent = [img for img in valid_items if img not in sent_image_cache[key]]
-
-        if not unsent:
-            sent_image_cache[key] = []
-            unsent = valid_items
-
-        selected_image = random.choice(unsent)
-        sent_image_cache[key].append(selected_image)
-
-        if len(sent_image_cache[key]) > 20:
-            sent_image_cache[key] = sent_image_cache[key][-10:]
-
+        # Step 4: send embed
         embed = discord.Embed(
-            title=f"Anime PFP for {name}",
+            title=f"Anime PFP for {character_name}",
             color=discord.Color.purple()
         )
         embed.set_image(url=selected_image)
-        embed.set_footer(text="Tip: Use more specific terms for better results")
+        embed.set_footer(text=f"Source: {source}")
         await ctx.send(embed=embed)
-
 
 async def setup(bot):
     await bot.add_cog(Search(bot))
     print("📦 Loaded search cog.")
+
