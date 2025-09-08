@@ -3,6 +3,184 @@ from discord.ext import commands
 import sqlite3
 import os
 import random
+from PIL import Image, ImageDraw, ImageFont
+import asyncio
+import traceback
+import io
+
+COG_PATH = os.path.dirname(os.path.abspath(__file__))   # ...\AniAvatar\cogs
+ROOT_PATH = os.path.dirname(COG_PATH)                   # ...\AniAvatar
+
+FONT_DIR = os.path.join(ROOT_PATH, "assets", "fonts")
+EMOJI_PATH = os.path.join(ROOT_PATH, "assets", "emojis", "RANK ICONS")
+
+def render_profile_image(
+    avatar_bytes: bytes,
+    display_name: str,
+    title_name: str,
+    level: int,
+    exp: int,
+    next_exp: int,
+    fonts: dict,
+    title_emoji_files: dict,
+) -> bytes:
+    try:
+        def _load_font(path, size):
+            try:
+                return ImageFont.truetype(path, size)
+            except Exception:
+                return ImageFont.load_default()
+
+        font_username = _load_font(fonts["bold"], 32)
+        font_medium = _load_font(fonts["medium"], 24)
+        font_small = _load_font(fonts["regular"], 20)
+
+        # base canvas
+        width, height = 600, 260
+        img = Image.new("RGBA", (width, height), (54, 57, 63, 255))
+        draw = ImageDraw.Draw(img)
+
+        # avatar
+        avatar = Image.open(io.BytesIO(avatar_bytes)).convert("RGBA").resize((100, 100))
+        img.paste(avatar, (20, 30), avatar)
+
+        # starting position
+        x, y = 140, 30
+
+        # username
+        draw.text((x, y), display_name, font=font_username, fill="white")
+        y += 40
+
+        # aligned labels
+        title_label = "Title    :" 
+        level_label = "Level  :" 
+        exp_label   = "EXP    :"  
+
+        # Title
+        draw.text((x, y), title_label, font=font_medium, fill="white")
+        label_width = draw.textlength(title_label, font=font_medium)
+        value_x = x + label_width + 10
+        draw.text((value_x, y), title_name, font=font_medium, fill="white")
+        text_width = draw.textlength(title_name, font=font_medium)
+
+        # Badge after title
+        emoji_path = title_emoji_files.get(title_name)
+        if emoji_path and os.path.exists(emoji_path):
+            try:
+                badge = Image.open(emoji_path).convert("RGBA").resize((26, 26))
+                bx = int(value_x + text_width + 10)
+                by = int(y + 5)
+                img.paste(badge, (bx, by), badge)
+            except Exception as e:
+                print("❌ Badge paste failed:", e)
+                traceback.print_exc()
+        else:
+            print("⚠️ No badge file found for:", title_name)
+
+        y += 32
+
+        # Level
+        draw.text((x, y), level_label, font=font_medium, fill="white")
+        label_width = draw.textlength(level_label, font=font_medium)
+        value_x = x + label_width + 10
+        draw.text((value_x, y), str(level), font=font_medium, fill="white")
+        y += 32
+
+        # EXP
+        exp_text = (
+            "∞" if next_exp == exp and next_exp != 0
+            else f"{exp:,} / {next_exp:,}" if next_exp > 0
+            else f"{exp:,}"
+        )
+        draw.text((x, y), exp_label, font=font_medium, fill="white")
+        label_width = draw.textlength(exp_label, font=font_medium)
+        value_x = x + label_width + 10
+        draw.text((value_x, y), exp_text, font=font_medium, fill="white")
+        y += 32
+
+        # message line
+        if next_exp > 0:
+            exp_left = max(0, next_exp - exp)
+            next_line = f"Gain {exp_left:,} more EXP to level up!"
+        else:
+            next_line = "You are at max level!"
+        draw.text((x, y), next_line, font=font_small, fill=(200, 200, 200))
+        y += 40
+
+        # progress bar
+        bar_x, bar_y = x, y
+        bar_width, bar_height = width - bar_x - 40, 24
+        progress = min(exp / next_exp, 1) if next_exp > 0 else 1
+
+        draw.rounded_rectangle(
+            [bar_x, bar_y, bar_x + bar_width, bar_y + bar_height],
+            radius=12,
+            fill=(30, 30, 30)
+        )
+        if progress > 0:
+            draw.rounded_rectangle(
+                [bar_x, bar_y, bar_x + int(bar_width * progress), bar_y + bar_height],
+                radius=12,
+                fill=(0, 200, 120)
+            )
+
+        # resize smaller (optional tweak)
+        final_img = img.resize((390, 169), Image.Resampling.LANCZOS)
+
+        # export as PNG bytes
+        out = io.BytesIO()
+        final_img.save(out, format="PNG")
+        return out.getvalue()
+
+    except Exception:
+        traceback.print_exc()
+        return None
+
+    
+FONTS = {
+    "bold": os.path.join(FONT_DIR, "gg sans Bold.ttf"),
+    "medium": os.path.join(FONT_DIR, "gg sans Medium.ttf"),
+    "regular": os.path.join(FONT_DIR, "gg sans Regular.ttf"),
+    "semibold": os.path.join(FONT_DIR, "gg sans Semibold.ttf"),
+}
+
+TITLE_EMOJI_FILES = {
+    "Novice": os.path.join(EMOJI_PATH, "NOVICE.png"),
+    "Warrior": os.path.join(EMOJI_PATH, "WARRIOR.png"),
+    "Elite": os.path.join(EMOJI_PATH, "ELITE.png"),
+    "Champion": os.path.join(EMOJI_PATH, "CHAMPION.png"),
+    "Hero": os.path.join(EMOJI_PATH, "HERO.png"),
+    "Legend": os.path.join(EMOJI_PATH, "LEGEND.png"),
+    "Mythic": os.path.join(EMOJI_PATH, "MYTHIC.png"),
+    "Ascendant": os.path.join(EMOJI_PATH, "ASCENDANT.png"),
+    "Immortal": os.path.join(EMOJI_PATH, "IMMORTAL.png"),
+    "Celestial": os.path.join(EMOJI_PATH, "CELESTIAL.png"),
+    "Transcendent": os.path.join(EMOJI_PATH, "TRANSCENDENT.png"),
+    "Aetherborn": os.path.join(EMOJI_PATH, "AETHERBORN.png"),
+    "Cosmic": os.path.join(EMOJI_PATH, "COSMIC.png"),
+    "Divine": os.path.join(EMOJI_PATH, "DIVINE.png"),
+    "Eternal": os.path.join(EMOJI_PATH, "ETERNAL.png"),
+    "Enlightened": os.path.join(EMOJI_PATH, "ENLIGHTENED.png"),
+}
+
+TITLE_COLORS = {
+    "Novice": discord.Color.light_gray(),
+    "Warrior": discord.Color.red(),
+    "Elite": discord.Color.orange(),
+    "Champion": discord.Color.gold(),
+    "Hero": discord.Color.green(),
+    "Legend": discord.Color.blue(),
+    "Mythic": discord.Color.purple(),
+    "Ascendant": discord.Color.teal(),
+    "Immortal": discord.Color.dark_red(),
+    "Celestial": discord.Color.dark_blue(),
+    "Transcendent": discord.Color.dark_purple(),
+    "Aetherborn": discord.Color.dark_teal(),
+    "Cosmic": discord.Color.dark_magenta(),
+    "Divine": discord.Color.green(),
+    "Eternal": discord.Color.red(),
+    "Enlightened": discord.Color.blue(),
+}
 
 def get_title(level: int):
     if level < 5: return "Novice"
@@ -39,26 +217,13 @@ def get_title_emoji(level: int):
     elif level < 100: return "<:DIVINE:1413865527050506311>"
     elif level < 125: return "<:ETERNAL:1413824371994136598>"
     else: return "<:ENLIGHTENED:1413866534605951079>"
-    
-TITLE_COLORS = {
-    "Novice": discord.Color.light_gray(),
-    "Warrior": discord.Color.red(),
-    "Elite": discord.Color.orange(),
-    "Champion": discord.Color.gold(),
-    "Hero": discord.Color.green(),
-    "Legend": discord.Color.blue(),
-    "Mythic": discord.Color.purple(),
-    "Ascendant": discord.Color.teal(),
-    "Immortal": discord.Color.dark_red(),
-    "Celestial": discord.Color.dark_blue(),
-    "Transcendent": discord.Color.dark_purple(),
-    "Aetherborn": discord.Color.dark_teal(),
-    "Cosmic": discord.Color.dark_magenta(),
-    "Divine": discord.Color.green(),
-    "Eternal": discord.Color.red(),
-    "Enlightened": discord.Color.blue(),
-}
 
+def load_font(path, size):
+    try:
+        return ImageFont.truetype(path, size)
+    except Exception as e:
+        print(f"Font load failed for {path}: {e}")
+        return ImageFont.load_default()
     
 class Progression(commands.Cog):
     MAX_LEVEL = 150
@@ -127,59 +292,74 @@ class Progression(commands.Cog):
         )
         self.conn.commit()
         return level, new_exp, leveled_up
-
+    
+    @commands.Cog.listener()
+    async def on_guild_remove(self, guild: discord.Guild):
+        """Cleanup DB when bot is removed from a guild"""
+        self.c.execute("DELETE FROM users WHERE guild_id = ?", (guild.id,))
+        self.conn.commit()
+        print(f"[Progression] Cleaned up DB for guild {guild.id} ({guild.name})")
+        
     @commands.hybrid_command(name="profile", description="Check your level, EXP, and title")
+    @commands.guild_only()
     async def profile(self, ctx, member: discord.Member = None):
         member = member or ctx.author
-        exp, level = self.get_user(member.id, ctx.guild.id)
-        title = get_title(level)
 
-        if level >= self.MAX_LEVEL:
-            exp_line = f"EXP     : ∞"
-            line = "You are already at max level! "
-        else:
-            next_exp = 50 * level + 20 * level**2
-            exp_left = next_exp - exp
-            exp_line = f"EXP     : {exp}/{next_exp}"
-            line = f"Gain {exp_left} more EXP to level up!"
+        try:
+            exp, level = self.get_user(member.id, ctx.guild.id)
+            title_name = get_title(level)
 
-        title_emoji = get_title_emoji(level)    
-        
-        embed = discord.Embed(
-            title=f"{member.display_name}'s Profile  {title_emoji}",
-            color=discord.Color.purple()
-        )
-        title_line = f"Title   : {title}"
-        level_line = f"Level   : {level}"
+            # compute next_exp etc
+            if level >= self.MAX_LEVEL:
+                next_exp = exp
+            else:
+                next_exp = 50 * level + 20 * level**2
 
-        max_box_width = 50  # adjustable by preference
+            # fetch avatar bytes (async)
+            avatar_asset = member.display_avatar.with_size(128)
+            buffer_avatar = io.BytesIO()
+            await avatar_asset.save(buffer_avatar)   # this is async API
+            buffer_avatar.seek(0)
+            avatar_bytes = buffer_avatar.getvalue()
 
-        def truncate(text):
-            return text if len(text) <= max_box_width else text[:max_box_width - 3] + "..."
+            # call the blocking render in a thread
+            img_bytes = await asyncio.to_thread(
+                render_profile_image,
+                avatar_bytes,
+                member.display_name,
+                title_name,
+                level,
+                exp,
+                next_exp,
+                FONTS,
+                TITLE_EMOJI_FILES,
+            )
 
-        title_line = truncate(title_line)
-        level_line = truncate(level_line)
-        exp_line = truncate(exp_line)
-        line = truncate(line)
+            # if rendering failed, report error and fallback to text embed (safe)
+            if not img_bytes:
+                await ctx.send("❌ Failed to generate profile image — check bot logs.")
+                return
 
-        max_length = max(len(title_line), len(level_line), len(exp_line), len(line))
+            file = discord.File(io.BytesIO(img_bytes), filename="profile.png")
 
-        embed.description = (
-            f"```\n"
-            f"┌{'─' * max_length}┐\n"
-            f"│{title_line.ljust(max_length)}│\n"
-            f"├{'─' * max_length}┤\n"
-            f"│{level_line.ljust(max_length)}│\n"
-            f"│{exp_line.ljust(max_length)}│\n"
-            f"│{line.ljust(max_length)}│\n"
-            f"└{'─' * max_length}┘\n"
-            f"```"
-        )
+            # If badge PNG doesn't exist, attach emoji in message content (so user still sees it)
+            badge_path = TITLE_EMOJI_FILES.get(title_name)
+            badge_text = ""
+            if not (badge_path and os.path.exists(badge_path)):
+                badge_text = get_title_emoji(level)
 
-        embed.set_thumbnail(url=member.display_avatar.url)
-        await ctx.send(embed=embed)
+            content = f"{member.display_name} {badge_text}".strip()
+            await ctx.send(content=content if badge_text else None, file=file)
+
+        except Exception:
+            # catch unexpected errors, log to console, notify user
+            traceback.print_exc()
+            await ctx.send("❌ Unexpected error while generating profile. Check console/logs.")
+
+
 
     @commands.hybrid_command(name="leaderboard", description="Show top levels in this server")
+    @commands.guild_only()
     async def leaderboard(self, ctx):
         self.c.execute(
             """
@@ -312,7 +492,7 @@ class Progression(commands.Cog):
         GUILD_ID = 974498807817588756
 
         for user_id in YOUR_ID:
-            level, exp, leveled_up = self.add_exp(user_id, GUILD_ID, 9999999999)
+            level, exp, leveled_up = self.add_exp(user_id, GUILD_ID, 10000)
             print(f"User {user_id} → Level {level}, EXP {exp}, Leveled up? {leveled_up}")
 
         print(f"🎉 You are now level {level} with {exp} EXP in guild {GUILD_ID}. Leveled up? {leveled_up}")
@@ -322,5 +502,6 @@ class Progression(commands.Cog):
 async def setup(bot):
     await bot.add_cog(Progression(bot))
     print("📦 Loaded progression cog.")
+
 
 
