@@ -16,12 +16,15 @@ It automates anime-related tasks — search anime info, fetch profile pictures, 
 - **Leveling System**
   - Gain EXP by chatting and playing games  
   - Custom titles based on level  
-  - Server leaderboard  
+  - Server leaderboard
+  - Profile Cards showing title, exp information and profile picture
 - **Utilities**
   - `/ping` latency check  
   - `/help` dynamic command list  
 - **Presence Rotation**
-  - Bot updates its Discord status every 20 minutes with random anime  
+  - Bot updates its Discord status every 20 minutes with random anime
+- **Polling**
+  - Create your own custom Polling up to 5 options. 
 
 ---
 
