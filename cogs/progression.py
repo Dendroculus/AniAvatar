@@ -15,28 +15,6 @@ FONT_DIR = os.path.join(ROOT_PATH, "assets", "fonts")
 EMOJI_PATH = os.path.join(ROOT_PATH, "assets", "emojis", "RANK ICONS")
 BG_PATH = os.path.join(ROOT_PATH, "assets", "backgrounds")
 
-def upscale_image(image: Image.Image, factor: int = 2) -> Image.Image:
-    new_width = image.width * factor
-    new_height = image.height * factor
-    return image.resize((new_width, new_height), Image.Resampling.LANCZOS)
-
-    
-def get_readable_font_color(bg_path):
-    try:
-        bg = Image.open(bg_path).convert("RGB")
-        small = bg.resize((10, 10))
-        pixels = list(small.getdata())
-        avg_brightness = sum((r*0.299 + g*0.587 + b*0.114) for r, g, b in pixels) / len(pixels)
-        if avg_brightness < 100:
-            return (255, 255, 255)  # bright text on dark bg
-        elif avg_brightness > 200:
-            return (40, 40, 40)     # dark text on very light bg
-        else:
-            # mid-tone background, use soft white
-            return (245, 245, 245)
-    except Exception:
-        return (255, 255, 255)
-    
 def render_profile_image(
     avatar_bytes: bytes,
     display_name: str,
@@ -66,17 +44,13 @@ def render_profile_image(
                 avg_g = sum(p[1] for p in pixels)/len(pixels)
                 avg_b = sum(p[2] for p in pixels)/len(pixels)
 
-                # relative luminance
                 def lum(c):
                     c = c/255
                     return c/12.92 if c <= 0.03928 else ((c+0.055)/1.055)**2.4
 
                 L_bg = 0.2126*lum(avg_r) + 0.7152*lum(avg_g) + 0.0722*lum(avg_b)
-
-                L_white = 1
-                L_black = 0
-                contrast_white = (max(L_bg, L_white)+0.05)/(min(L_bg, L_white)+0.05)
-                contrast_black = (max(L_bg, L_black)+0.05)/(min(L_bg, L_black)+0.05)
+                contrast_white = (max(L_bg, 1)+0.05)/(min(L_bg, 1)+0.05)
+                contrast_black = (max(L_bg, 0)+0.05)/(min(L_bg, 0)+0.05)
 
                 return (255,255,255) if contrast_white >= contrast_black else (0,0,0)
             except:
@@ -100,7 +74,6 @@ def render_profile_image(
         else:
             bg = Image.new("RGBA", (width, height), (167,139,250,255))
 
-        # Optional overlay for busy backgrounds
         overlay = Image.new("RGBA", (width, height), (0,0,0,60))
         bg = Image.alpha_composite(bg, overlay)
 
@@ -110,19 +83,42 @@ def render_profile_image(
         if font_color is None:
             font_color = get_adaptive_font_color(bg_path)
 
-        # Avatar
-        avatar = Image.open(io.BytesIO(avatar_bytes)).convert("RGBA").resize((100,100))
-        img.paste(avatar, (20,30), avatar)
+        # === Layout anchors ===
+        left_margin = 40
+        top_margin = 30
 
-        x, y = 140, 30
+        # === Avatar with circle mask + border glow ===
+        avatar = Image.open(io.BytesIO(avatar_bytes)).convert("RGBA").resize((110, 110))
+
+        mask = Image.new("L", avatar.size, 0)
+        mask_draw = ImageDraw.Draw(mask)
+        mask_draw.ellipse([0, 0, avatar.size[0], avatar.size[1]], fill=255)
+        avatar_circle = Image.new("RGBA", avatar.size, (0, 0, 0, 0))
+        avatar_circle.paste(avatar, (0, 0), mask)
+
+        glow_size = (avatar.size[0] + 12, avatar.size[1] + 12)
+        glow = Image.new("RGBA", glow_size, (0, 0, 0, 0))
+        glow_draw = ImageDraw.Draw(glow)
+        glow_draw.ellipse([0, 0, glow_size[0], glow_size[1]], fill=(255, 255, 255, 80))
+
+        avatar_offset = -20  
+
+        img.paste(glow, (left_margin + avatar_offset, top_margin + 5), glow)
+        img.paste(avatar_circle, (left_margin + 6 + avatar_offset, top_margin + 11), avatar_circle)
+
+        # === Text anchor (username, stats, exp msg) ===
+        x, y = left_margin + 130, top_margin
+
         shadow_offset = 2
+        def draw_text(pos, text, font, fill, small=False):
+            if small:
+                draw.text((pos[0]+1, pos[1]+1), text, font=font, fill=(0,0,0,100))
+                draw.text(pos, text, font=font, fill=fill)
+            else:
+                draw.text((pos[0]+2, pos[1]+2), text, font=font, fill=(0,0,0,180))
+                draw.text(pos, text, font=font, fill=fill, stroke_width=2, stroke_fill=(0,0,0,180))
 
-        # Helper function for drawing text with stroke + shadow
-        def draw_text(pos, text, font, fill):
-            draw.text((pos[0]+shadow_offset, pos[1]+shadow_offset), text, font=font, fill=(0,0,0,180))
-            draw.text(pos, text, font=font, fill=fill, stroke_width=2, stroke_fill=(0,0,0,180))
-
-        draw_text((x, y), display_name, font_username, font_color)
+        draw_text((x, y), display_name, font_username, font_color, small=True)
         y += 40
 
         labels = ["Title ", "Level ", "EXP "]
@@ -132,36 +128,24 @@ def render_profile_image(
             f"{exp:,} / {next_exp:,}" if next_exp else "∞"
         ]
 
-        # Calculate max label width (without colon)
         label_width = max(draw.textlength(lbl, font=font_medium) for lbl in labels)
 
         for label, value in zip(labels, values):
-            # Draw label
             draw_text((x, y), label, font_medium, font_color)
-
-            # Colon position (with a fixed padding)
             colon_x = x + label_width + 8
             draw_text((colon_x, y), ":", font_medium, font_color)
-
-            # Value aligned after colon
             value_x = colon_x + 12
             draw_text((value_x, y), value, font_medium, font_color)
 
-            # Badge for title
             if label.strip() == "Title":
                 emoji_path = title_emoji_files.get(title_name)
                 if emoji_path and os.path.exists(emoji_path):
                     try:
                         badge = Image.open(emoji_path).convert("RGBA").resize((51, 46))
                         bx = int(value_x + draw.textlength(value, font=font_medium) + 10)
-
-                        # compute text height
                         bbox = font_medium.getbbox(value)
-                        text_height = bbox[3] - bbox[1]  # bottom - top
-
-                        # center badge
+                        text_height = bbox[3] - bbox[1]
                         by = int(y + text_height / 2 - badge.height / 2 + 5)
-
                         img.paste(badge, (bx, by), badge)
                     except:
                         pass
@@ -174,57 +158,45 @@ def render_profile_image(
         draw_text((x, y), next_line, font_small, font_color)
         y += 40
 
+        # === EXP Bar aligned with text block ===
         bar_x, bar_y = x, y
-        bar_width, bar_height = width - bar_x - 40, 24
+        bar_width, bar_height = width - bar_x - left_margin, 24
         progress = (exp / next_exp) if next_exp is not None else 1
-       # EXP bar background
+
         draw.rounded_rectangle(
             [bar_x, bar_y, bar_x + bar_width, bar_y + bar_height],
             radius=12,
             fill=(30, 30, 30)
         )
 
-        # EXP bar fill with gradient + segment lines
         if progress > 0:
             progress_width = int(bar_width * progress)
-
-            # Gradient foreground
             gradient = Image.new("RGBA", (progress_width, bar_height), (0, 0, 0, 0))
             grad_draw = ImageDraw.Draw(gradient)
 
             for i in range(progress_width):
-                # Teal → Lime gradient
                 r = int(0 + (80 - 0) * (i / progress_width))
                 g = int(180 + (255 - 180) * (i / progress_width))
                 b = int(120 + (60 - 120) * (i / progress_width))
                 grad_draw.line([(i, 0), (i, bar_height)], fill=(r, g, b, 255))
 
-           # Create a mask with rounded corners for the progress bar
             mask = Image.new("L", (progress_width, bar_height), 0)
             mask_draw = ImageDraw.Draw(mask)
-            mask_draw.rounded_rectangle(
-                [0, 0, progress_width, bar_height],
-                radius=12,
-                fill=255
-            )
-
-            # Paste gradient using the rounded mask
+            mask_draw.rounded_rectangle([0, 0, progress_width, bar_height], radius=12, fill=255)
             img.paste(gradient, (bar_x, bar_y), mask)
 
-            # Add RPG-style segment lines
-            num_segments = 10  # number of divisions
+            num_segments = 10
             segment_width = bar_width // num_segments
             for i in range(1, num_segments):
                 line_x = bar_x + i * segment_width
                 if line_x < bar_x + progress_width:
                     draw.line(
                         [(line_x, bar_y + 2), (line_x, bar_y + bar_height - 2)],
-                        fill=(255, 255, 255, 100),  # faint white lines
+                        fill=(255, 255, 255, 100),
                         width=1
                     )
 
         final_img = img.resize((360,155), Image.Resampling.LANCZOS)
-        upscaled_img = upscale_image(final_img, factor=4)
         out = io.BytesIO()
         final_img.save(out, format="PNG")
         return out.getvalue()
@@ -232,6 +204,7 @@ def render_profile_image(
     except Exception:
         traceback.print_exc()
         return None
+
 
 FONTS = {
     "bold": os.path.join(FONT_DIR, "gg sans Bold.ttf"),
@@ -616,7 +589,7 @@ class Progression(commands.Cog):
     @commands.guild_only()
     async def profiletheme(self, ctx):
         view = MainThemeView(ctx.author.id, cog=self)  # pass the cog
-        await ctx.send("Select your profile theme:", view=view)
+        await ctx.send("Select your profile theme:", view=view, ephemeral=True)
 
 
     @commands.Cog.listener()
@@ -694,20 +667,19 @@ class Progression(commands.Cog):
             (guild_id, user_id, guild_id, user_id, guild_id, user_id, guild_id)
         )
         return self.c.fetchone()[0]
+    
+    @commands.Cog.listener()
+    async def on_ready(self):
+        print(f"{self.bot.user} is ready!")
 
-    # RUN THIS IF YOU WANT TO CUSTOM EXP FOR YOURSELF OR OTHERS
-    # @commands.Cog.listener()
-    # async def on_ready(self):
-    #     print(f"{self.bot.user} is ready!")
+        YOUR_ID = [955268891125375036]
+        GUILD_ID = 1412345648174333956
 
-    #     YOUR_ID = [955268891125375036]
-    #     GUILD_ID = 1412345648174333956
+        for user_id in YOUR_ID:
+            level, exp, leveled_up = self.add_exp(user_id, GUILD_ID, 40000)
+            print(f"User {user_id} → Level {level}, EXP {exp}, Leveled up? {leveled_up}")
 
-    #     for user_id in YOUR_ID:
-    #         level, exp, leveled_up = self.add_exp(user_id, GUILD_ID, 9999)
-    #         print(f"User {user_id} → Level {level}, EXP {exp}, Leveled up? {leveled_up}")
-
-    #     print(f"🎉 You are now level {level} with {exp} EXP in guild {GUILD_ID}. Leveled up? {leveled_up}")
+        print(f"🎉 You are now level {level} with {exp} EXP in guild {GUILD_ID}. Leveled up? {leveled_up}")
         
 
 
