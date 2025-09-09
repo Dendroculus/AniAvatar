@@ -15,6 +15,12 @@ FONT_DIR = os.path.join(ROOT_PATH, "assets", "fonts")
 EMOJI_PATH = os.path.join(ROOT_PATH, "assets", "emojis", "RANK ICONS")
 BG_PATH = os.path.join(ROOT_PATH, "assets", "backgrounds")
 
+def upscale_image(image: Image.Image, factor: int = 2) -> Image.Image:
+    new_width = image.width * factor
+    new_height = image.height * factor
+    return image.resize((new_width, new_height), Image.Resampling.LANCZOS)
+
+    
 def get_readable_font_color(bg_path):
     try:
         bg = Image.open(bg_path).convert("RGB")
@@ -146,9 +152,16 @@ def render_profile_image(
                 emoji_path = title_emoji_files.get(title_name)
                 if emoji_path and os.path.exists(emoji_path):
                     try:
-                        badge = Image.open(emoji_path).convert("RGBA").resize((26, 26))
+                        badge = Image.open(emoji_path).convert("RGBA").resize((51, 46))
                         bx = int(value_x + draw.textlength(value, font=font_medium) + 10)
-                        by = int(y + 5)
+
+                        # compute text height
+                        bbox = font_medium.getbbox(value)
+                        text_height = bbox[3] - bbox[1]  # bottom - top
+
+                        # center badge
+                        by = int(y + text_height / 2 - badge.height / 2 + 5)
+
                         img.paste(badge, (bx, by), badge)
                     except:
                         pass
@@ -211,6 +224,7 @@ def render_profile_image(
                     )
 
         final_img = img.resize((360,155), Image.Resampling.LANCZOS)
+        upscaled_img = upscale_image(final_img, factor=4)
         out = io.BytesIO()
         final_img.save(out, format="PNG")
         return out.getvalue()
@@ -219,7 +233,6 @@ def render_profile_image(
         traceback.print_exc()
         return None
 
-    
 FONTS = {
     "bold": os.path.join(FONT_DIR, "gg sans Bold.ttf"),
     "medium": os.path.join(FONT_DIR, "gg sans Medium.ttf"),
@@ -320,14 +333,18 @@ class MainThemeSelect(discord.ui.Select):
         super().__init__(placeholder="Select a theme...", min_values=1, max_values=1, options=options)
 
     async def callback(self, interaction: discord.Interaction):
-        idx = self.values[0].lower()  # label selected by user
+        idx = self.values[0].lower()
         selected_theme = next(f for f in self.folders if f.lower() == idx)
-        await interaction.response.send_message(
-            f"✅ You selected **{selected_theme.capitalize()}**! Now pick a background:",
-            view=SubThemeView(self.user_id, selected_theme, self.cog),
-            ephemeral=True
+        
+        # Disable the main theme select to prevent further changes
+        self.disabled = True
+        for item in self.view.children:
+            if isinstance(item, discord.ui.Select):
+                item.disabled = True
+        await interaction.response.edit_message(
+            content=f"✅ You selected **{selected_theme.capitalize()}**! Now pick a background:",
+            view=SubThemeView(self.user_id, selected_theme, self.cog)
         )
-
         
 class MainThemeView(discord.ui.View):
     def __init__(self, user_id, cog):
@@ -362,10 +379,14 @@ class SubThemeSelect(discord.ui.Select):
         font_color = "white"  # or fetch from DB
 
         self.cog.set_user_theme(self.user_id, theme_name, bg_file, font_color)
+        
+        for item in self.view.children:
+            if isinstance(item, discord.ui.Select):
+                item.disabled = True
 
-        await interaction.response.send_message(
-            f"✅ Your profile background has been set to **{theme_name} / {selected_label}**!",
-            ephemeral=True
+        await interaction.response.edit_message(
+            content=f"✅ Your profile background has been set to **{theme_name} / {selected_label}**!",
+            view=self.view
         )
 
 
@@ -637,13 +658,13 @@ class Progression(commands.Cog):
                 embed_title = f"{message.author.display_name} <:LEVELUP:1413479714428948551> {level}    {old_emoji} <:RIGHTWARDARROW:1414227272302334062> {new_emoji}"
                 embed_description = (
                     f"```Congratulations {message.author.display_name}! You have reached level {level} and ascended to {new_title}. ```\n"
-                    f"Title: `{new_title}`"
+                    f"Title: `{new_title}` {new_emoji}"
                 )
             else:  # Normal level-up
                 embed_title = f"{message.author.display_name} <:LEVELUP:1413479714428948551> {level}"
                 embed_description = (
                     f"```Congratulations {message.author.display_name}! You have reached level {level}.```\n"
-                    f"Title: `{new_title}`"
+                    f"Title: `{new_title}` {new_emoji}"
                 )
 
             embed = discord.Embed(
@@ -673,16 +694,17 @@ class Progression(commands.Cog):
             (guild_id, user_id, guild_id, user_id, guild_id, user_id, guild_id)
         )
         return self.c.fetchone()[0]
-    
+
+    # RUN THIS IF YOU WANT TO CUSTOM EXP FOR YOURSELF OR OTHERS
     # @commands.Cog.listener()
     # async def on_ready(self):
     #     print(f"{self.bot.user} is ready!")
 
-    #     YOUR_ID = [1257852423918190675]
-    #     GUILD_ID = 974498807817588756
+    #     YOUR_ID = [955268891125375036]
+    #     GUILD_ID = 1412345648174333956
 
     #     for user_id in YOUR_ID:
-    #         level, exp, leveled_up = self.add_exp(user_id, GUILD_ID, 10000)
+    #         level, exp, leveled_up = self.add_exp(user_id, GUILD_ID, 9999)
     #         print(f"User {user_id} → Level {level}, EXP {exp}, Leveled up? {leveled_up}")
 
     #     print(f"🎉 You are now level {level} with {exp} EXP in guild {GUILD_ID}. Leveled up? {leveled_up}")
