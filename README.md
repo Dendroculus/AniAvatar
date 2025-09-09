@@ -17,7 +17,7 @@ It automates anime-related tasks — search anime info, fetch profile pictures, 
   - Gain EXP by chatting and playing games  
   - Custom titles based on level  
   - Server leaderboard
-  - Profile Cards showing title, exp information and profile picture
+  - Profile Cards showing title, EXP, profile picture, and customizable themes/backgrounds
 - **Utilities**
   - `/ping` latency check  
   - `/help` dynamic command list  
