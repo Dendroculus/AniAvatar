@@ -46,7 +46,7 @@ See the [LICENSE](LICENSE) file for details.
 
 ## ⚠️ Disclaimer  
 AniAvatar is an independent project and is **not affiliated with, supported by, or endorsed by Discord Inc., AniList, or Google.**  
-All anime characters and artwork belong to their respective creators.  
+All assets (backgrounds, icons, profile cards) are original and edited by me.  
 
 ---
 
