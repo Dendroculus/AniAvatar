@@ -24,8 +24,8 @@ def render_profile_image(
     next_exp: int,
     fonts: dict,
     title_emoji_files: dict,
-    bg_file: str = "GALAXY.PNG",
-    theme_name: str = "galaxy",
+    bg_file: str = None,
+    theme_name: str = "default",
     font_color: tuple = None,
 ) -> bytes:
     try:
@@ -56,9 +56,31 @@ def render_profile_image(
             except:
                 return (255,255,255)
 
-        font_username = _load_font(fonts["bold"], 32)
+        def generate_default_bg(width, height):
+            # Create vertical purple gradient
+            bg = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+            grad = ImageDraw.Draw(bg)
+            for y in range(height):
+                r = int(120 + (180 - 120) * (y / height))   # purple gradient
+                g = int(60 + (100 - 60) * (y / height))
+                b = int(160 + (220 - 160) * (y / height))
+                grad.line([(0, y), (width, y)], fill=(r, g, b, 255))
+
+            shape = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+            shape_draw = ImageDraw.Draw(shape)
+            shape_draw.polygon([(width,0), (width,80), (width-120,0)], fill=(255,255,255,40))
+            bg = Image.alpha_composite(bg, shape)
+
+            shape2 = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+            shape2_draw = ImageDraw.Draw(shape2)
+            shape2_draw.polygon([(0,height), (0,height-80), (120,height)], fill=(0,0,0,60))
+            bg = Image.alpha_composite(bg, shape2)
+
+            return bg
+        
+        font_username = _load_font(fonts["bold"], 32.5)
         font_medium = _load_font(fonts["medium"], 25.5)
-        font_small = _load_font(fonts["regular"], 20)
+        font_small = _load_font(fonts["regular"], 21.5)
 
         width, height = 600, 260
         corner_radius = 40
@@ -68,11 +90,15 @@ def render_profile_image(
         mask_draw = ImageDraw.Draw(mask)
         mask_draw.rounded_rectangle([0,0,width,height], radius=corner_radius, fill=255)
 
-        bg_path = os.path.join(BG_PATH, theme_name.lower(), bg_file)
-        if os.path.exists(bg_path):
-            bg = Image.open(bg_path).convert("RGBA").resize((width, height))
+        # Background selection
+        if theme_name == "default" or not bg_file:
+            bg = generate_default_bg(width, height)
         else:
-            bg = Image.new("RGBA", (width, height), (167,139,250,255))
+            bg_path = os.path.join(BG_PATH, theme_name.lower(), bg_file)
+            if os.path.exists(bg_path):
+                bg = Image.open(bg_path).convert("RGBA").resize((width, height))
+            else:
+                bg = generate_default_bg(width, height)
 
         overlay = Image.new("RGBA", (width, height), (0,0,0,60))
         bg = Image.alpha_composite(bg, overlay)
@@ -80,14 +106,15 @@ def render_profile_image(
         img.paste(bg, (0,0), mask)
         draw = ImageDraw.Draw(img)
 
-        if font_color is None:
+        if font_color is None and theme_name != "default" and bg_file:
+            bg_path = os.path.join(BG_PATH, theme_name.lower(), bg_file)
             font_color = get_adaptive_font_color(bg_path)
+        elif font_color is None:
+            font_color = (255,255,255)
 
-        # === Layout anchors ===
         left_margin = 40
         top_margin = 30
 
-        # === Avatar with circle mask + border glow ===
         avatar = Image.open(io.BytesIO(avatar_bytes)).convert("RGBA").resize((110, 110))
 
         mask = Image.new("L", avatar.size, 0)
@@ -102,21 +129,26 @@ def render_profile_image(
         glow_draw.ellipse([0, 0, glow_size[0], glow_size[1]], fill=(255, 255, 255, 80))
 
         avatar_offset = -20  
-
         img.paste(glow, (left_margin + avatar_offset, top_margin + 5), glow)
         img.paste(avatar_circle, (left_margin + 6 + avatar_offset, top_margin + 11), avatar_circle)
 
-        # === Text anchor (username, stats, exp msg) ===
         x, y = left_margin + 130, top_margin
 
-        shadow_offset = 2
-        def draw_text(pos, text, font, fill, small=False):
+        def draw_text(pos, text, font, fill, small=False, stroke_width=2, stroke_fill=(0,0,0,255)):
             if small:
                 draw.text((pos[0]+1, pos[1]+1), text, font=font, fill=(0,0,0,100))
                 draw.text(pos, text, font=font, fill=fill)
             else:
                 draw.text((pos[0]+2, pos[1]+2), text, font=font, fill=(0,0,0,180))
-                draw.text(pos, text, font=font, fill=fill, stroke_width=2, stroke_fill=(0,0,0,180))
+                draw.text(
+                    pos,
+                    text,
+                    font=font,
+                    fill=fill,
+                    stroke_width=stroke_width,
+                    stroke_fill=stroke_fill
+                )
+
 
         draw_text((x, y), display_name, font_username, font_color, small=True)
         y += 40
@@ -155,10 +187,17 @@ def render_profile_image(
             next_line = f"Gain {max(0, next_exp - exp):,} more EXP to level up!"
         else:
             next_line = "You are at max level!"
-        draw_text((x, y), next_line, font_small, font_color)
+        draw_text(
+                (x, y),
+                next_line,
+                font_small,
+                (255,255,255),           
+                stroke_width=3.15,          
+                stroke_fill=(0,0,0,255)  
+            )
         y += 40
 
-        # === EXP Bar aligned with text block ===
+        # === EXP Bar ===
         bar_x, bar_y = x, y
         bar_width, bar_height = width - bar_x - left_margin, 24
         progress = (exp / next_exp) if next_exp is not None else 1
@@ -204,7 +243,6 @@ def render_profile_image(
     except Exception:
         traceback.print_exc()
         return None
-
 
 FONTS = {
     "bold": os.path.join(FONT_DIR, "gg sans Bold.ttf"),
@@ -327,7 +365,7 @@ class MainThemeView(discord.ui.View):
         super().__init__()
         self.cog = cog
         self.add_item(MainThemeSelect(user_id, cog))
-
+        
 class SubThemeSelect(discord.ui.Select):
     def __init__(self, user_id, theme, cog):
         self.theme = theme
@@ -435,8 +473,8 @@ class Progression(commands.Cog):
         self.c.execute("""
         CREATE TABLE IF NOT EXISTS profile_theme (
             user_id INTEGER PRIMARY KEY,
-            theme_name TEXT DEFAULT 'galaxy',
-            bg_file TEXT DEFAULT 'GALAXY.PNG',
+            theme_name TEXT DEFAULT 'default',
+            bg_file TEXT DEFAULT 'NULL',
             font_color TEXT DEFAULT 'white'
         )
     """)
@@ -665,6 +703,51 @@ class Progression(commands.Cog):
 
         view = MainThemeView(ctx.author.id, cog=self)
         await ctx.send(embed=embed, file=file, view=view)
+        
+    @commands.hybrid_command(name="resetprofiletheme",description="Reset your profile card theme to default")
+    @commands.guild_only()
+    async def resetprofiletheme(self, ctx):
+        try:
+            # Reset theme in DB
+            self.set_user_theme(ctx.author.id, "default", None, "white")
+
+            # Fetch current EXP & level
+            exp, level = self.get_user(ctx.author.id, ctx.guild.id)
+            title_name = get_title(level)
+            next_exp = 50 * level + 20 * level**2 if level < self.MAX_LEVEL else None
+            avatar_asset = ctx.author.display_avatar.with_size(128)
+            buffer_avatar = io.BytesIO()
+            await avatar_asset.save(buffer_avatar)
+            buffer_avatar.seek(0)
+            avatar_bytes = buffer_avatar.getvalue()
+            img_bytes = await asyncio.to_thread(
+                render_profile_image,
+                avatar_bytes,
+                ctx.author.display_name,
+                title_name,
+                level,
+                exp,
+                next_exp,
+                FONTS,
+                TITLE_EMOJI_FILES,
+                bg_file=None,
+                theme_name="default",
+                font_color="white"
+            )
+
+            file = discord.File(io.BytesIO(img_bytes), filename="profile.png")
+            embed = discord.Embed(
+                title="Profile Theme Reset",
+                description="✅ Your profile card theme has been reset to default."
+            )
+            embed.set_image(url="attachment://profile.png")
+
+            await ctx.send(embed=embed, file=file)
+
+        except Exception:
+            traceback.print_exc()
+            await ctx.send("❌ Failed to reset profile theme. Check console/logs.")
+
 
 
 
@@ -749,10 +832,10 @@ class Progression(commands.Cog):
         print(f"{self.bot.user} is ready!")
 
         YOUR_ID = [955268891125375036]
-        GUILD_ID = 1412345648174333956
+        GUILD_ID = 974498807817588756
 
         for user_id in YOUR_ID:
-            level, exp, leveled_up = self.add_exp(user_id, GUILD_ID, 40000)
+            level, exp, leveled_up = self.add_exp(user_id, GUILD_ID, 99999999)
             print(f"User {user_id} → Level {level}, EXP {exp}, Leveled up? {leveled_up}")
 
         print(f"🎉 You are now level {level} with {exp} EXP in guild {GUILD_ID}. Leveled up? {leveled_up}")
