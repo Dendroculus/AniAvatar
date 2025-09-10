@@ -306,18 +306,21 @@ class MainThemeSelect(discord.ui.Select):
         super().__init__(placeholder="Select a theme...", min_values=1, max_values=1, options=options)
 
     async def callback(self, interaction: discord.Interaction):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("⚠️ You can only select a background for yourself.", ephemeral=True)
+            return
         idx = self.values[0].lower()
         selected_theme = next(f for f in self.folders if f.lower() == idx)
-        
         # Disable the main theme select to prevent further changes
         self.disabled = True
         for item in self.view.children:
             if isinstance(item, discord.ui.Select):
                 item.disabled = True
         await interaction.response.edit_message(
-            content=f"✅ You selected **{selected_theme.capitalize()}**! Now pick a background:",
+            content=f"You have selected **{selected_theme.capitalize()}**! Now pick a background:",
             view=SubThemeView(self.user_id, selected_theme, self.cog)
         )
+        
         
 class MainThemeView(discord.ui.View):
     def __init__(self, user_id, cog):
@@ -331,10 +334,7 @@ class SubThemeSelect(discord.ui.Select):
         self.cog = cog
         theme_path = os.path.join(BG_PATH, theme)
 
-        # List all image files
         files = [f for f in os.listdir(theme_path) if f.lower().endswith((".png", ".jpg", ".jpeg"))]
-
-        # Map them to Theme 1, Theme 2, ...
         self.file_map = {f"Theme {i+1}": file for i, file in enumerate(files)}
 
         options = [
@@ -346,22 +346,62 @@ class SubThemeSelect(discord.ui.Select):
         self.user_id = user_id
 
     async def callback(self, interaction: discord.Interaction):
-        selected_label = self.values[0]  # Theme 1, Theme 2, etc.
-        bg_file = self.file_map[selected_label]  # actual filename
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message(
+                "⚠️ You can only select a background for yourself.", ephemeral=True
+            )
+            return
+
+        selected_label = self.values[0]
+        bg_file = self.file_map[selected_label]
         theme_name = self.theme
-        font_color = "white"  # or fetch from DB
+        font_color = "white"
 
         self.cog.set_user_theme(self.user_id, theme_name, bg_file, font_color)
-        
+
+        # Disable all selects in the view
         for item in self.view.children:
             if isinstance(item, discord.ui.Select):
                 item.disabled = True
 
-        await interaction.response.edit_message(
-            content=f"✅ Your profile background has been set to **{theme_name} / {selected_label}**!",
-            view=self.view
+        # Edit the original message's embed to show selection saved
+        embed = discord.Embed(
+            title="Your profile card theme has been updated!",
+            description=f"Your selection has been saved! You selected **{selected_label}**."
+        )
+        embed.set_image(url=f"attachment://profile.png")  # keep the old image in embed
+        await interaction.response.edit_message(embed=embed, view=self.view)
+        await interaction.message.edit(content="")
+
+        # Generate updated profile image
+        member = interaction.user
+        exp, level = self.cog.get_user(member.id, interaction.guild.id)
+        title_name = get_title(level)
+        next_exp = None if level >= self.cog.MAX_LEVEL else 50 * level + 20 * level**2
+
+        avatar_bytes = await member.display_avatar.with_size(128).read()
+
+        img_bytes = await asyncio.to_thread(
+            render_profile_image,
+            avatar_bytes,
+            member.display_name,
+            title_name,
+            level,
+            exp,
+            next_exp,
+            FONTS,
+            TITLE_EMOJI_FILES,
+            bg_file=bg_file,
+            theme_name=theme_name,
+            font_color=font_color
         )
 
+        if img_bytes:
+            file = discord.File(io.BytesIO(img_bytes), filename="profile.png")
+            await interaction.followup.send(
+                content=f"{member.mention}, here’s your updated profile! <:MinoriSmile:1415182284914556928>",
+                file=file
+            )
 
 class SubThemeView(discord.ui.View):
     def __init__(self, user_id, theme, cog):
@@ -378,7 +418,7 @@ class Progression(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.cooldowns = {}
-        data_path = os.path.join(os.path.dirname(__file__), "..", "data", "aniavatar.db")
+        data_path = os.path.join(os.path.dirname(__file__), "..", "data", "minori.db")
         os.makedirs(os.path.dirname(data_path), exist_ok=True)
         data_path = os.path.abspath(data_path)
         self.conn = sqlite3.connect(data_path)
@@ -588,8 +628,44 @@ class Progression(commands.Cog):
     @commands.hybrid_command(name="profiletheme", description="Choose your profile card background theme")
     @commands.guild_only()
     async def profiletheme(self, ctx):
-        view = MainThemeView(ctx.author.id, cog=self)  # pass the cog
-        await ctx.send("Select your profile theme:", view=view, ephemeral=True)
+        # Fetch user's current profile image
+        exp, level = self.get_user(ctx.author.id, ctx.guild.id)
+        title_name = get_title(level)
+        next_exp = 50 * level + 20 * level**2 if level < self.MAX_LEVEL else None
+
+        avatar_asset = ctx.author.display_avatar.with_size(128)
+        buffer_avatar = io.BytesIO()
+        await avatar_asset.save(buffer_avatar)
+        buffer_avatar.seek(0)
+        avatar_bytes = buffer_avatar.getvalue()
+
+        theme_name, bg_file, font_color = self.get_user_theme(ctx.author.id)
+
+        img_bytes = await asyncio.to_thread(
+            render_profile_image,
+            avatar_bytes,
+            ctx.author.display_name,
+            title_name,
+            level,
+            exp,
+            next_exp,
+            FONTS,
+            TITLE_EMOJI_FILES,
+            bg_file=bg_file,
+            theme_name=theme_name,
+            font_color=font_color
+        )
+
+        file = discord.File(io.BytesIO(img_bytes), filename="profile.png")
+        embed = discord.Embed(
+        title="Your current profile",
+        description="Below is your current profile card theme. You can change it by selecting a theme from the dropdown menu."
+        )
+        embed.set_image(url="attachment://profile.png")
+
+        view = MainThemeView(ctx.author.id, cog=self)
+        await ctx.send(embed=embed, file=file, view=view)
+
 
 
     @commands.Cog.listener()
