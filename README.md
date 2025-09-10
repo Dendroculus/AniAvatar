@@ -18,13 +18,19 @@ It automates anime-related tasks — search anime info, fetch profile pictures, 
   - Custom titles based on level  
   - Server leaderboard
   - Profile Cards showing title, EXP, profile picture, and customizable themes/backgrounds
+  - **Automatic Role Assignment**
+    - Title roles (Novice → Enlightened) are auto-created and maintained
+    - Old roles auto-removed when leveling up
+    - Roles synced every 2 minutes to ensure consistency
+    - Duplicate roles cleaned up automatically
 - **Utilities**
   - `/ping` latency check  
   - `/help` dynamic command list  
 - **Presence Rotation**
   - Bot updates its Discord status every 20 minutes with random anime
 - **Polling**
-  - Create your own custom Polling up to 5 options. 
+  - Create your own custom Polling up to 5 options.
+
 
 ---
 
