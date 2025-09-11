@@ -7,6 +7,7 @@ from PIL import Image, ImageDraw, ImageFont
 import asyncio
 import traceback
 import io
+from discord import MessageReference
 
 COG_PATH = os.path.dirname(os.path.abspath(__file__))   # ...\AniAvatar\cogs
 ROOT_PATH = os.path.dirname(COG_PATH)                   # ...\AniAvatar
@@ -177,7 +178,7 @@ def render_profile_image(
                         bx = int(value_x + draw.textlength(value, font=font_medium) + 10)
                         bbox = font_medium.getbbox(value)
                         text_height = bbox[3] - bbox[1]
-                        by = int(y + text_height / 2 - badge.height / 2 + 5)
+                        by = int(y + text_height / 2 - badge.height / 2 + 7)
                         img.paste(badge, (bx, by), badge)
                     except:
                         pass
@@ -308,22 +309,22 @@ def get_title(level: int):
     else: return "Enlightened"
 
 def get_title_emoji(level: int):
-    if level < 5: return "<:NOVICE:1413497054642307153>"
-    elif level < 10: return "<:WARRIOR:1413545369966608465>"
-    elif level < 15: return "<:ELITE:1413735235379658812>"
-    elif level < 20: return "<:CHAMPION:1413738197246152834>"
-    elif level < 25: return "<:HERO:1413742569304752170>"
-    elif level < 30: return "<:LEGEND:1413748431599698071>"
-    elif level < 35: return "<:MYTHIC:1413749422524989450>"
-    elif level < 40: return "<:ASCENDANT:1413754160410660864>"
-    elif level < 50: return "<:IMMORTAL:1413848406161621103>"
-    elif level < 60: return "<:CELESTIAL:1413858244144660532>"
-    elif level < 70: return "<:TRANSCENDENT:1413862700299194561>"
-    elif level < 80: return "<:AETHERBORN:1413863769825869856>"
-    elif level < 90: return "<:COSMIC:1413864596661338172>"
-    elif level < 100: return "<:DIVINE:1413865527050506311>"
-    elif level < 125: return "<:ETERNAL:1413824371994136598>"
-    else: return "<:ENLIGHTENED:1413866534605951079>"
+    if level < 5: return "<:NOVICE:1414508405002862663>"
+    elif level < 10: return "<:WARRIOR:1414508311650242661>"
+    elif level < 15: return "<:ELITE:1414508395301699724>"
+    elif level < 20: return "<:CHAMPION:1414508304448749568>"
+    elif level < 25: return "<:HERO:1414508388812853258>"
+    elif level < 30: return "<:LEGEND:1414508296269856768>"
+    elif level < 35: return "<:MYTHIC:1414508380172587099>"
+    elif level < 40: return "<:ASCENDANT:1414508291341684776>"
+    elif level < 50: return "<:IMMORTAL:1414508281543524454>"
+    elif level < 60: return "<:CELESTIAL:1414508342520320070>"
+    elif level < 70: return "<:TRANSCENDENT:1414508273767288832>"
+    elif level < 80: return "<:AETHERBORN:1414508333951483904>"
+    elif level < 90: return "<:COSMIC:1414508264695005184>"
+    elif level < 100: return "<:DIVINE:1414508323763388446>"
+    elif level < 125: return "<:ETERNAL:1414508351676481536>"
+    else: return "<:ENLIGHTENED:1414508255744360510>"
 
 def load_font(path, size):
     try:
@@ -349,7 +350,6 @@ class MainThemeSelect(discord.ui.Select):
             return
         idx = self.values[0].lower()
         selected_theme = next(f for f in self.folders if f.lower() == idx)
-        # Disable the main theme select to prevent further changes
         self.disabled = True
         for item in self.view.children:
             if isinstance(item, discord.ui.Select):
@@ -405,7 +405,7 @@ class SubThemeSelect(discord.ui.Select):
         # Edit the original message's embed to show selection saved
         embed = discord.Embed(
             title="Your profile card theme has been updated!",
-            description=f"Your selection has been saved! You selected **{selected_label}**."
+            description=f"Your selection has been saved!\n You have selected **`{theme_name} {selected_label}`**."
         )
         embed.set_image(url=f"attachment://profile.png")  # keep the old image in embed
         await interaction.response.edit_message(embed=embed, view=self.view)
@@ -480,6 +480,39 @@ class Progression(commands.Cog):
     """)
 
         self.conn.commit()
+        
+        self.c.execute("""
+        CREATE TABLE IF NOT EXISTS user_coins (
+            user_id INTEGER,
+            guild_id INTEGER,
+            coins INTEGER DEFAULT 0,
+            PRIMARY KEY(user_id, guild_id)
+        )
+    """)
+        self.conn.commit()
+
+    async def get_coins(self, user_id: int, guild_id: int) -> int:
+        self.c.execute("SELECT coins FROM user_coins WHERE user_id = ? AND guild_id = ?", (user_id, guild_id))
+        result = self.c.fetchone()
+        if not result:
+            self.c.execute("INSERT INTO user_coins (user_id, guild_id) VALUES (?, ?)", (user_id, guild_id))
+            self.conn.commit()
+            return 0
+        return result[0]
+
+    async def add_coins(self, user_id: int, guild_id: int, amount: int):
+        self.c.execute("""
+            INSERT INTO user_coins (user_id, guild_id, coins) VALUES (?, ?, ?)
+            ON CONFLICT(user_id, guild_id) DO UPDATE SET coins = coins + ?
+        """, (user_id, guild_id, amount, amount))
+        self.conn.commit()
+    async def remove_coins(self, user_id: int, guild_id: int, amount: int) -> bool:
+        coins = await self.get_coins(user_id, guild_id)
+        if coins < amount:
+            return False
+        self.c.execute("UPDATE user_coins SET coins = coins - ? WHERE user_id = ? AND guild_id = ?", (amount, user_id, guild_id))
+        self.conn.commit()
+        return True
 
     def get_user_theme(self, user_id: int):
         self.c.execute("SELECT theme_name, bg_file, font_color FROM profile_theme WHERE user_id = ?", (user_id,))
@@ -748,9 +781,6 @@ class Progression(commands.Cog):
             traceback.print_exc()
             await ctx.send("❌ Failed to reset profile theme. Check console/logs.")
 
-
-
-
     @commands.Cog.listener()
     async def on_message(self, message):
         if message.author.bot or not message.guild:
@@ -805,9 +835,17 @@ class Progression(commands.Cog):
                 color=discord.Color.green()
             )
             embed.set_thumbnail(url=message.author.display_avatar.url)
-            await message.channel.send(embed=embed)
-
-
+            lvlup_msg = await message.channel.send(embed=embed)
+            # ---------------- COINS REWARD ----------------
+            coins_amount = random.randint(30, 50)
+            prog_cog = self.bot.get_cog("Progression")
+            if prog_cog:
+                await prog_cog.add_coins(user_id, guild_id, coins_amount)
+                await message.channel.send(
+                    f"{message.author.display_name} received <:Coins:1415353285270966403> {coins_amount} coins for leveling up!",
+                    reference=MessageReference(message_id=lvlup_msg.id, channel_id=lvlup_msg.channel.id, guild_id=lvlup_msg.guild.id)
+                )
+                    
         # Rank-up message
         if new_rank < old_rank:
             embed = discord.Embed(
@@ -817,8 +855,6 @@ class Progression(commands.Cog):
             )
             embed.set_thumbnail(url=message.author.display_avatar.url)
             await message.channel.send(embed=embed)
-            
-        await self.bot.process_commands(message)
         
     def get_rank(self, user_id: int, guild_id: int):
         self.c.execute(
@@ -827,21 +863,7 @@ class Progression(commands.Cog):
         )
         return self.c.fetchone()[0]
     
-    @commands.Cog.listener()
-    async def on_ready(self):
-        print(f"{self.bot.user} is ready!")
-
-        YOUR_ID = [955268891125375036]
-        GUILD_ID = 974498807817588756
-
-        for user_id in YOUR_ID:
-            level, exp, leveled_up = self.add_exp(user_id, GUILD_ID, 99999999)
-            print(f"User {user_id} → Level {level}, EXP {exp}, Leveled up? {leveled_up}")
-
-        print(f"🎉 You are now level {level} with {exp} EXP in guild {GUILD_ID}. Leveled up? {leveled_up}")
-        
-
-
+    
 async def setup(bot):
     await bot.add_cog(Progression(bot))
     print("📦 Loaded progression cog.")
