@@ -7,7 +7,6 @@ from discord.ext import commands, tasks
 
 from .progression import get_title, TITLE_COLORS
 
-# Keep this list in the same order as your get_title tiers.
 TITLE_ORDER = [
     "Novice", "Warrior", "Elite", "Champion", "Hero", "Legend", "Mythic",
     "Ascendant", "Immortal", "Celestial", "Transcendent", "Aetherborn",
@@ -18,15 +17,10 @@ TITLE_ORDER = [
 class Roles(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
-        # per-guild locks to prevent concurrent creates
         self._locks: Dict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
-
-        # Sync loop settings (tune as needed)
         self.SYNC_INTERVAL_MINUTES = 2
         self.MAX_PER_GUILD = 30
         self.SLEEP_BETWEEN_OPS = 0.06
-
-        # start loop
         self.sync_roles_loop.change_interval(minutes=self.SYNC_INTERVAL_MINUTES)
         self.sync_roles_loop.start()
 
@@ -52,7 +46,6 @@ class Roles(commands.Cog):
         matches = [r for r in guild.roles if r.name and r.name.strip().lower() == title_norm]
 
         if matches:
-            # Keep the oldest role (lowest ID = usually the first created)
             keep = min(matches, key=lambda r: r.id)
             extras = [r for r in matches if r != keep]
 
@@ -144,7 +137,7 @@ class Roles(commands.Cog):
                 positions[role] = desired_pos
 
         if not positions:
-            return  # nothing to change
+            return  
 
         try:
             await guild.edit_role_positions(positions=positions)
@@ -156,6 +149,8 @@ class Roles(commands.Cog):
 
 
     async def update_roles(self, member: discord.Member, level: int):
+        if member.bot:
+            return
         try:
             guild = member.guild
             title = get_title(level)
@@ -214,7 +209,6 @@ class Roles(commands.Cog):
                     if processed >= self.MAX_PER_GUILD:
                         break
                     try:
-                        # progression.get_user is synchronous in your earlier code; keep same contract
                         exp, level = progression.get_user(member.id, guild.id)
                         await self.update_roles(member, level)
                         processed += 1
