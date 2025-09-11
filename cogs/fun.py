@@ -151,7 +151,7 @@ class PollView(discord.ui.View):
                 winners = [opt for opt, count in results.items() if count == max_votes]
 
                 if len(winners) == 1:
-                    winner_text = f"🏆 The winner is **{winners[0]}** with {max_votes} vote(s)!"
+                    winner_text = f"<:CHAMPION:1414508304448749568> The winner is **{winners[0]}** with {max_votes} vote(s)!"
                 else:
                     winner_text = f"🤝 It's a tie between: {', '.join(winners)} ({max_votes} vote(s) each)."
 
@@ -180,6 +180,7 @@ class Fun(commands.Cog):
         await ctx.send(embed=embed)
 
     @commands.hybrid_command(name="poll", description="Create a poll with custom options")
+    @commands.guild_only()
     @app_commands.describe(
         question="The question to ask",
         duration="How long should the poll last?",
@@ -207,6 +208,9 @@ class Fun(commands.Cog):
             time = custom_minutes * 60
         else:
             time = duration.value
+            
+        if time > 604800:  
+            return await ctx.send("⚠️ Poll duration cannot exceed 7 days.")
 
         view = PollView(question, options, ctx.author, timeout=time)
         embed = view.make_poll_embed(ctx.author.id)
