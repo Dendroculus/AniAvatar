@@ -1,0 +1,501 @@
+from discord.ext import commands
+import discord
+import os
+from .progression import get_title, get_title_emoji
+import random
+from datetime import datetime, timedelta
+import asyncio
+
+COG_PATH = os.path.dirname(os.path.abspath(__file__))
+ROOT_PATH = os.path.dirname(COG_PATH)
+SHOP_ICON_URL = "https://cdn.discordapp.com/emojis/1415555390489366680.png"
+
+
+def format_coins(coins: int) -> str:
+    if coins < 1_000:
+        return str(coins)
+    elif coins < 1_000_000:
+        return f"{coins / 1_000:.2f}K".rstrip("0").rstrip(".")
+    elif coins < 1_000_000_000:
+        return f"{coins / 1_000_000:.2f}M".rstrip("0").rstrip(".")
+    else:
+        return f"{coins / 1_000_000_000:.2f}B".rstrip("0").rstrip(".")
+    
+class CloseButton(discord.ui.Button):
+    def __init__(self, owner_id: int, close_text: str, label: str = "Close"):
+        super().__init__(label=label, style=discord.ButtonStyle.danger)
+        self.owner_id = owner_id
+        self.close_text = close_text
+
+    async def callback(self, interaction: discord.Interaction):
+        if interaction.user.id != self.owner_id:
+            await interaction.response.send_message("⚠️ This is not your menu!", ephemeral=True)
+            return
+
+        await interaction.response.edit_message(content=self.close_text, embed=None, view=None)
+
+
+class InventorySelect(discord.ui.Select):
+    def __init__(self, cog, user_id, guild_id, items, parent_view):
+        self.cog = cog
+        self.user_id = user_id
+        self.guild_id = guild_id
+        self.items_data = items
+        self.parent_view = parent_view
+
+        options = [
+            discord.SelectOption(
+                label=name,
+                description=f"You own {qty} of this item.",
+                emoji=emoji,
+                value=name
+            )
+            for name, qty, emoji in items if qty > 0
+        ]
+        super().__init__(placeholder="Choose an item to use...", min_values=1, max_values=1, options=options)
+        
+    async def on_timeout(self):
+        for child in self.children:
+            child.disabled = True
+        if hasattr(self, "message") and self.message:
+            await self.message.edit(view=self)
+
+    async def callback(self, interaction: discord.Interaction):
+        if hasattr(self.parent_view, "reset_timer"):
+            self.parent_view.reset_timer()
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("⚠️ This is not your inventory!", ephemeral=True)
+            return
+
+        self.cog.user_locks[self.user_id] = True
+
+        try:
+            selected_item = self.values[0]
+            await interaction.response.defer()
+
+            c = self.cog.progression_cog.c
+            c.execute(
+                "SELECT quantity FROM user_inventory WHERE user_id = ? AND guild_id = ? AND item_name = ?",
+                (self.user_id, self.guild_id, selected_item)
+            )
+            row = c.fetchone()
+            if not row or row[0] <= 0:
+                await interaction.followup.send("❌ You don't own this item anymore.", ephemeral=True)
+                return
+
+            c.execute(
+                "UPDATE user_inventory SET quantity = quantity - 1 WHERE user_id = ? AND guild_id = ? AND item_name = ?",
+                (self.user_id, self.guild_id, selected_item)
+            )
+            c.execute(
+                "DELETE FROM user_inventory WHERE user_id = ? AND guild_id = ? AND item_name = ? AND quantity <= 0",
+                (self.user_id, self.guild_id, selected_item)
+            )
+            self.cog.progression_cog.conn.commit()
+
+            feedback_msg = f"You used `{selected_item}`!"
+
+            if selected_item in ["Small EXP Potion", "Medium EXP Potion", "Large EXP Potion", "Level Skip Token"]:
+                gain, extra_msg = await self.cog.apply_potion_effect(
+                    self.user_id, self.guild_id, selected_item, interaction.channel
+                )
+                feedback_msg = f"You used `{selected_item}` and gained {gain} <:EXP:1415642038589984839>!"
+                if extra_msg:
+                    feedback_msg += f"\n{extra_msg}"
+                    
+            if selected_item == "Mystery Box":
+                rewards = await self.cog.apply_mystery_box(self.user_id, self.guild_id)
+                if rewards:
+                    reward_lines = []
+                    for item, qty in rewards:
+                        c.execute("SELECT emoji FROM shop_items WHERE name = ?", (item,))
+                        emoji = c.fetchone()
+                        emoji = emoji[0] if emoji else "📦"
+                        reward_lines.append(f"{qty}x {emoji} {item}")
+                    feedback_msg = "<:MysteryBox:1415707555325415485> You opened a Mystery Box and got:\n" + "\n".join(reward_lines)
+
+            c.execute("SELECT item_name, quantity FROM user_inventory WHERE user_id = ? AND guild_id = ?",
+                    (self.user_id, self.guild_id))
+            raw_items = c.fetchall()
+
+            items = []
+            for name, qty in raw_items:
+                if qty <= 0:
+                    continue
+                c.execute("SELECT emoji FROM shop_items WHERE name = ?", (name,))
+                emoji = c.fetchone()
+                emoji = emoji[0] if emoji else "📦"
+                items.append((name, qty, emoji))
+
+            if not items:
+                await interaction.edit_original_response(embed=None, view=None, content="📭 Your inventory is now empty.")
+                await interaction.followup.send(feedback_msg, ephemeral=True)
+                return
+
+            inventory_text = "\n".join(f"{emoji} {name} x{qty}" for name, qty, emoji in items)
+            embed = discord.Embed(
+                title=f"{interaction.user.display_name}'s Inventory",
+                description=inventory_text,
+                color=discord.Color.dark_purple()
+            )
+            embed.set_thumbnail(url=interaction.user.display_avatar.url)
+
+            new_view = InventoryView(self.cog, self.user_id, self.guild_id, items)
+            await interaction.edit_original_response(embed=embed, view=new_view)
+            await interaction.followup.send(feedback_msg)
+
+        finally:
+            async def release_lock():
+                await asyncio.sleep(2)  #
+                self.cog.user_locks[self.user_id] = False
+            asyncio.create_task(release_lock())
+
+class InventoryView(discord.ui.View):
+    def __init__(self, cog, user_id, guild_id, items, timeout=180):
+        super().__init__(timeout=None)  # disable built-in timeout
+        self.cog = cog
+        self.user_id = user_id
+        self.guild_id = guild_id
+        self.items = items
+        self.message = None
+        self.timeout_seconds = timeout
+        self._timeout_task = None
+
+        select = InventorySelect(cog, user_id, guild_id, items, self)
+        self.add_item(select)
+        close_button = CloseButton(owner_id=user_id, close_text="❌ Inventory closed.", label="Close Inventory")
+        self.add_item(close_button)
+
+        self.start_timeout()
+
+    def start_timeout(self):
+        if self._timeout_task:
+            self._timeout_task.cancel()
+        self._timeout_task = asyncio.create_task(self._timeout_loop())
+
+    async def _timeout_loop(self):
+        try:
+            await asyncio.sleep(self.timeout_seconds)
+            for child in self.children:
+                child.disabled = True
+            if self.message:
+                await self.message.edit(view=self)
+        except asyncio.CancelledError:
+            return
+
+    def reset_timer(self):
+        self.start_timeout()
+
+class ShopSelect(discord.ui.Select):
+    def __init__(self, progression_cog, user_id, guild_id, options, parent_view):
+        self.progression_cog = progression_cog
+        self.user_id = user_id
+        self.guild_id = guild_id
+        self.parent_view = parent_view
+        self.message = None
+        super().__init__(placeholder="Select an item to buy...", min_values=1, max_values=1, options=options)
+
+    async def callback(self, interaction: discord.Interaction):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("⚠️ You can only buy items for yourself.", ephemeral=True)
+            return
+
+        selected_item = self.values[0]
+
+        c = self.progression_cog.c
+        c.execute("SELECT price, emoji FROM shop_items WHERE name = ?", (selected_item,))
+        row = c.fetchone()
+        if not row:
+            await interaction.response.send_message("❌ This item no longer exists in the shop.", ephemeral=True)
+            return
+        price, emoji = row
+
+        coins = await self.progression_cog.get_coins(self.user_id, self.guild_id)
+        if coins < price:
+            await interaction.response.send_message("❌ You don't have enough coins.", ephemeral=True)
+            return
+
+        await self.progression_cog.remove_coins(self.user_id, self.guild_id, price)
+        c.execute("""
+            INSERT INTO user_inventory (user_id, guild_id, item_name, quantity)
+            VALUES (?, ?, ?, 1)
+            ON CONFLICT(user_id, guild_id, item_name) DO UPDATE SET quantity = quantity + 1
+        """, (self.user_id, self.guild_id, selected_item))
+        self.progression_cog.conn.commit()
+
+        new_balance = await self.progression_cog.get_coins(self.user_id, self.guild_id)
+        c.execute("SELECT name, price, emoji FROM shop_items")
+        items = c.fetchall()
+
+        embed = discord.Embed(
+            title="🛒 Minori Bargains",
+            description=f"Your Coins: **{format_coins(new_balance)}**",
+            color=discord.Color.dark_purple()
+        )
+        embed.set_thumbnail(url=SHOP_ICON_URL)
+        for name, price, emoji in items:
+            embed.add_field(name=f"{emoji} {name}", value=f"{price} coins", inline=False)
+
+        new_options = []
+        for name, price, emoji in items:
+            new_options.append(discord.SelectOption(
+                label=name,
+                description=f"Buy {name} for {price} coins",
+                emoji=emoji,
+                value=name,
+            ))
+        self.options = new_options
+
+        msg_to_edit = getattr(self, "message", None) or getattr(self.parent_view, "message", None)
+        await interaction.response.defer()
+        
+        if msg_to_edit:
+            await msg_to_edit.edit(embed=embed, view=self.parent_view)
+        else:
+            await interaction.followup.edit_message(interaction.message.id, embed=embed, view=self.parent_view)
+            
+        await interaction.followup.send(f"You bought **1x {selected_item}** {emoji}!", ephemeral=True)
+
+class Trades(commands.Cog):
+    def __init__(self, bot):
+        self.bot = bot
+        self.progression_cog = None
+        self.user_locks = {}
+
+    async def cog_load(self):
+        self.progression_cog = self.bot.get_cog("Progression")
+        if not self.progression_cog:
+            print("[Shop] Progression cog not loaded! Coins won't work properly.")
+            return
+
+        c = self.progression_cog.c
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS shop_items (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT UNIQUE,
+                type TEXT,
+                price INTEGER,
+                emoji TEXT
+            )
+        """)
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS user_inventory (
+                user_id INTEGER,
+                guild_id INTEGER,
+                item_name TEXT,
+                quantity INTEGER,
+                PRIMARY KEY(user_id, guild_id, item_name)
+            )
+        """)
+        self.progression_cog.conn.commit()
+
+        default_items = [
+            ("Small EXP Potion", "consumable", 125, "<:SmallExpBoostPotion:1415347886186561628>"),
+            ("Medium EXP Potion", "consumable", 250, "<:MediumExpBoostPotion:1415347878343217266>"),
+            ("Large EXP Potion", "consumable", 500, "<:LargeExpBoostPotion:1415347869493493781>"),
+            ("Level Skip Token", "consumable", 1500, "<:LevelSkipToken:1415349457511383161>"),
+            ("Mystery Box", "consumable", 3000, "<:MysteryBox:1415707555325415485>"),
+        ]
+        for name, type_, price, emoji in default_items:
+            c.execute(
+                "INSERT OR IGNORE INTO shop_items (name, type, price, emoji) VALUES (?, ?, ?, ?)",
+                (name, type_, price, emoji)
+            )
+        self.progression_cog.conn.commit()
+
+    async def apply_potion_effect(self, user_id: int, guild_id: int, item_name: str, channel: discord.TextChannel = None):
+        potion_effects = {
+            "Small EXP Potion": 0.05,
+            "Medium EXP Potion": 0.12,
+            "Large EXP Potion": 0.225,
+        }
+
+        exp, level = self.progression_cog.get_user(user_id, guild_id)
+        required_exp = 50 * level + 20 * level**2
+
+        if item_name == "Level Skip Token":
+            remaining = required_exp - exp
+            gain = remaining if remaining > 0 else required_exp
+        elif item_name in potion_effects:
+            gain = int(required_exp * potion_effects[item_name])
+        else:
+            return 0, ""
+
+        old_level = level
+        new_level, new_exp, leveled_up = self.progression_cog.add_exp(user_id, guild_id, gain)
+
+        extra_msg = ""
+        if leveled_up and channel:
+            guild = self.progression_cog.bot.get_guild(guild_id)
+            if guild:
+                member = guild.get_member(user_id)
+                if member:
+                    old_title = get_title(old_level)
+                    new_title = get_title(new_level)
+                    old_emoji = get_title_emoji(old_level)
+                    new_emoji = get_title_emoji(new_level)
+
+                    if new_title != old_title:
+                        embed_title = f"{member.display_name} <:LEVELUP:1413479714428948551> {new_level}    {old_emoji} <:RIGHTWARDARROW:1414227272302334062> {new_emoji}"
+                        embed_description = (
+                            f"```Congratulations {member.display_name}! You have reached level {new_level} and ascended to {new_title}. ```\n"
+                            f"Title: `{new_title}` {new_emoji}"
+                        )
+                    else:
+                        embed_title = f"{member.display_name} <:LEVELUP:1413479714428948551> {new_level}"
+                        embed_description = (
+                            f"```Congratulations {member.display_name}! You have reached level {new_level}.``` \n"
+                            f"Title: `{new_title}` {new_emoji}"
+                        )
+
+                    embed = discord.Embed(title=embed_title, description=embed_description, color=discord.Color.dark_purple())
+                    embed.set_thumbnail(url=member.display_avatar.url)
+                    lvlup_msg = await channel.send(embed=embed)
+
+                    coins_amount = random.randint(30, 50)
+                    await self.progression_cog.add_coins(user_id, guild_id, coins_amount)
+                    await channel.send(
+                        f"{member.display_name} received <:Coins:1415353285270966403> {coins_amount} coins for leveling up!",
+                        reference=discord.MessageReference(
+                            message_id=lvlup_msg.id,
+                            channel_id=lvlup_msg.channel.id,
+                            guild_id=lvlup_msg.guild.id
+                        )
+                    )
+                    extra_msg = ""  
+
+        return gain, extra_msg
+    
+    async def apply_mystery_box(self, user_id: int, guild_id: int):
+        c = self.progression_cog.c
+        rewards = []
+
+        # Level Skip Token (15%)
+        if random.random() < 0.15:
+            amount = random.randint(1, 3)
+            c.execute("""
+                INSERT INTO user_inventory (user_id, guild_id, item_name, quantity)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(user_id, guild_id, item_name) DO UPDATE SET quantity = quantity + ?
+            """, (user_id, guild_id, "Level Skip Token", amount, amount))
+            rewards.append(("Level Skip Token", amount))
+
+        # Large EXP Potion (20%)
+        if random.random() < 0.20:
+            amount = random.randint(1, 3)
+            c.execute("""
+                INSERT INTO user_inventory (user_id, guild_id, item_name, quantity)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(user_id, guild_id, item_name) DO UPDATE SET quantity = quantity + ?
+            """, (user_id, guild_id, "Large EXP Potion", amount, amount))
+            rewards.append(("Large EXP Potion", amount))
+
+        # Medium EXP Potion (50%)
+        if random.random() < 0.50:
+            amount = random.randint(1, 3)
+            c.execute("""
+                INSERT INTO user_inventory (user_id, guild_id, item_name, quantity)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(user_id, guild_id, item_name) DO UPDATE SET quantity = quantity + ?
+            """, (user_id, guild_id, "Medium EXP Potion", amount, amount))
+            rewards.append(("Medium EXP Potion", amount))
+
+        # Small EXP Potion (always 3)
+        c.execute("""
+            INSERT INTO user_inventory (user_id, guild_id, item_name, quantity)
+            VALUES (?, ?, ?, 3)
+            ON CONFLICT(user_id, guild_id, item_name) DO UPDATE SET quantity = quantity + 3
+        """, (user_id, guild_id, "Small EXP Potion"))
+        rewards.append(("Small EXP Potion", 3))
+
+        self.progression_cog.conn.commit()
+        return rewards
+
+
+    @commands.hybrid_command(name="shop", description="View the shop and buy items!")
+    @commands.guild_only()
+    async def shop(self, ctx):
+        if not self.progression_cog:
+            await ctx.send("Progression cog not loaded. Shop unavailable.")
+            return
+
+        user_id = ctx.author.id
+        guild_id = ctx.guild.id
+        c = self.progression_cog.c
+
+        c.execute("SELECT name, price, emoji FROM shop_items")
+        items = c.fetchall()
+        if not items:
+            await ctx.send("Shop is empty.")
+            return
+
+        user_coins = await self.progression_cog.get_coins(user_id, guild_id)
+        embed = discord.Embed(
+            title="Minori Bargains",
+            description=f"Your Coins: **{format_coins(user_coins)}**",
+            color=discord.Color.dark_purple()
+        )
+        embed.set_thumbnail(url=SHOP_ICON_URL)
+        for name, price, emoji in items:
+            embed.add_field(name=f"{emoji} {name}", value=f"{price} coins", inline=False)
+
+        options = [
+            discord.SelectOption(label=name,
+                                description=f"Buy {name} for {price} coins",
+                                emoji=emoji,
+                                value=name)
+            for name, price, emoji in items
+        ]
+
+        view = discord.ui.View(timeout=None)        
+        shop_select = ShopSelect(self.progression_cog, user_id, guild_id, options, view)
+        view.add_item(shop_select)
+        close_button = CloseButton(owner_id=user_id, close_text="❌ Shop closed.", label="Close Shop")
+        view.add_item(close_button)              
+
+        msg = await ctx.send(embed=embed, view=view)
+        view.message = msg
+        shop_select.message = msg
+
+    @commands.hybrid_command(name="inventory", description="Check your inventory and items")
+    @commands.guild_only()
+    async def inventory(self, ctx):
+        if not self.progression_cog:
+            await ctx.send("Progression cog not loaded. Inventory unavailable.")
+            return
+
+        user_id = ctx.author.id
+        guild_id = ctx.guild.id
+        c = self.progression_cog.c
+        c.execute("SELECT item_name, quantity FROM user_inventory WHERE user_id = ? AND guild_id = ?", (user_id, guild_id))
+        raw_items = c.fetchall()
+
+        items = []
+        for name, qty in raw_items:
+            if qty <= 0:
+                continue
+            c.execute("SELECT emoji FROM shop_items WHERE name = ?", (name,))
+            emoji = c.fetchone()
+            emoji = emoji[0] if emoji else "📦"
+            items.append((name, qty, emoji))
+
+        if not items:
+            await ctx.send("Your inventory is empty.")
+            return
+
+        inventory_text = "\n".join(f"{emoji} {name} x{qty}" for name, qty, emoji in items)
+        embed = discord.Embed(
+            title=f"{ctx.author.display_name}'s Inventory",
+            description=inventory_text,
+            color=discord.Color.dark_purple()
+        )
+        embed.set_thumbnail(url=ctx.author.display_avatar.url)
+
+        view = InventoryView(self, user_id, guild_id, items)
+        msg = await ctx.send(embed=embed, view=view)
+        view.message = msg 
+
+
+async def setup(bot):
+    await bot.add_cog(Trades(bot))
+    print("📦 Loaded shop cog.")
