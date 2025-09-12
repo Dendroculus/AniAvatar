@@ -4,6 +4,7 @@ from discord.ext import commands
 import aiohttp
 from datetime import datetime, timedelta
 import asyncio
+import random
 
 class PollView(discord.ui.View):
     def __init__(self, question: str, options: list[str], author: discord.Member, timeout: int = 60):
@@ -160,6 +161,7 @@ class PollView(discord.ui.View):
 class Fun(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+        self.gamble_cooldowns = {}
 
     @commands.hybrid_command(name="waifu", description="Get a random waifu image")
     async def waifu(self, ctx):
@@ -218,7 +220,174 @@ class Fun(commands.Cog):
         view.message = msg
         view.updater_task = ctx.bot.loop.create_task(view.start_updater())
 
-        
+    @commands.hybrid_command(name="gamble", description="Gamble your coins!")
+    @commands.guild_only()
+    async def gamble(self, ctx: commands.Context):
+        progression_cog = self.bot.get_cog("Progression")
+        if not progression_cog:
+            return await ctx.send("❌ Progression cog not loaded. Coins unavailable.")
+
+        user_id = ctx.author.id
+        guild_id = ctx.guild.id
+        user_coins = await progression_cog.get_coins(user_id, guild_id)
+        if user_coins <= 0:
+            return await ctx.send("❌ You don't have any coins to gamble!")
+
+        class GambleSelect(discord.ui.View):
+            def __init__(self, bot, user_id, guild_id):
+                super().__init__(timeout=120)
+                self.bot = bot
+                self.user_id = user_id
+                self.guild_id = guild_id
+                self.timeout_task = None
+
+                # Dropdown options
+                self.options_list = [
+                    ("100", 100, discord.PartialEmoji(name="Coins", id=1415353285270966403)),
+                    ("250", 250, discord.PartialEmoji(name="Coins", id=1415353285270966403)),
+                    ("500", 500, discord.PartialEmoji(name="Coins", id=1415353285270966403)),
+                    ("All In", -2, discord.PartialEmoji(name="Coins", id=1415353285270966403)),
+                    ("Custom", -1, None)
+                ]
+                self.select = self.create_select()
+                self.add_item(self.select)
+
+                # Exit button
+                self.exit_button = discord.ui.Button(
+                    label="Exit Gamble",
+                    style=discord.ButtonStyle.danger
+                )
+                self.exit_button.callback = self.exit_callback
+                self.add_item(self.exit_button)
+
+            def create_select(self):
+                select = discord.ui.Select(
+                    placeholder="Select amount to gamble",
+                    options=[
+                        discord.SelectOption(label=label, value=str(value), emoji=emoji)
+                        for label, value, emoji in self.options_list
+                    ]
+                )
+                select.callback = self.select_callback
+                return select
+
+            async def select_callback(self, interaction: discord.Interaction):
+                if interaction.user.id != self.user_id:
+                    return await interaction.response.send_message(
+                        "⚠️ This is not your gamble session.", ephemeral=True
+                    )
+
+                self.reset_timeout()
+                user_coins = await progression_cog.get_coins(self.user_id, self.guild_id)
+                value = int(self.select.values[0])
+
+                if value == -2:  # All In
+                    value = user_coins
+
+                if value == -1:  # Custom modal
+                    class CustomModal(discord.ui.Modal):
+                        def __init__(self):
+                            super().__init__(title="Custom Gamble")
+                            self.amount_input = discord.ui.TextInput(
+                                label="Enter amount",
+                                placeholder=f"Max {user_coins} Coins",
+                                style=discord.TextStyle.short
+                            )
+                            self.add_item(self.amount_input)
+
+                        async def on_submit(self, modal_interaction: discord.Interaction):
+                            try:
+                                amount = int(self.amount_input.value)
+                                if amount <= 0 or amount > user_coins:
+                                    return await modal_interaction.response.send_message(
+                                        f"❌ Invalid amount. You have {user_coins} <:Coins:1415353285270966403>.",
+                                        ephemeral=True
+                                    )
+                                await process_gamble(modal_interaction, amount)
+                            except ValueError:
+                                await modal_interaction.response.send_message("❌ Invalid number.", ephemeral=True)
+
+                    await interaction.response.send_modal(CustomModal())
+                else:
+                    if value > user_coins:
+                        await interaction.response.send_message(
+                            f"❌ Not enough coins. You have {user_coins} <:Coins:1415353285270966403>.",
+                            ephemeral=True
+                        )
+                    else:
+                        await process_gamble(interaction, value)
+
+                # Reset the dropdown
+                self.remove_item(self.select)
+                self.select = self.create_select()
+                self.add_item(self.select)
+                new_coins = await progression_cog.get_coins(self.user_id, self.guild_id)
+                await interaction.message.edit(
+                    content=f"You have {new_coins} <:Coins:1415353285270966403>. Select amount to gamble:",
+                    view=self
+                )
+
+            async def exit_callback(self, interaction: discord.Interaction):
+                if interaction.user.id != self.user_id:
+                    return await interaction.response.send_message(
+                        "⚠️ This is not your gamble session.", ephemeral=True
+                    )
+                for child in self.children:
+                    child.disabled = True
+                await interaction.message.edit(view=self)
+                await interaction.response.send_message("❌ Gamble exited.", ephemeral=True)
+                self.stop()
+
+            def reset_timeout(self):
+                if hasattr(self, "timeout_task") and self.timeout_task:
+                    self.timeout_task.cancel()
+                self.timeout_task = self.bot.loop.create_task(self.timeout_handler())
+
+            async def timeout_handler(self):
+                await asyncio.sleep(self.timeout)
+                for child in self.children:
+                    child.disabled = True
+                if hasattr(self, "message") and self.message:
+                    try:
+                        await self.message.edit(view=self)
+                    except:
+                        pass
+                self.stop()
+
+        async def process_gamble(interaction: discord.Interaction, amount: int):
+            user_total_coins = await progression_cog.get_coins(user_id, guild_id)
+            base_chance = 0.5
+            bet_ratio = amount / user_total_coins
+            win_chance = max(0.13, base_chance - bet_ratio * 0.5)
+
+            if random.random() < win_chance:
+                await progression_cog.add_coins(user_id, guild_id, amount)
+                result_text = f"<:MinoriAmazed:1416024121837490256> You won {amount} <:Coins:1415353285270966403>!"
+            else:
+                await progression_cog.remove_coins(user_id, guild_id, amount)
+                result_text = f"<:MinoriDissapointed:1416016691430821958> You lost {amount} <:Coins:1415353285270966403>."
+
+            new_balance = await progression_cog.get_coins(user_id, guild_id)
+            try:
+                await interaction.response.send_message(
+                    f"{result_text} Your new balance: {new_balance} <:Coins:1415353285270966403>."
+                )
+            except discord.errors.InteractionResponded:
+                await interaction.followup.send(
+                    f"{result_text} Your new balance: {new_balance} <:Coins:1415353285270966403>."
+                )
+
+        view = GambleSelect(self.bot, user_id, guild_id)
+        message = await ctx.send(
+            f"You have {user_coins} <:Coins:1415353285270966403>. Select amount to gamble:",
+            view=view
+        )
+        view.message = message
+        view.reset_timeout()
+
+
+
+
 async def setup(bot):
     await bot.add_cog(Fun(bot))
     print("📦 Loaded fun cog.")
