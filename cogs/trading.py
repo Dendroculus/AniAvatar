@@ -3,7 +3,7 @@ import discord
 import os
 from .progression import get_title, get_title_emoji
 import random
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import asyncio
 
 COG_PATH = os.path.dirname(os.path.abspath(__file__))
@@ -256,11 +256,12 @@ class ShopSelect(discord.ui.Select):
             
         await interaction.followup.send(f"You bought **1x {selected_item}** {emoji}!", ephemeral=True)
 
-class Trades(commands.Cog):
+class Trading(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.progression_cog = None
         self.user_locks = {}
+        self.donate_cooldowns = {}
 
     async def cog_load(self):
         self.progression_cog = self.bot.get_cog("Progression")
@@ -305,7 +306,7 @@ class Trades(commands.Cog):
 
     async def apply_potion_effect(self, user_id: int, guild_id: int, item_name: str, channel: discord.TextChannel = None):
         potion_effects = {
-            "Small EXP Potion": 0.05,
+            "Small EXP Potion": 0.03,
             "Medium EXP Potion": 0.12,
             "Large EXP Potion": 0.225,
         }
@@ -495,7 +496,146 @@ class Trades(commands.Cog):
         msg = await ctx.send(embed=embed, view=view)
         view.message = msg 
 
+    @commands.hybrid_command(name="donate", description="Give an item to another user")
+    @commands.guild_only()
+    async def donate(self, ctx, member: discord.Member):
+        if member.bot:
+            await ctx.send("<:MinoriConfused:1415707082988060874> You cannot donate to bots.")
+            return
+        
+        donor_id = ctx.author.id
+        receiver_id = member.id
+        
+        if donor_id == receiver_id:
+            await ctx.send("<:MinoriConfused:1415707082988060874> You cannot donate to yourself.")
+            return
+        
+        guild_id = ctx.guild.id
+        c = self.progression_cog.c
+
+        now = datetime.now(timezone.utc)
+        if donor_id in self.donate_cooldowns and now < self.donate_cooldowns[donor_id]:
+            remaining = self.donate_cooldowns[donor_id] - now
+            await ctx.send(f"<:TIME:1415961777912545341> You can donate again in {str(remaining).split('.')[0]}")
+            return
+
+        c.execute("SELECT item_name, quantity FROM user_inventory WHERE user_id = ? AND guild_id = ?", (donor_id, guild_id))
+        items = [(name, qty) for name, qty in c.fetchall() if qty > 0]
+        if not items:
+            await ctx.send("📭 Your inventory is empty, cannot donate.")
+            return
+
+        c.execute("SELECT name, emoji FROM shop_items")
+        emoji_map = {name: emoji for name, emoji in c.fetchall()}
+
+        
+        caps = {
+            "Mystery Box": 1,
+            "Level Skip Token": 1,
+            "Large EXP Potion": 2,
+            "Medium EXP Potion": 3,
+            "Small EXP Potion": 5
+        }
+
+        options = [
+            discord.SelectOption(
+                label=name,
+                description=f"You have {qty}",
+                emoji=emoji_map.get(name, "📦"),
+                value=name
+            ) for name, qty in items
+        ]
+        
+        class DonateView(discord.ui.View):
+            def __init__(self, author_id, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                self.author_id = author_id
+
+            async def interaction_check(self, interaction: discord.Interaction) -> bool:
+                if interaction.user.id != self.author_id:
+                    await interaction.response.send_message(
+                        "⚠️ This is not your donate menu!", ephemeral=True
+                    )
+                    return False
+                return True
+
+
+        class DonateAmountModal(discord.ui.Modal):
+            def __init__(self, item_name, max_amount=None):
+                super().__init__(title=f"Donate {item_name}")
+                self.item_name = item_name
+                self.max_amount = max_amount
+                self.amount_input = discord.ui.TextInput(
+                    label="Amount",
+                    placeholder=f"Max {max_amount}" if max_amount else "Enter amount",
+                    style=discord.TextStyle.short
+                )
+                self.add_item(self.amount_input)
+
+            async def on_submit(self, interaction: discord.Interaction):
+                try:
+                    amt = int(self.amount_input.value)
+                    if amt <= 0:
+                        await interaction.response.send_message("❌ Amount must be at least 1.", ephemeral=True)
+                        return
+                    if self.max_amount is not None and amt > self.max_amount:
+                        await interaction.response.send_message(
+                            f"❌ You can only donate up to {self.max_amount} of this item.", ephemeral=True
+                        )
+                        view = discord.ui.View()
+                        view.add_item(DonateSelect())
+                        await interaction.edit_original_response(view=view)
+                        return
+
+                    await finalize_donate(self.item_name, amt, interaction)
+                except:
+                    await interaction.response.send_message("❌ Invalid number.", ephemeral=True)
+
+        class DonateSelect(discord.ui.Select):
+            def __init__(self):
+                super().__init__(placeholder="Select an item to donate", min_values=1, max_values=1, options=options)
+
+            async def callback(self, interaction: discord.Interaction):
+                selected_item = self.values[0]
+                max_cap = caps.get(selected_item, None)
+
+                if max_cap == 1:
+                    await finalize_donate(selected_item, 1, interaction)
+                else:
+                    await interaction.response.send_modal(DonateAmountModal(selected_item, max_cap))
+
+        async def finalize_donate(item_name, amount, interaction):
+            c.execute("SELECT quantity FROM user_inventory WHERE user_id = ? AND guild_id = ? AND item_name = ?", (donor_id, guild_id, item_name))
+            row = c.fetchone()
+            if not row or row[0] < amount:
+                await interaction.response.send_message("❌ You don't have enough of this item.", ephemeral=True)
+                return
+
+            c.execute("UPDATE user_inventory SET quantity = quantity - ? WHERE user_id = ? AND guild_id = ? AND item_name = ?",
+                    (amount, donor_id, guild_id, item_name))
+            c.execute("DELETE FROM user_inventory WHERE user_id = ? AND guild_id = ? AND item_name = ? AND quantity <= 0",
+                    (donor_id, guild_id, item_name))
+
+            c.execute("""INSERT INTO user_inventory (user_id, guild_id, item_name, quantity)
+                        VALUES (?, ?, ?, ?)
+                        ON CONFLICT(user_id, guild_id, item_name) DO UPDATE SET quantity = quantity + ?""",
+                    (receiver_id, guild_id, item_name, amount, amount))
+            self.progression_cog.conn.commit()
+
+            # 2-hour cooldown to donate
+            self.donate_cooldowns[donor_id] = datetime.now(timezone.utc) + timedelta(hours=2)
+
+            for child in view.children:
+                child.disabled = True
+            await interaction.response.edit_message(
+                content=f"You donated {amount}x {emoji_map.get(item_name, '📦')} {item_name} to {member.display_name}!",
+                view=view
+            )
+
+        view = DonateView(ctx.author.id, timeout=180)
+        view.add_item(DonateSelect())
+        await ctx.send(f"Select an item to donate to {member.display_name}:", view=view)
 
 async def setup(bot):
-    await bot.add_cog(Trades(bot))
+    await bot.add_cog(Trading(bot))
     print("📦 Loaded shop cog.")
