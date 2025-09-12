@@ -15,6 +15,7 @@ class Games(commands.Cog):
             self.trivia_list = json.load(f)
 
     @commands.hybrid_command(name="animequiz", description="Start an anime trivia quiz.")
+    @commands.guild_only()
     @app_commands.describe(questions="Number of questions")
     @app_commands.choices(questions=[
         app_commands.Choice(name="5", value=5),
@@ -31,10 +32,8 @@ class Games(commands.Cog):
 
         for idx, question in enumerate(quiz_questions, 1):
             # Build options
-            other_answers = [q["answer"] for q in self.trivia_list if q["answer"] != question["answer"]]
-            fake_options = random.sample(other_answers, k=min(3, len(other_answers)))
-            options_list = fake_options + [question["answer"]]
-            random.shuffle(options_list)
+            options_list = question["options"]
+            random.shuffle(options_list) 
             options = [discord.SelectOption(label=opt, value=opt) for opt in options_list]
 
             embed = discord.Embed(title=f"Question {idx}/{num_questions}", description=question["question"])
@@ -60,23 +59,29 @@ class Games(commands.Cog):
                 if selected == question["answer"]:
                     score += 1
                     if profile_cog:
-
                         _, current_level = profile_cog.get_user(ctx.author.id, ctx.guild.id)
-                        exp_reward = random.randint(5 + current_level * 2, 10 + current_level * 3)  
+                        exp_reward = random.randint(5 + current_level * 2, 10 + current_level * 3) 
+                        coin_reward = random.randint(5, 20)
+                        messages = [
+                            f"Correct! You earned +{exp_reward} <:EXP:1415642038589984839> and +{coin_reward} <:Coins:1415353285270966403>!",
+                            f"Nice work! Rewards: +{exp_reward} <:EXP:1415642038589984839> | +{coin_reward} <:Coins:1415353285270966403>",
+                            f"Correct answer! +{exp_reward} <:EXP:1415642038589984839>, +{coin_reward} <:Coins:1415353285270966403> gained."
+                        ]
                         level, new_exp, leveled_up = profile_cog.add_exp(ctx.author.id, ctx.guild.id, exp_reward)
-                        await ctx.send(f"✅ Correct! +{exp_reward} EXP")
+                        await ctx.send(random.choice(messages))
                     else:
-                        await ctx.send(f"✅ Correct! The answer is **{question['answer']}**.")
+                        await ctx.send(f"Correct! The answer is **{question['answer']}**.")
                 else:
                     await ctx.send(f"❌ Wrong! The correct answer is **{question['answer']}**.")
             except asyncio.TimeoutError:
                 select.disabled = True
                 await message.edit(view=view)
-                await ctx.send(f"⏰ Time's up! The correct answer was `{question['answer']}`.")
+                await ctx.send(f"<:TIME:1415961777912545341>  Time's up! The correct answer was `{question['answer']}`.")
 
         await ctx.send(f"🏁 Quiz finished! You scored **{score}/{num_questions}**.")
 
     @commands.hybrid_command(name="guesscharacter", description="Guess a random popular anime character")
+    @commands.guild_only()
     async def guesscharacter(self, ctx):
         character = None
         source = "AniList"
@@ -225,15 +230,26 @@ class Games(commands.Cog):
 
             profile_cog = self.bot.get_cog("Progression")
             if selected == correct_name:
-                if profile_cog:
+                if profile_cog and interaction.guild: 
                     _, current_level = profile_cog.get_user(interaction.user.id, interaction.guild.id)
                     exp_reward = random.randint(5 + current_level * 2, 10 + current_level * 3)
+                    coin_reward = random.randint(15, 30)
+                    messages = [
+                        f"Correct! You earned +{exp_reward} <:EXP:1415642038589984839> and +{coin_reward} <:Coins:1415353285270966403>!",
+                        f"Nice work! Rewards: +{exp_reward} <:EXP:1415642038589984839> | +{coin_reward} <:Coins:1415353285270966403>",
+                        f"Correct answer! +{exp_reward} <:EXP:1415642038589984839>, +{coin_reward} <:Coins:1415353285270966403> gained."
+                    ]
                     level, new_exp, leveled_up = profile_cog.add_exp(interaction.user.id, interaction.guild.id, exp_reward)
-                    await interaction.response.send_message(f"✅ Correct! +{exp_reward} EXP")
+                    await interaction.response.send_message(random.choice(messages))
                 else:
-                    await interaction.response.send_message(f"✅ Correct! It was **{correct_name}** from **{anime_title}**!")
+                    await interaction.response.send_message(
+                        f"Correct! It was **{correct_name}** from **{anime_title}**!\n"
+                        f"(No EXP awarded outside servers)"
+                    )
             else:
-                await interaction.response.send_message(f"❌ Wrong! The correct answer was **{correct_name}** from **{anime_title}**.")
+                await interaction.response.send_message(
+                    f"❌ Wrong! The correct answer was **{correct_name}** from **{anime_title}**."
+                )
 
             for item in view.children:
                 if isinstance(item, discord.ui.Select):
