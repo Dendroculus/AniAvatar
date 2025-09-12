@@ -1,18 +1,49 @@
 import discord
-import asyncio
-import aiohttp
-from discord import app_commands
 from discord.ext import commands
+from discord import app_commands
 import random
+import asyncio
 import json
 import os
+import aiohttp
+from itertools import cycle
+from datetime import datetime, timezone
+
 
 class Games(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.data_path = os.path.join(os.path.dirname(__file__), "..", "data", "trivia.json")
         with open(self.data_path, "r", encoding="utf-8") as f:
-            self.trivia_list = json.load(f)
+            data = json.load(f)
+
+        if isinstance(data, dict):
+            self.trivia_dict = data
+        elif isinstance(data, list):
+            self.trivia_dict = {"Mixed": data}
+        else:
+            self.trivia_dict = {"Mixed": []}
+
+        self.used_questions = set()  
+
+    def get_balanced_questions(self, num_questions: int):
+        titles = list(self.trivia_dict.keys())
+        random.shuffle(titles)
+        questions = []
+        title_cycle = cycle(titles)
+
+        while len(questions) < num_questions:
+            title = next(title_cycle)
+            available = [q for q in self.trivia_dict[title] if q["question"] not in self.used_questions]
+            if available:
+                q = random.choice(available)
+                self.used_questions.add(q["question"])  
+                questions.append(q)
+
+            if len(self.used_questions) >= sum(len(qs) for qs in self.trivia_dict.values()):
+                self.used_questions.clear()
+
+        return questions
 
     @commands.hybrid_command(name="animequiz", description="Start an anime trivia quiz.")
     @commands.guild_only()
@@ -25,18 +56,20 @@ class Games(commands.Cog):
     ])
     async def animequiz(self, ctx, questions: app_commands.Choice[int]):
         num_questions = questions.value
-        quiz_questions = random.sample(self.trivia_list, min(num_questions, len(self.trivia_list)))
+        quiz_questions = self.get_balanced_questions(num_questions)
         score = 0
 
-        profile_cog = self.bot.get_cog("Progression")  # Make sure this matches your cog name
+        profile_cog = self.bot.get_cog("Progression")
 
         for idx, question in enumerate(quiz_questions, 1):
-            # Build options
             options_list = question["options"]
-            random.shuffle(options_list) 
+            random.shuffle(options_list)
             options = [discord.SelectOption(label=opt, value=opt) for opt in options_list]
 
-            embed = discord.Embed(title=f"Question {idx}/{num_questions}", description=question["question"])
+            embed = discord.Embed(
+                title=f"Question {idx}/{num_questions}",
+                description=question["question"]
+            )
             view = discord.ui.View()
             future = asyncio.get_event_loop().create_future()
 
@@ -46,7 +79,8 @@ class Games(commands.Cog):
                 if interaction.user != ctx.author:
                     await interaction.response.send_message("This is not your game!", ephemeral=True)
                     return
-                future.set_result(interaction.data["values"][0])
+                if not future.done():
+                    future.set_result(interaction.data["values"][0])
                 select.disabled = True
                 await interaction.response.edit_message(view=view)
 
@@ -60,14 +94,14 @@ class Games(commands.Cog):
                     score += 1
                     if profile_cog:
                         _, current_level = profile_cog.get_user(ctx.author.id, ctx.guild.id)
-                        exp_reward = random.randint(5 + current_level * 2, 10 + current_level * 3) 
+                        exp_reward = random.randint(5 + current_level * 2, 10 + current_level * 3)
                         coin_reward = random.randint(5, 20)
                         messages = [
                             f"Correct! You earned +{exp_reward} <:EXP:1415642038589984839> and +{coin_reward} <:Coins:1415353285270966403>!",
                             f"Nice work! Rewards: +{exp_reward} <:EXP:1415642038589984839> | +{coin_reward} <:Coins:1415353285270966403>",
                             f"Correct answer! +{exp_reward} <:EXP:1415642038589984839>, +{coin_reward} <:Coins:1415353285270966403> gained."
                         ]
-                        level, new_exp, leveled_up = profile_cog.add_exp(ctx.author.id, ctx.guild.id, exp_reward)
+                        profile_cog.add_exp(ctx.author.id, ctx.guild.id, exp_reward)
                         await ctx.send(random.choice(messages))
                     else:
                         await ctx.send(f"Correct! The answer is **{question['answer']}**.")
@@ -76,10 +110,10 @@ class Games(commands.Cog):
             except asyncio.TimeoutError:
                 select.disabled = True
                 await message.edit(view=view)
-                await ctx.send(f"<:TIME:1415961777912545341>  Time's up! The correct answer was `{question['answer']}`.")
+                await ctx.send(f"<:TIME:1415961777912545341> Time's up! The correct answer was `{question['answer']}`.")
 
         await ctx.send(f"🏁 Quiz finished! You scored **{score}/{num_questions}**.")
-
+        
     @commands.hybrid_command(name="guesscharacter", description="Guess a random popular anime character")
     @commands.guild_only()
     async def guesscharacter(self, ctx):
