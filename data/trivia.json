@@ -1,518 +1,1641 @@
-[
-  {
-    "question": "What is the name of the pirate crew Luffy leads in One Piece?",
-    "options": ["Straw Hat Pirates", "Blackbeard Pirates", "Red Hair Pirates", "Heart Pirates"],
-    "answer": "Straw Hat Pirates"
-  },
-  {
-    "question": "Which anime features a notebook that kills anyone whose name is written in it?",
-    "options": ["Death Note", "Code Geass", "Tokyo Ghoul", "Attack on Titan"],
-    "answer": "Death Note"
-  },
-  {
-    "question": "What is Sailor Moon’s real name?",
-    "options": ["Usagi Tsukino", "Rei Hino", "Ami Mizuno", "Makoto Kino"],
-    "answer": "Usagi Tsukino"
-  },
-  {
-    "question": "In Attack on Titan, what is the name of the main protagonist?",
-    "options": ["Eren Yeager", "Armin Arlert", "Mikasa Ackerman", "Levi"],
-    "answer": "Eren Yeager"
-  },
-  {
-    "question": "Which anime features a girl who can see ghosts and spirits, and exorcises them?",
-    "options": ["Noragami", "Bleach", "Inuyasha", "Natsume Yuujinchou"],
-    "answer": "Natsume Yuujinchou"
-  },
-  {
-    "question": "Who is the strongest hero in One Punch Man?",
-    "options": ["Saitama", "Genos", "Tatsumaki", "Bang"],
-    "answer": "Saitama"
-  },
-  {
-    "question": "Which anime character says the line: 'I’ll take a potato chip… AND EAT IT!'?",
-    "options": ["Light Yagami", "Luffy", "Naruto", "Ichigo Kurosaki"],
-    "answer": "Light Yagami"
-  },
-  {
-    "question": "What is the signature weapon of Mikasa Ackerman in Attack on Titan?",
-    "options": ["Vertical Maneuvering Gear", "Sword", "Gun", "Bow and Arrow"],
-    "answer": "Vertical Maneuvering Gear"
-  },
-   {
-    "question": "Who is the main protagonist of Tate no Yuusha no Nariagari?",
-    "options": ["Naofumi Iwatani", "Raphtalia", "Motoyasu Kitamura", "Ren Amaki"],
-    "answer": "Naofumi Iwatani"
-  },
-  {
-    "question": "What weapon does Naofumi wield?",
-    "options": ["Shield", "Sword", "Bow", "Spear"],
-    "answer": "Shield"
-  },
-  {
-    "question": "Who is Naofumi's first companion?",
-    "options": ["Raphtalia", "Filo", "Motoyasu", "Myne"],
-    "answer": "Raphtalia"
-  },
-  {
-    "question": "Which kingdom summons the Shield Hero?",
-    "options": ["Melromarc", "Fitoria", "Q'Thry", "Kano"],
-    "answer": "Melromarc"
-  },
-  {
-    "question": "What is Filo's true form?",
-    "options": ["Filolial Queen", "Dragon", "Elf", "Demon"],
-    "answer": "Filolial Queen"
-  },
-  {
-    "question": "Who betrays the heroes in Melromarc?",
-    "options": ["Myne", "Motoyasu", "Ren", "Raphtalia"],
-    "answer": "Myne"
-  },
-  {
-    "question": "Which item allows Naofumi to heal Raphtalia?",
-    "options": ["Divine Bow", "Holy Water", "Healing Staff", "Shield Power"],
-    "answer": "Shield Power"
-  },
-  {
-    "question": "What race is Raphtalia?",
-    "options": ["Raccoon demi-human", "Elf", "Human", "Dragonkin"],
-    "answer": "Raccoon demi-human"
-  },
-  {
-    "question": "Who is the second summoned hero?",
-    "options": ["Motoyasu Kitamura", "Naofumi", "Ren Amaki", "Itsuki Kawasumi"],
-    "answer": "Motoyasu Kitamura"
-  },
-  {
-    "question": "Which organization protects the kingdom from monsters?",
-    "options": ["Heroes", "Church", "Knights", "Merchants"],
-    "answer": "Heroes"
-  },
-
-  {
-    "question": "Who is Subaru Natsuki's first ally in Re:Zero?",
-    "options": ["Emilia", "Rem", "Ram", "Beatrice"],
-    "answer": "Emilia"
-  },
-  {
-    "question": "What ability does Subaru have?",
-    "options": ["Return by Death", "Time Stop", "Telepathy", "Teleportation"],
+{
+  "One Piece": [
+    {
+      "question": "What is the name of the pirate crew Luffy leads in One Piece?",
+      "options": ["Straw Hat Pirates", "Blackbeard Pirates", "Red Hair Pirates", "Heart Pirates"],
+      "answer": "Straw Hat Pirates"
+    },
+    {
+      "question": "In 'One Piece', which Devil Fruit did Nico Robin eat?",
+      "options": ["Hana Hana no Mi", "Gomu Gomu no Mi", "Mera Mera no Mi", "Tori Tori no Mi"],
+      "answer": "Hana Hana no Mi"
+    },
+    {
+      "question": "In 'One Piece', which Marine Admiral is nicknamed 'Akainu'?",
+      "options": ["Sakazuki", "Borsalino", "Kuzan", "Fujitora"],
+      "answer": "Sakazuki"
+    }
+  ],
+  "Death Note": [
+    {
+      "question": "Which anime features a notebook that kills anyone whose name is written in it?",
+      "options": ["Death Note", "Code Geass", "Tokyo Ghoul", "Attack on Titan"],
+      "answer": "Death Note"
+    },
+    {
+      "question": "Which anime character says the line: 'I’ll take a potato chip… AND EAT IT!'?",
+      "options": ["Light Yagami", "Luffy", "Naruto", "Ichigo Kurosaki"],
+      "answer": "Light Yagami"
+    },
+    {
+      "question": "In 'Death Note', what is the full name of L?",
+      "options": ["L Lawliet", "Light Yagami", "Ryuk", "Near"],
+      "answer": "L Lawliet"
+    }
+  ],
+  "Sailor Moon": [
+    {
+      "question": "What is Sailor Moon’s real name?",
+      "options": ["Usagi Tsukino", "Rei Hino", "Ami Mizuno", "Makoto Kino"],
+      "answer": "Usagi Tsukino"
+    }
+  ],
+  "Attack on Titan": [
+    {
+      "question": "In Attack on Titan, what is the name of the main protagonist?",
+      "options": ["Eren Yeager", "Armin Arlert", "Mikasa Ackerman", "Levi"],
+      "answer": "Eren Yeager"
+    },
+    {
+      "question": "What is the signature weapon of Mikasa Ackerman in Attack on Titan?",
+      "options": ["Vertical Maneuvering Gear", "Sword", "Gun", "Bow and Arrow"],
+      "answer": "Vertical Maneuvering Gear"
+    },
+    {
+      "question": "In 'Attack on Titan', what is the original name of the Founding Titan?",
+      "options": ["Ymir Fritz", "Eren Yeager", "Historia Reiss", "Levi Ackerman"],
+      "answer": "Ymir Fritz"
+    },
+    {
+      "question": "In 'Attack on Titan', who inherits the Armored Titan from Reiner?",
+      "options": ["Porco Galliard", "Eren Yeager", "Annie Leonhart", "Pieck Finger"],
+      "answer": "Porco Galliard"
+    },
+    {
+      "question": "What is the main theme of Attack on Titan?",
+      "options": ["Humanity's battle against giant humanoid creatures known as Titans.", "Pirates searching for treasure", "Magical girls saving the world", "Ninjas competing for rank"],
+      "answer": "Humanity's battle against giant humanoid creatures known as Titans."
+    }
+  ],
+  "Natsume Yuujinchou": [
+    {
+      "question": "Which anime features a girl who can see ghosts and spirits, and exorcises them?",
+      "options": ["Noragami", "Bleach", "Inuyasha", "Natsume Yuujinchou"],
+      "answer": "Natsume Yuujinchou"
+    }
+  ],
+  "One Punch Man": [
+    {
+      "question": "Who is the strongest hero in One Punch Man?",
+      "options": ["Saitama", "Genos", "Tatsumaki", "Bang"],
+      "answer": "Saitama"
+    },
+    {
+      "question": "In One Punch Man, what is Saitama's main issue with being a hero?",
+      "options": ["He is too strong and defeats every enemy with one punch.", "He can’t defeat his enemies", "He has no motivation", "He loses every fight"],
+      "answer": "He is too strong and defeats every enemy with one punch."
+    }
+  ],
+  "Tate no Yuusha no Nariagari": [
+    {
+      "question": "Who is the main protagonist of Tate no Yuusha no Nariagari?",
+      "options": ["Naofumi Iwatani", "Raphtalia", "Motoyasu Kitamura", "Ren Amaki"],
+      "answer": "Naofumi Iwatani"
+    },
+    {
+      "question": "What weapon does Naofumi wield?",
+      "options": ["Shield", "Sword", "Bow", "Spear"],
+      "answer": "Shield"
+    },
+    {
+      "question": "Who is Naofumi's first companion?",
+      "options": ["Raphtalia", "Filo", "Motoyasu", "Myne"],
+      "answer": "Raphtalia"
+    },
+    {
+      "question": "Which kingdom summons the Shield Hero?",
+      "options": ["Melromarc", "Fitoria", "Q'Thry", "Kano"],
+      "answer": "Melromarc"
+    },
+    {
+      "question": "What is Filo's true form?",
+      "options": ["Filolial Queen", "Dragon", "Elf", "Demon"],
+      "answer": "Filolial Queen"
+    },
+    {
+      "question": "Who betrays the heroes in Melromarc?",
+      "options": ["Myne", "Motoyasu", "Ren", "Raphtalia"],
+      "answer": "Myne"
+    },
+    {
+      "question": "Which item allows Naofumi to heal Raphtalia?",
+      "options": ["Divine Bow", "Holy Water", "Healing Staff", "Shield Power"],
+      "answer": "Shield Power"
+    },
+    {
+      "question": "What race is Raphtalia?",
+      "options": ["Raccoon demi-human", "Elf", "Human", "Dragonkin"],
+      "answer": "Raccoon demi-human"
+    },
+    {
+      "question": "Who is the second summoned hero?",
+      "options": ["Motoyasu Kitamura", "Naofumi", "Ren Amaki", "Itsuki Kawasumi"],
+      "answer": "Motoyasu Kitamura"
+    },
+    {
+      "question": "Which organization protects the kingdom from monsters?",
+      "options": ["Heroes", "Church", "Knights", "Merchants"],
+      "answer": "Heroes"
+    }
+  ],
+  "Re:Zero": [
+    {
+      "question": "Who is Subaru Natsuki's first ally in Re:Zero?",
+      "options": ["Emilia", "Rem", "Ram", "Beatrice"],
+      "answer": "Emilia"
+    },
+    {
+      "question": "What ability does Subaru have?",
+      "options": ["Return by Death", "Time Stop", "Telepathy", "Teleportation"],
+      "answer": "Return by Death"
+    },
+    {
+      "question": "What is the name of Rem's twin?",
+      "options": ["Ram", "Beatrice", "Emilia", "Crusch"],
+      "answer": "Ram"
+    },
+    {
+      "question": "Who is the spirit that lives in the mansion?",
+      "options": ["Beatrice", "Roswaal", "Felt", "Subaru"],
+      "answer": "Beatrice"
+    },
+    {
+      "question": "What is Subaru's favorite food?",
+      "options": ["Cup Noodles", "Bread", "Steak", "Fish"],
+      "answer": "Cup Noodles"
+    },
+    {
+      "question": "Who kills Subaru in his first death?",
+      "options": ["Petelgeuse", "Rem", "Roswaal", "Emilia"],
+      "answer": "Petelgeuse"
+    },
+    {
+      "question": "What is the full name of the Sin Archbishops’ leader, Petelgeuse?",
+      "options": ["Petelgeuse Romanee-Conti", "Petelgeuse van Astrea", "Petelgeuse Mathers", "Petelgeuse Lugnica"],
+      "answer": "Petelgeuse Romanee-Conti"
+    },
+    {
+      "question": "Which magical construct maintains the library in Roswaal’s mansion?",
+      "options": ["Beatrice", "Puck", "Subaru", "Crusch"],
+      "answer": "Beatrice"
+    },
+    {
+      "question": "What is the specific time Subaru first discovers the ability 'Return by Death'?",
+      "options": ["After dying in the capital", "After dying in the mansion", "After fighting Petelgeuse", "After meeting Rem"],
+      "answer": "After dying in the capital"
+    },
+    {
+      "question": "Which cult member is known for using surgical precision and a scalpel as a weapon?",
+      "options": ["Lye Batenkaitos", "Regulus Corneas", "Petelgeuse Romanee-Conti", "Elsa Granhiert"],
+      "answer": "Lye Batenkaitos"
+    },
+    {
+      "question": "Who becomes the temporary ruler of the Crusch faction after her absence?",
+      "options": ["Priscilla", "Reinhard", "Subaru", "Felt"],
+      "answer": "Reinhard"
+    },
+    {
+      "question": "What is the name of the dragon spirit sealed in the Roswaal mansion?",
+      "options": ["Puck", "Flora", "Felt", "Crusch"],
+      "answer": "Puck"
+    },
+    {
+      "question": "What is the significance of the insignia on Rem’s maid uniform?",
+      "options": ["It marks her as a Rem clan member", "It symbolizes loyalty to Roswaal", "It denotes magical power", "It represents her twin bond"],
+      "answer": "It symbolizes loyalty to Roswaal"
+    },
+    {
+      "question": "Which character kills Subaru multiple times in the first arc to test 'Return by Death'?",
+      "options": ["Elsa Granhiert", "Petelgeuse Romanee-Conti", "Regulus Corneas", "Wilhelm van Astrea"],
+      "answer": "Petelgeuse Romanee-Conti"
+    },
+    {
+      "question": "Which of these is NOT a member of the Witch Cult's Sin Archbishops?",
+      "options": ["Echidna", "Petelgeuse", "Regulus", "Lye"],
+      "answer": "Echidna"
+    },
+    {
+      "question": "Which character has a powerful curse on them that affects everyone around them?",
+      "options": ["Satella", "Emilia", "Subaru", "Beatrice"],
+      "answer": "Satella"
+    },
+    {
+      "question": "Which arc introduces the Sanctuary and the Archbishop Regulus?",
+      "options": ["Arc 4", "Arc 2", "Arc 3", "Arc 5"],
+      "answer": "Arc 4"
+    },
+    {
+      "question": "What object does Subaru repeatedly use to communicate past events to himself?",
+      "options": ["Diary", "Letter", "Signet Ring", "Magic Scroll"],
+      "answer": "Diary"
+    },
+    {
+      "question": "Which character possesses the 'Witch Factor' allowing her to manipulate life and death?",
+      "options": ["Echidna", "Satella", "Beatrice", "Crusch"],
+      "answer": "Echidna"
+    },
+    {
+      "question": "What is the first name of Crusch's loyal knight, often seen protecting her?",
+      "options": ["Reinhard", "Wilhelm", "Garfield", "Felt"],
+      "answer": "Wilhelm"
+    },
+    {
+      "question": "Which of these events triggers Subaru’s initial memory reset?",
+      "options": ["His death in the royal capital", "Emilia’s kidnapping", "Meeting Beatrice", "The Witch Cult attack on the mansion"],
+      "answer": "His death in the royal capital"
+    },
+    {
+      "question": "Which character is known for carrying a giant axe and being extremely protective of Crusch?",
+      "options": ["Garfield", "Wilhelm", "Reinhard", "Petelgeuse"],
+      "answer": "Garfield"
+    },
+    {
+      "question": "What food does Subaru frequently crave, becoming a running gag?",
+      "options": ["Pocky", "Rice Balls", "Onigiri", "Sandwiches"],
+      "answer": "Onigiri"
+    },
+    {
+      "question": "Who ultimately defeats the Archbishop of Greed, Regulus Corneas?",
+      "options": ["Subaru and Reinhard", "Emilia alone", "Beatrice", "Rem and Ram"],
+      "answer": "Subaru and Reinhard"
+    },
+    {
+      "question": "Which character has the ability to nullify magic using their sword?",
+      "options": ["Reinhard", "Wilhelm", "Garfield", "Petelgeuse"],
+      "answer": "Wilhelm"
+    },
+    {
+      "question": "In 'Re:Zero', which witch's cult worships the Witch of Envy?",
+      "options": ["Witch Cult", "Sanctuary Order", "Church of Lugnica", "Crusch Faction"],
+      "answer": "Witch Cult"
+    },
+    {
+      "question": "Who manipulates memories in 'Re:Zero' using the Witch Factor?",
+      "options": ["Echidna", "Satella", "Beatrice", "Crusch"],
+      "answer": "Echidna"
+    },
+      {
+    "question": "What is the name of Subaru's cursed ability that forces him back to a checkpoint when he dies?",
+    "options": ["Return by Death", "Rewind of Fate", "Repeat of Time", "Resurrection Loop"],
     "answer": "Return by Death"
-  },
-  {
-    "question": "What is the name of Rem's twin?",
-    "options": ["Ram", "Beatrice", "Emilia", "Crusch"],
-    "answer": "Ram"
-  },
-  {
-    "question": "Who is the spirit that lives in the mansion?",
-    "options": ["Beatrice", "Roswaal", "Felt", "Subaru"],
-    "answer": "Beatrice"
-  },
-  {
-    "question": "What is Subaru's favorite food?",
-    "options": ["Cup Noodles", "Bread", "Steak", "Fish"],
-    "answer": "Cup Noodles"
-  },
-  {
-    "question": "Who kills Subaru in his first death?",
-    "options": ["Petelgeuse", "Rem", "Roswaal", "Emilia"],
-    "answer": "Petelgeuse"
-  },
-  {
-    "question": "Which character is the Sword Saint of Lugnica in Black Clover?",
-    "options": ["Yuno", "Asta", "Noelle", "Julius"],
-    "answer": "Yuno"
-  },
-  {
-    "question": "What magic does Asta wield?",
-    "options": ["Anti-Magic", "Fire", "Water", "Wind"],
-    "answer": "Anti-Magic"
-  },
-  {
-    "question": "Who is Asta's rival and childhood friend?",
-    "options": ["Yuno", "Noelle", "Finral", "Magna"],
-    "answer": "Yuno"
-  },
-  {
-    "question": "Which squad is Yuno part of?",
-    "options": ["Golden Dawn", "Black Bulls", "Silver Eagles", "Crimson Lion Kings"],
-    "answer": "Golden Dawn"
-  },
+    },
+    {
+      "question": "Which Witch granted Subaru his Return by Death authority?",
+      "options": ["Satella, the Witch of Envy", "Echidna, the Witch of Greed", "Sekhmet, the Witch of Sloth", "Minerva, the Witch of Wrath"],
+      "answer": "Satella, the Witch of Envy"
+    },
+    {
+      "question": "Beatrice was bound by a contract to wait for 'that person' for how many years?",
+      "options": ["400 years", "100 years", "1,000 years", "200 years"],
+      "answer": "400 years"
+    },
+    {
+      "question": "Which extremely powerful offensive spells are associated with Beatrice in your source?",
+      "options": ["Al Shamak and Minya", "Zeta Nova and Karyu", "Aqua Veil and Frostbite", "Inferno Array and Void Slash"],
+      "answer": "Al Shamak and Minya"
+    },
+    {
+      "question": "Roswaal possesses a tome that provides future 'scripts' he forces the world to follow. What is that book called in your source?",
+      "options": ["Tome of Wisdom", "Book of Fate", "Codex of Prophecy", "Manual of Destiny"],
+      "answer": "Tome of Wisdom"
+    },
+    {
+      "question": "What is Roswaal L. Mathers' formal role in the kingdom as described in your source?",
+      "options": ["Margrave overseeing the estate", "Royal Chancellor", "High Priest", "Chief Commander"],
+      "answer": "Margrave overseeing the estate"
+    },
+    {
+      "question": "Which Witch is described as an insatiable seeker of knowledge who runs the Castle of Dreams?",
+      "options": ["Echidna, the Witch of Greed", "Satella, the Witch of Envy", "Daphne, the Witch of Gluttony", "Sekhmet, the Witch of Sloth"],
+      "answer": "Echidna, the Witch of Greed"
+    },
+    {
+      "question": "What activity characterizes Echidna’s Castle of Dreams where she meets others?",
+      "options": ["A tea party offering contracts", "A battle arena for champions", "A vault of forbidden grimoires", "A shrine of repentance"],
+      "answer": "A tea party offering contracts"
+    },
+    {
+      "question": "Which of the following is explicitly listed as one of Reinhard Van Astrea’s Divine Protections in your source?",
+      "options": ["Automatic resurrection", "Permanent invisibility", "Void manipulation", "Time travel"],
+      "answer": "Automatic resurrection"
+    },
+    {
+      "question": "According to the source, approximately how many Divine Protections does Reinhard possess?",
+      "options": ["Over forty", "Ten", "Twenty", "Exactly seven"],
+      "answer": "Over forty"
+    },
+    {
+      "question": "Which strange trait of Reinhard's Divine Protections is mentioned that aids communication?",
+      "options": ["Understanding any language", "Telepathic speech", "Mimicry of voices", "Automatic translation scrolls"],
+      "answer": "Understanding any language"
+    },
+    {
+      "question": "Which Witch of Sin is credited in your source with creating the mabeasts out of a desire to solve hunger?",
+      "options": ["Daphne (Gluttony)", "Sekhmet (Sloth)", "Minerva (Wrath)", "Echidna (Greed)"],
+      "answer": "Daphne (Gluttony)"
+    },
+    {
+      "question": "Which Witch of Sin is described as possessing incredible healing powers but causing destruction whenever she heals?",
+      "options": ["Minerva (Wrath)", "Sekhmet (Sloth)", "Daphne (Gluttony)", "Echidna (Greed)"],
+      "answer": "Minerva (Wrath)"
+    },
+    {
+      "question": "Which Witch of Sin from the source is noted as physically lazy but unimaginably powerful?",
+      "options": ["Sekhmet (Sloth)", "Daphne (Gluttony)", "Minerva (Wrath)", "Echidna (Greed)"],
+      "answer": "Sekhmet (Sloth)"
+    },
+    {
+      "question": "The Witch Cult's highest-ranking members, the Sin Archbishops, each hold what kind of power?",
+      "options": ["Witch Factors (Authorities)", "Spirit Contracts", "Royal Grants", "Divine Blessings"],
+      "answer": "Witch Factors (Authorities)"
+    },
+    {
+      "question": "Regulus Corneas' Authority is described as what ability in your source?",
+      "options": ["Stopping his own time (Stillness of an Object's Time)", "Instant teleportation", "Mind control of crowds", "Absorbing magic spells"],
+      "answer": "Stopping his own time (Stillness of an Object's Time)"
+    },
+    {
+      "question": "Petelgeuse Romanee-Conti's authority is nicknamed in your source as what?",
+      "options": ["The Unseen Hand", "The Silent Whisper", "The Timebreak", "The Void Grasp"],
+      "answer": "The Unseen Hand"
+    },
+    {
+      "question": "Which Sin Archbishop is described in your source as being able to link and share injuries and emotions of those around her?",
+      "options": ["Sirius (Wrath)", "Regulus (Greed)", "Petelgeuse (Sloth)", "Lye (unknown)"],
+      "answer": "Sirius (Wrath)"
+    },
+    {
+      "question": "According to the source, how do Authorities differ mechanically from conventional magic?",
+      "options": ["They do not consume mana but erode the user's sanity", "They require a sacred relic to cast", "They can only be used at night", "They are weaker but faster than magic"],
+      "answer": "They do not consume mana but erode the user's sanity"
+    },
+    {
+      "question": "Which category does 'Spirit Arts' fall under, per your source?",
+      "options": ["A subset involving contracts with spirits", "A forbidden branch of Authorities", "A royal-only magic", "A lost type of lost technology"],
+      "answer": "A subset involving contracts with spirits"
+    },
+    {
+      "question": "Which specific Spirit does Emilia form a contract with, according to the source you provided?",
+      "options": ["Puck, the Great Spirit", "Beatrice, the Library Spirit", "Sylph, the Wind Spirit", "Undine, the Water Spirit"],
+      "answer": "Puck, the Great Spirit"
+    },
+    {
+      "question": "Which arc directly resolves Beatrice's contract and results in her joining Subaru's camp?",
+      "options": ["Arc 4 (The Sanctuary)", "Arc 1 (The Capital City)", "Arc 3 (Royal Selection)", "Arc 6 (Pleiades Watchtower)"],
+      "answer": "Arc 4 (The Sanctuary)"
+    },
+    {
+      "question": "In the summary you gave, which arc is described as a 'psychological horror' featuring amnesia inside a tower?",
+      "options": ["Arc 6 (The Pleiades Watchtower)", "Arc 2 (Roswaal Mansion)", "Arc 5 (The Tower)", "Arc 7 (Vollachia)"],
+      "answer": "Arc 6 (The Pleiades Watchtower)"
+    },
+    {
+      "question": "Which arc is said to focus on large-scale battles in a water city attacked by multiple Sin Archbishops?",
+      "options": ["Arc 5 (The Tower/Priestella)", "Arc 3 (Royal Selection)", "Arc 2 (Roswaal Mansion)", "Arc 1 (The Capital City)"],
+      "answer": "Arc 5 (The Tower/Priestella)"
+    },
+    {
+      "question": "Which arc leaves Subaru separated in a militant empire where Rem is awake but has lost memories of him?",
+      "options": ["Arc 7 (The Empire of Vollachia)", "Arc 4 (The Sanctuary)", "Arc 3 (Royal Selection)", "Arc 6 (Pleiades Watchtower)"],
+      "answer": "Arc 7 (The Empire of Vollachia)"
+    },
+    {
+      "question": "What major revelation about the world's history is noted in the Arc 6 summary you provided?",
+      "options": ["Crucial lore about the Sage Flugel and Satella", "The origin of grimoires being machines", "That witches are actually gods", "A lost continent's return"],
+      "answer": "Crucial lore about the Sage Flugel and Satella"
+    },
+    {
+      "question": "Which character from your source is explicitly stated to have been the sole survivor of an attack by Petelgeuse?",
+      "options": ["Rem", "Ram", "Beatrice", "Emilia"],
+      "answer": "Rem"
+    },
+    {
+      "question": "What happened to Ram during the destruction of her village that reduced her power?",
+      "options": ["She lost her horn, the source of an oni's power", "She lost her voice", "She lost her sight", "She lost her grimoire"],
+      "answer": "She lost her horn, the source of an oni's power"
+    },
+    {
+      "question": "Which figure in your source is described as flamboyant, wearing clown-like makeup, but secretly manipulative?",
+      "options": ["Roswaal L. Mathers", "Reinhard Van Astrea", "Wilhelm Van Astrea", "Subaru Natsuki"],
+      "answer": "Roswaal L. Mathers"
+    },
+    {
+      "question": "Which Witch is described as being the architect of the Sanctuary and manipulative, often viewing people as data points?",
+      "options": ["Echidna", "Satella", "Daphne", "Sekhmet"],
+      "answer": "Echidna"
+    },
+    {
+      "question": "Which Witch is the overarching antagonist who destroyed half the world 400 years ago, per your source?",
+      "options": ["Satella, the Witch of Envy", "Echidna, the Witch of Greed", "Minerva, the Witch of Wrath", "Daphne, the Witch of Gluttony"],
+      "answer": "Satella, the Witch of Envy"
+    },
+    {
+      "question": "According to your source, what emotional relationship does Satella have toward Subaru?",
+      "options": ["She is obsessively in love with him", "She hates him with all her being", "She is indifferent to him", "She is his mother reincarnated"],
+      "answer": "She is obsessively in love with him"
+    },
+    {
+      "question": "Which of the following best describes Roswaal's long-term goal mentioned in your source?",
+      "options": ["To resurrect his teacher, the Witch of Greed (Echidna)", "To become the next king", "To destroy all spirits", "To master every Authority"],
+      "answer": "To resurrect his teacher, the Witch of Greed (Echidna)"
+    },
+    {
+      "question": "Which symptom is explicitly associated with using an Authority, as opposed to magic?",
+      "options": ["Alignment of the user's personality with the corresponding Sin and erosion of sanity", "Instant physical transformation of the user", "Permanent loss of magic potential", "Requirement of a grimoire to activate"],
+      "answer": "Alignment of the user's personality with the corresponding Sin and erosion of sanity"
+    },
+    {
+      "question": "The Sin Archbishops are described as 'utterly insane' because their personalities are what?",
+      "options": ["Twisted and amplified by their respective sins", "Calm and calculating", "Mild and apologetic", "Completely identical to their human past selves"],
+      "answer": "Twisted and amplified by their respective sins"
+    },
+    {
+      "question": "Which Royal Selection candidate in your source is described as a merchant who wants to open the world's borders?",
+      "options": ["Anastasia Hoshin", "Priscilla Barielle", "Crusch Karsten", "Felt"],
+      "answer": "Anastasia Hoshin"
+    },
+    {
+      "question": "Which candidate believes the throne should be earned and is described as a street urchin?",
+      "options": ["Felt", "Emilia", "Priscilla", "Crusch"],
+      "answer": "Felt"
+    },
+    {
+      "question": "What ability is Crusch Karsten said to possess (a Divine Protection) in your source?",
+      "options": ["Wind Reading — seeing lies and sensing emotions in the air", "Divine Sight — seeing future events", "Stone Skin — immunity to physical harm", "Mindless Charm — controlling crowds"],
+      "answer": "Wind Reading — seeing lies and sensing emotions in the air"
+    },
+    {
+      "question": "Which knight is described as Crusch's loyal healer and cross-dressing male in your source?",
+      "options": ["Felix Argyle", "Wilhelm Van Astrea", "Reinhard Van Astrea", "Garfield"],
+      "answer": "Felix Argyle"
+    },
+    {
+      "question": "Wilhelm Van Astrea is described in your source as having which two relations/roles?",
+      "options": ["Reinhard's grandfather and the former Sword Saint who slew the White Whale", "Subaru's mentor and a Spirit Mage", "Roswaal's rival and a Sin Archbishop", "Crusch's son and a merchant lord"],
+      "answer": "Reinhard's grandfather and the former Sword Saint who slew the White Whale"
+    },
+    {
+      "question": "Arc 3's major turning point culminated in what tragic outcome for Rem (per your source)?",
+      "options": ["Rem is put into a coma", "Rem becomes a Sin Archbishop", "Rem leaves the series", "Rem kills Subaru"],
+      "answer": "Rem is put into a coma"
+    },
+    {
+      "question": "Which camp is described as militaristic and efficient, with a legendary swordsman named Wilhelm?",
+      "options": ["Crusch Camp", "Emilia Camp", "Priscilla Camp", "Felt Camp"],
+      "answer": "Crusch Camp"
+    },
+    {
+      "question": "Which character’s arc involves growing into a confident leader and confronting a traumatic past 'frozen in ice'?",
+      "options": ["Emilia", "Rem", "Beatrice", "Ram"],
+      "answer": "Emilia"
+    },
+    {
+      "question": "What descriptive consequence does the source give for Emilia’s resemblance to Satella?",
+      "options": ["Intense racism and isolation", "Instant royal acceptance", "Divine protection from authorities", "Loss of her magic abilities"],
+      "answer": "Intense racism and isolation"
+    },
+    {
+      "question": "What does the source say Echidna primarily views people's suffering as?",
+      "options": ["Data points in a grand experiment", "A divine punishment to be enacted", "An unforgivable sin", "A call to immediate murder"],
+      "answer": "Data points in a grand experiment"
+    },
+    {
+      "question": "Which of the following is explicitly stated in your source as NOT being consumed when using an Authority?",
+      "options": ["Mana", "Willpower", "Life force", "Time"],
+      "answer": "Mana"
+    },
+    {
+      "question": "Which arc involved Subaru confessing Return by Death to Echidna, according to the text you provided?",
+      "options": ["Arc 4 (The Sanctuary)", "Arc 1 (The Capital City)", "Arc 5 (The Tower)", "Arc 2 (Roswaal Mansion)"],
+      "answer": "Arc 4 (The Sanctuary)"
+    },
+    {
+      "question": "According to your source, what narrative role does Reinhard often serve relative to Subaru?",
+      "options": ["A near-invincible solution to problems Subaru cannot solve", "Subaru's primary combat rival who opposes him", "A minor background character with no impact", "The primary antagonist of the series"],
+      "answer": "A near-invincible solution to problems Subaru cannot solve"
+    },
+    {
+      "question": "Which Witch is Roswaal trying to resurrect as part of his 400-year plan, per your source?",
+      "options": ["Echidna, the Witch of Greed", "Satella, the Witch of Envy", "Minerva, the Witch of Wrath", "Daphne, the Witch of Gluttony"],
+      "answer": "Echidna, the Witch of Greed"
+    }
 
-  {
-    "question": "Who is Kazuma's partner in Konosuba?",
-    "options": ["Aqua", "Megumin", "Darkness", "Yunyun"],
-    "answer": "Aqua"
-  },
-  {
-    "question": "Which magic does Megumin specialize in?",
-    "options": ["Explosion Magic", "Water Magic", "Healing Magic", "Wind Magic"],
-    "answer": "Explosion Magic"
-  },
-  {
-    "question": "Who is the masochistic crusader in Kazuma's party?",
-    "options": ["Darkness", "Aqua", "Megumin", "Wiz"],
-    "answer": "Darkness"
-  },
-  {
-    "question": "What is Kazuma's signature skill?",
-    "options": ["Steal", "Explosion", "Swordsmanship", "Healing"],
-    "answer": "Steal"
-  },
-  {
-    "question": "Which demon lord does the group fight first?",
-    "options": ["Verdia", "Vanir", "Dullahan", "Krauser"],
-    "answer": "Vanir"
-  },
-  {
-    "question": "Who is the archwizard that owns a magic shop?",
-    "options": ["Wiz", "Yunyun", "Aqua", "Megumin"],
-    "answer": "Wiz"
-  },
-  {
-    "question": "What is Darkness's real name?",
-    "options": ["Lalatina Dustiness Ford", "Mitsurugi", "Kazuma", "Megumin"],
-    "answer": "Lalatina Dustiness Ford"
-  },
-  {
-    "question": "Which town do they frequently visit for quests?",
-    "options": ["Axel", "Lagos", "Ragnarok", "Frostgard"],
-    "answer": "Axel"
-  },
-  {
-    "question": "Who has a crush on Yunyun?",
-    "options": ["Kazuma", "Megumin", "Aqua", "Darkness"],
-    "answer": "Kazuma"
-  },
-
-  {
-    "question": "Who is the male lead in Horimiya?",
-    "options": ["Izumi Miyamura", "Kyoko Hori", "Tooru Ishikawa", "Sota Hori"],
-    "answer": "Izumi Miyamura"
-  },
-  {
-    "question": "What is Kyoko Hori's younger brother's name?",
-    "options": ["Sota", "Tooru", "Izumi", "Kakeru"],
-    "answer": "Sota"
-  },
-  {
-    "question": "What color is Miyamura's hair before school?",
-    "options": ["Black", "Brown", "Blue", "Purple"],
-    "answer": "Black"
-  },
-  {
-    "question": "Who is Miyamura's close friend at school?",
-    "options": ["Tooru Ishikawa", "Kyoko Hori", "Sota Hori", "Rem"],
-    "answer": "Tooru Ishikawa"
-  },
-  {
-    "question": "Where do Hori and Miyamura frequently meet after school?",
-    "options": ["Miyamura's house", "School", "Cafe", "Park"],
-    "answer": "Miyamura's house"
-  },
-  {
-    "question": "Which club is Tooru Ishikawa part of?",
-    "options": ["Soccer Club", "Art Club", "Drama Club", "Music Club"],
-    "answer": "Soccer Club"
-  },
-  {
-    "question": "What is Hori's favorite snack?",
-    "options": ["Chocolate", "Candy", "Chips", "Ice Cream"],
-    "answer": "Chocolate"
-  },
-  {
-    "question": "Who helps Miyamura with his piercings?",
-    "options": ["Kyoko Hori", "Tooru Ishikawa", "Sota Hori", "Rem"],
-    "answer": "Kyoko Hori"
-  },
-  {
-    "question": "What is the theme of Horimiya?",
-    "options": ["Romance", "Action", "Comedy", "Horror"],
-    "answer": "Romance"
-  },
+  ],
+  "Black Clover": [
     {
-    "question": "What is the full name of the Sin Archbishops’ leader, Petelgeuse?",
-    "options": ["Petelgeuse Romanee-Conti", "Petelgeuse van Astrea", "Petelgeuse Mathers", "Petelgeuse Lugnica"],
-    "answer": "Petelgeuse Romanee-Conti"
-  },
-  {
-    "question": "Which magical construct maintains the library in Roswaal’s mansion?",
-    "options": ["Beatrice", "Puck", "Subaru", "Crusch"],
-    "answer": "Beatrice"
-  },
-  {
-    "question": "What is the specific time Subaru first discovers the ability 'Return by Death'?",
-    "options": ["After dying in the capital", "After dying in the mansion", "After fighting Petelgeuse", "After meeting Rem"],
-    "answer": "After dying in the capital"
-  },
-  {
-    "question": "Which cult member is known for using surgical precision and a scalpel as a weapon?",
-    "options": ["Lye Batenkaitos", "Regulus Corneas", "Petelgeuse Romanee-Conti", "Elsa Granhiert"],
-    "answer": "Lye Batenkaitos"
-  },
-  {
-    "question": "Who becomes the temporary ruler of the Crusch faction after her absence?",
-    "options": ["Priscilla", "Reinhard", "Subaru", "Felt"],
-    "answer": "Reinhard"
-  },
-  {
-    "question": "What is the name of the dragon spirit sealed in the Roswaal mansion?",
-    "options": ["Puck", "Flora", "Felt", "Crusch"],
-    "answer": "Puck"
-  },
-  {
-    "question": "What is the significance of the insignia on Rem’s maid uniform?",
-    "options": ["It marks her as a Rem clan member", "It symbolizes loyalty to Roswaal", "It denotes magical power", "It represents her twin bond"],
-    "answer": "It symbolizes loyalty to Roswaal"
-  },
-  {
-    "question": "Which character kills Subaru multiple times in the first arc to test 'Return by Death'?",
-    "options": ["Elsa Granhiert", "Petelgeuse Romanee-Conti", "Regulus Corneas", "Wilhelm van Astrea"],
-    "answer": "Petelgeuse Romanee-Conti"
-  },
-  {
-    "question": "Which of these is NOT a member of the Witch Cult's Sin Archbishops?",
-    "options": ["Echidna", "Petelgeuse", "Regulus", "Lye"],
-    "answer": "Echidna"
-  },
-  {
-    "question": "Which character has a powerful curse on them that affects everyone around them?",
-    "options": ["Satella", "Emilia", "Subaru", "Beatrice"],
-    "answer": "Satella"
-  },
-  {
-    "question": "What is the true name of Rem’s twin sister, Ram?",
-    "options": ["Ram", "Ramiel", "Ramona", "Remilia"],
-    "answer": "Ram"
-  },
-  {
-    "question": "Which arc introduces the Sanctuary and the Archbishop Regulus?",
-    "options": ["Arc 4", "Arc 2", "Arc 3", "Arc 5"],
-    "answer": "Arc 4"
-  },
-  {
-    "question": "What object does Subaru repeatedly use to communicate past events to himself?",
-    "options": ["Diary", "Letter", "Signet Ring", "Magic Scroll"],
-    "answer": "Diary"
-  },
-  {
-    "question": "Which character possesses the 'Witch Factor' allowing her to manipulate life and death?",
-    "options": ["Echidna", "Satella", "Beatrice", "Crusch"],
-    "answer": "Echidna"
-  },
-  {
-    "question": "What is the first name of Crusch's loyal knight, often seen protecting her?",
-    "options": ["Reinhard", "Wilhelm", "Garfield", "Felt"],
-    "answer": "Wilhelm"
-  },
-  {
-    "question": "Which of these events triggers Subaru’s initial memory reset?",
-    "options": ["His death in the royal capital", "Emilia’s kidnapping", "Meeting Beatrice", "The Witch Cult attack on the mansion"],
-    "answer": "His death in the royal capital"
-  },
-  {
-    "question": "Which character is known for carrying a giant axe and being extremely protective of Crusch?",
-    "options": ["Garfield", "Wilhelm", "Reinhard", "Petelgeuse"],
-    "answer": "Garfield"
-  },
-  {
-    "question": "What food does Subaru frequently crave, becoming a running gag?",
-    "options": ["Pocky", "Rice Balls", "Onigiri", "Sandwiches"],
-    "answer": "Onigiri"
-  },
-  {
-    "question": "Who ultimately defeats the Archbishop of Greed, Regulus Corneas?",
-    "options": ["Subaru and Reinhard", "Emilia alone", "Beatrice", "Rem and Ram"],
-    "answer": "Subaru and Reinhard"
-  },
-  {
-    "question": "Which character has the ability to nullify magic using their sword?",
-    "options": ["Reinhard", "Wilhelm", "Garfield", "Petelgeuse"],
-    "answer": "Wilhelm"
-  },
+      "question": "Which character is the Sword Saint of Lugnica in Black Clover?",
+      "options": ["Yuno", "Asta", "Noelle", "Julius"],
+      "answer": "Yuno"
+    },
     {
-    "question": "In 'Attack on Titan', what is the original name of the Founding Titan?",
-    "options": ["Ymir Fritz", "Eren Yeager", "Historia Reiss", "Levi Ackerman"],
-    "answer": "Ymir Fritz"
-  },
-  {
-    "question": "In 'Death Note', what is the full name of L?",
-    "options": ["L Lawliet", "Light Yagami", "Ryuk", "Near"],
-    "answer": "L Lawliet"
-  },
-  {
-    "question": "In 'Steins;Gate', what gadget does Okabe Rintarou use to send messages to the past?",
-    "options": ["Phone Microwave", "Time Turner", "Chrono Trigger", "Future Gadget 101"],
-    "answer": "Phone Microwave"
-  },
-  {
-    "question": "In 'Fullmetal Alchemist: Brotherhood', who is the Father of the Homunculi?",
-    "options": ["Father", "Father Cornello", "Lust", "Envy"],
-    "answer": "Father"
-  },
-  {
-    "question": "In 'One Piece', which Devil Fruit did Nico Robin eat?",
-    "options": ["Hana Hana no Mi", "Gomu Gomu no Mi", "Mera Mera no Mi", "Tori Tori no Mi"],
-    "answer": "Hana Hana no Mi"
-  },
-  {
-    "question": "In 'Code Geass', what is the Geass power given to Lelouch?",
-    "options": ["Power of Absolute Obedience", "Time Travel", "Mind Reading", "Invincibility"],
-    "answer": "Power of Absolute Obedience"
-  },
-  {
-    "question": "In 'Tokyo Ghoul', what is the name of Kaneki's ghoul mask designer?",
-    "options": ["Uta", "Touka", "Nishiki", "Yoshimura"],
-    "answer": "Uta"
-  },
-  {
-    "question": "In 'Naruto', who was the first person to awaken the Mangekyō Sharingan?",
-    "options": ["Indra Ōtsutsuki", "Itachi Uchiha", "Sasuke Uchiha", "Madara Uchiha"],
-    "answer": "Indra Ōtsutsuki"
-  },
-  {
-    "question": "In 'Re:Zero', which witch's cult worships the Witch of Envy?",
-    "options": ["Witch Cult", "Sanctuary Order", "Church of Lugnica", "Crusch Faction"],
-    "answer": "Witch Cult"
-  },
-  {
-    "question": "In 'Demon Slayer', what is the total number of forms in Tanjiro's Water Breathing techniques?",
-    "options": ["10", "12", "15", "8"],
-    "answer": "10"
-  },
+      "question": "What magic does Asta wield?",
+      "options": ["Anti-Magic", "Fire", "Water", "Wind"],
+      "answer": "Anti-Magic"
+    },
     {
-    "question": "In 'Steins;Gate', what is Kurisu Makise's nickname?",
-    "options": ["Christina", "Kuricha", "Makisen", "Kurisu-chan"],
-    "answer": "Kurisu-chan"
+      "question": "Who is Asta's rival and childhood friend?",
+      "options": ["Yuno", "Noelle", "Finral", "Magna"],
+      "answer": "Yuno"
+    },
+    {
+      "question": "Which squad is Yuno part of?",
+      "options": ["Golden Dawn", "Black Bulls", "Silver Eagles", "Crimson Lion Kings"],
+      "answer": "Golden Dawn"
+    },
+    {
+      "question": "What is the true identity of the 'Black Reaper' in 'Black Clover'?",
+      "options": ["Yami Sukehiro", "Luck Voltia", "Asta", "Noelle Silva"],
+      "answer": "Yami Sukehiro"
+    },
+    {
+    "question": "How many leaves does Yuno's grimoire have?",
+    "options": ["One-leaf", "Three-leaf", "Four-leaf", "Five-leaf"],
+    "answer": "Four-leaf"
+    },
+    {
+      "question": "What is the name of the wind spirit that aids Yuno?",
+      "options": ["Undine", "Sylph", "Salamander", "Gnome"],
+      "answer": "Sylph"
+    },
+    {
+      "question": "What is Noelle Silva's primary element of magic?",
+      "options": ["Fire", "Water", "Earth", "Lightning"],
+      "answer": "Water"
+    },
+    {
+      "question": "Which signature technique is Noelle known for?",
+      "options": ["Sea Dragon's Roar", "Flame Slash", "Thunder Barrage", "Earth Split"],
+      "answer": "Sea Dragon's Roar"
+    },
+    {
+      "question": "What is the name of the devil residing in Asta's grimoire?",
+      "options": ["Zagred", "Liebe", "Zechs", "Lucifero"],
+      "answer": "Liebe"
+    },
+    {
+      "question": "How many leaves does Asta's grimoire have?",
+      "options": ["Three-leaf", "Four-leaf", "Five-leaf", "Six-leaf"],
+      "answer": "Five-leaf"
+    },
+    {
+      "question": "What type of magic does Luck Voltia primarily use?",
+      "options": ["Wind Magic", "Lightning Magic", "Ice Magic", "Sound Magic"],
+      "answer": "Lightning Magic"
+    },
+    {
+      "question": "What kind of magic is Magna Swing known for?",
+      "options": ["Earth Magic", "Fire Magic", "Water Magic", "Light Magic"],
+      "answer": "Fire Magic"
+    },
+    {
+      "question": "What is Gauche Adlai's specialty magic?",
+      "options": ["Mirror Magic", "Thread Magic", "Trap Magic", "Bone Magic"],
+      "answer": "Mirror Magic"
+    },
+    {
+      "question": "Charmy Pappitson is famous for combining food obsession with which magic?",
+      "options": ["Cotton Magic", "Stone Magic", "Shadow Magic", "Beast Magic"],
+      "answer": "Cotton Magic"
+    },
+    {
+      "question": "What magic does Vanessa Enoteca primarily use?",
+      "options": ["Ink Magic", "Thread Magic", "Paper Magic", "Wind Magic"],
+      "answer": "Thread Magic"
+    },
+    {
+      "question": "The bird nicknamed 'Nero' is actually which character in human form?",
+      "options": ["Secre Swallowtail", "Marie Adlai", "Mimosa Vermillion", "Charlotte Roselei"],
+      "answer": "Secre Swallowtail"
+    },
+    {
+      "question": "Which Magic Knight was famous for mastering Time Magic?",
+      "options": ["Yami Sukehiro", "Julius Novachrono", "William Vangeance", "Fuegoleon Vermillion"],
+      "answer": "Julius Novachrono"
+    },
+    {
+      "question": "What is the name of the main kingdom where much of Black Clover takes place?",
+      "options": ["Heart Kingdom", "Spade Kingdom", "Clover Kingdom", "Diamond Kingdom"],
+      "answer": "Clover Kingdom"
+    },
+    {
+      "question": "In Black Clover lore, what is a grimoire?",
+      "options": ["A magic book that grants spells to its wielder", "A type of weapon", "A royal title", "A fortress"],
+      "answer": "A magic book that grants spells to its wielder"
+    },
+    {
+      "question": "Which Magic Knight squad is famous for accepting eccentric and rejected members?",
+      "options": ["Golden Dawn", "Black Bulls", "Crimson Lion Kings", "Silver Eagles"],
+      "answer": "Black Bulls"
+    },
+    {
+      "question": "Who is the captain of the Crimson Lion Kings?",
+      "options": ["Nozel Silva", "Fuegoleon Vermillion", "Gordon Agrippa", "Langris Vaude"],
+      "answer": "Fuegoleon Vermillion"
+    },
+    {
+      "question": "What elemental magic is Fuegoleon Vermillion associated with?",
+      "options": ["Wind", "Water", "Fire", "Earth"],
+      "answer": "Fire"
+    },
+    {
+      "question": "Which weapon does Yami Sukehiro most commonly use in battle?",
+      "options": ["Bow", "Spear", "Sword", "Gauntlets"],
+      "answer": "Sword"
+    },
+    {
+      "question": "Who among the Black Bulls is known to use 'Shadow' related tactics and serves as a strategic vice-captain?",
+      "options": ["Nacht Faust", "Finral Roulacase", "Gordon Agrippa", "Charmy Pappitson"],
+      "answer": "Nacht Faust"
+    },
+    {
+      "question": "What type of magic does Finral Roulacase specialize in?",
+      "options": ["Spatial Magic", "Sound Magic", "Bone Magic", "Thread Magic"],
+      "answer": "Spatial Magic"
+    },
+    {
+      "question": "Which Black Bulls member primarily uses plant-based or restoration magic?",
+      "options": ["Mimosa Vermillion", "Noelle Silva", "Charmy Pappitson", "Magna Swing"],
+      "answer": "Mimosa Vermillion"
+    },
+    {
+      "question": "To which noble family does Noelle belong?",
+      "options": ["Silva", "Vermillion", "Kira", "Adlai"],
+      "answer": "Silva"
+    },
+    {
+      "question": "What is the name of the antagonistic organization that once sought to revive the elves?",
+      "options": ["Black Bulls", "Eye of the Midnight Sun", "Royal Knights", "Imperial Guard"],
+      "answer": "Eye of the Midnight Sun"
+    },
+    {
+      "question": "Who was the elf leader around whom much of the Eye of the Midnight Sun's history revolves?",
+      "options": ["Licht", "Zagred", "Secre", "Liebe"],
+      "answer": "Licht"
+    },
+    {
+      "question": "Approximately how many official Magic Knight squads are there in the Clover Kingdom?",
+      "options": ["5", "7", "9", "12"],
+      "answer": "9"
+    },
+    {
+      "question": "What does a four-leaf grimoire commonly indicate about its wielder?",
+      "options": ["They are a villain", "They have low mana", "They are extremely talented/fortunate", "They cannot use magic"],
+      "answer": "They are extremely talented/fortunate"
+    },
+    {
+      "question": "From which village did Asta originate (the place he grew up in the orphanage)?",
+      "options": ["Hage Village", "Katia Village", "Seabed Town", "Forge Town"],
+      "answer": "Hage Village"
+    },
+    {
+      "question": "Which Black Bulls member is known for setting many traps and using 'Trap Magic'?",
+      "options": ["Zora Ideale", "Gauche Adlai", "Magna Swing", "Luck Voltia"],
+      "answer": "Zora Ideale"
+    },
+    {
+      "question": "What is the family name shared by Fuegoleon and Mimosa?",
+      "options": ["Silva", "Vermillion", "Kira", "Adlai"],
+      "answer": "Vermillion"
+    },
+    {
+      "question": "Which Black Bulls member uses Poison Magic?",
+      "options": ["Gordon Agrippa", "Charmy Pappitson", "Finral Roulacase", "Vanessa Enoteca"],
+      "answer": "Gordon Agrippa"
+    },
+    {
+      "question": "Which member of the Black Bulls has a tragic past involving the Phantom Troupe? (note: think of emotional scars rather than a direct link)",
+      "options": ["Charmy Pappitson", "Gauche Adlai", "Vanessa Enoteca", "Magna Swing"],
+      "answer": "Gauche Adlai"
+    },
+    {
+      "question": "Which author created the Black Clover manga?",
+      "options": ["Eiichiro Oda", "Yūki Tabata", "Tite Kubo", "Hajime Isayama"],
+      "answer": "Yūki Tabata"
+    },
+    {
+      "question": "Which of these is NOT one of Asta's anti-magic swords?",
+      "options": ["Demon-Slayer Sword", "Demon-Dweller Sword", "Demon-Destroyer Sword", "Excalibur"],
+      "answer": "Excalibur"
+    },
+    {
+      "question": "Which of the following is an actual name of one of Asta's anti-magic swords?",
+      "options": ["Demon-Slayer Sword", "Dragonbane Blade", "Heaven's Tear", "Soulcrusher"],
+      "answer": "Demon-Slayer Sword"
+    },
+    {
+      "question": "Which of these groups formed later as an allied force to face major threats (Royal selection from many squads)?",
+      "options": ["Eye of the Midnight Sun", "Royal Knights", "Black Bulls", "Diamond Guard"],
+      "answer": "Royal Knights"
+    },
+    {
+      "question": "Which Black Bulls member frequently provides comic relief while possessing surprising strength?",
+      "options": ["Vanessa Enoteca", "Charmy Pappitson", "Gordon Agrippa", "Zora Ideale"],
+      "answer": "Charmy Pappitson"
+    },
+    {
+      "question": "Which noble family is known for strong water magic users (hint: Noelle is from this family)?",
+      "options": ["Kira", "Silva", "Adlai", "Vaude"],
+      "answer": "Silva"
+    },
+    {
+      "question": "Which character is known for a powerful healing and plant-based support style during battles?",
+      "options": ["Mimosa Vermillion", "Noelle Silva", "Charmy Pappitson", "Yuno"],
+      "answer": "Mimosa Vermillion"
+    },
+    {
+      "question": "What term describes the phenomenon when a grimoire responds to a particular wielder (e.g., a grimoire chooses someone)?",
+      "options": ["Bonding", "Resonance", "Grimoire Sync", "Grimoire Acceptance"],
+      "answer": "Grimoire Acceptance"
+    },
+    {
+      "question": "Which character is known for mastering and using Spatial Magic to instantly move people or objects?",
+      "options": ["Finral Roulacase", "Gordon Agrippa", "Gauche Adlai", "Magna Swing"],
+      "answer": "Finral Roulacase"
+    },
+    {
+      "question": "Which of the following kingdoms is NOT part of the main four nations regularly shown in the series?",
+      "options": ["Clover Kingdom", "Spade Kingdom", "Heart Kingdom", "Maple Kingdom"],
+      "answer": "Maple Kingdom"
+    },
+    {
+      "question": "Which Black Bulls member later reveals surprising technical or scientific knowledge (often comedic)?",
+      "options": ["Charmy Pappitson", "Gordon Agrippa", "Vanessa Enoteca", "Magna Swing"],
+      "answer": "Gordon Agrippa"
+    },
+    {
+      "question": "Which organization originally sought to eliminate humans tied to certain crimes and later had complex motives tied to reincarnation?",
+      "options": ["Eye of the Midnight Sun", "Black Bulls", "Royal Knights", "Golden Dawn"],
+      "answer": "Eye of the Midnight Sun"
+    },
+    {
+      "question": "Which character often acts stoic and serious and is a member of the Golden Dawn (well-known for discipline and skill)?",
+      "options": ["Langris Vaude", "Gauche Adlai", "Charmy Pappitson", "Magna Swing"],
+      "answer": "Langris Vaude"
+    },
+    {
+      "question": "What is commonly used in Black Clover as the symbol on a grimoire indicating an extraordinarily rare four-leaf or five-leaf?",
+      "options": ["A star", "A clover leaf", "A sword", "A crown"],
+      "answer": "A clover leaf"
+    },
+    {
+      "question": "Which Black Bulls member is recognized for clever use of 'Red Thread of Fate' to alter outcomes?",
+      "options": ["Vanessa Enoteca", "Charmy Pappitson", "Gordon Agrippa", "Noelle Silva"],
+      "answer": "Vanessa Enoteca"
+    },
+    {
+      "question": "Who is known in-universe as the 'Wizard King' titleholder protecting the Clover Kingdom?",
+      "options": ["Yami Sukehiro", "Julius Novachrono", "Fuegoleon Vermillion", "William Vangeance"],
+      "answer": "Julius Novachrono"
+    }
+  ],
+  "Konosuba": [
+    {
+      "question": "Who is Kazuma's partner in Konosuba?",
+      "options": ["Aqua", "Megumin", "Darkness", "Yunyun"],
+      "answer": "Aqua"
+    },
+    {
+      "question": "Which magic does Megumin specialize in?",
+      "options": ["Explosion Magic", "Water Magic", "Healing Magic", "Wind Magic"],
+      "answer": "Explosion Magic"
+    },
+    {
+      "question": "Who is the masochistic crusader in Kazuma's party?",
+      "options": ["Darkness", "Aqua", "Megumin", "Wiz"],
+      "answer": "Darkness"
+    },
+    {
+      "question": "What is Kazuma's signature skill?",
+      "options": ["Steal", "Explosion", "Swordsmanship", "Healing"],
+      "answer": "Steal"
+    },
+    {
+      "question": "Which demon lord does the group fight first?",
+      "options": ["Verdia", "Vanir", "Dullahan", "Krauser"],
+      "answer": "Vanir"
+    },
+    {
+      "question": "Who is the archwizard that owns a magic shop?",
+      "options": ["Wiz", "Yunyun", "Aqua", "Megumin"],
+      "answer": "Wiz"
+    },
+    {
+      "question": "What is Darkness's real name?",
+      "options": ["Lalatina Dustiness Ford", "Mitsurugi", "Kazuma", "Megumin"],
+      "answer": "Lalatina Dustiness Ford"
+    },
+    {
+      "question": "Which town do they frequently visit for quests?",
+      "options": ["Axel", "Lagos", "Ragnarok", "Frostgard"],
+      "answer": "Axel"
+    },
+    {
+      "question": "Who has a crush on Yunyun?",
+      "options": ["Kazuma", "Megumin", "Aqua", "Darkness"],
+      "answer": "Kazuma"
+    },
+    {
+      "question": "In 'Konosuba', what is Aqua’s official title?",
+      "options": ["Goddess of Water", "Archwizard", "Saint", "Crusader"],
+      "answer": "Goddess of Water"
+    },
+     {
+    "question": "What is Kazuma Satou's class/job when he first becomes an adventurer?",
+    "options": ["Adventurer", "Mage", "Priest", "Crusader"],
+    "answer": "Adventurer"
+    },
+    {
+      "question": "What is the name of Megumin's small black familiar?",
+      "options": ["Chomusuke", "Nero", "Puck", "Kero"],
+      "answer": "Chomusuke"
+    },
+    {
+      "question": "Megumin belongs to which clan known for powerful magic users?",
+      "options": ["Crimson Demon Clan", "Silver Fox Clan", "Azure Mage Clan", "Sunflower Clan"],
+      "answer": "Crimson Demon Clan"
+    },
+    {
+      "question": "How many times per day does Megumin typically cast her Explosion spell?",
+      "options": ["Once", "Twice", "Three times", "Unlimited"],
+      "answer": "Once"
+    },
+    {
+      "question": "What is the name of the town where Kazuma and his party usually take quests?",
+      "options": ["Axel", "Zanarkand", "Lagos", "Fortenia"],
+      "answer": "Axel"
+    },
+    {
+      "question": "Which object functions as the central hub for taking quests in town?",
+      "options": ["Adventurer's Guild", "Royal Palace", "Magic Tower", "Church Hall"],
+      "answer": "Adventurer's Guild"
+    },
+    {
+      "question": "What unusual trait is Darkness best known for?",
+      "options": ["Masochism", "Fear of heights", "Invisibility", "Love of cooking"],
+      "answer": "Masochism"
+    },
+    {
+      "question": "What type of combat role best describes Darkness?",
+      "options": ["Tank / Crusader", "Healer", "Ranged DPS", "Support Mage"],
+      "answer": "Tank / Crusader"
+    },
+    {
+      "question": "Which character is a lich who runs a magic shop in Axel?",
+      "options": ["Wiz", "Iris", "Eris", "Luna"],
+      "answer": "Wiz"
+    },
+    {
+      "question": "What is the profession of Eris in the town where Kazuma settles?",
+      "options": ["Shrine goddess / Priestess", "Blacksmith", "Guild receptionist", "Merchant"],
+      "answer": "Shrine goddess / Priestess"
+    },
+    {
+      "question": "Which class is Chris most associated with when seen working with Kazuma?",
+      "options": ["Thief", "Mage", "Cleric", "Warrior"],
+      "answer": "Thief"
+    },
+    {
+      "question": "What is one of Aqua's recurring weaknesses that causes trouble for the party?",
+      "options": ["Bad luck with money and poor common-sense", "Inability to use water magic", "Allergic to cats", "Fear of darkness"],
+      "answer": "Bad luck with money and poor common-sense"
+    },
+    {
+      "question": "What is the specialty of Yunyun compared to Megumin?",
+      "options": ["Supportive magic and academics as a Crimson Demon", "Swordsmanship", "Divine healing", "Long-range archery"],
+      "answer": "Supportive magic and academics as a Crimson Demon"
+    },
+    {
+      "question": "Which sport-like tournament do villagers hold that briefly involves the main cast?",
+      "options": ["Festival Games", "Royal Trials", "Crimson Cup", "Harvest Joust"],
+      "answer": "Festival Games"
+    },
+    {
+      "question": "What kind of establishment is Wiz’s shop primarily?",
+      "options": ["Magic shop and funeral parlor", "Tavern", "Blacksmith", "Guild Hall"],
+      "answer": "Magic shop and funeral parlor"
+    },
+    {
+      "question": "What is Kazuma's usual approach when dealing with tough monsters?",
+      "options": ["Strategy and trickery", "Head-on charge", "Only magic", "Running away always"],
+      "answer": "Strategy and trickery"
+    },
+    {
+      "question": "Which of these is a frequent comedic cause of arguments in the party?",
+      "options": ["Money and living expenses", "Different hometowns", "Food preferences", "Rival guilds"],
+      "answer": "Money and living expenses"
+    },
+    {
+      "question": "What is the primary reason Megumin refuses to learn other spells?",
+      "options": ["She is obsessed with Explosion and values its perfection", "She can't read", "She lost her grimoire", "She is allergic to other spells"],
+      "answer": "She is obsessed with Explosion and values its perfection"
+    },
+    {
+      "question": "Which of these is a common side job the group takes to earn money?",
+      "options": ["Monster hunting and odd jobs", "Royal courier", "Ship crewing", "Temple maintenance"],
+      "answer": "Monster hunting and odd jobs"
+    },
+    {
+      "question": "What is the nature of Vanir (the demon) in relation to other characters? (not the one you already asked about)",
+      "options": ["A demon who enjoys human entertainment and tricks", "A wandering merchant", "A royal knight", "A god of harvest"],
+      "answer": "A demon who enjoys human entertainment and tricks"
+    },
+    {
+      "question": "Which daily habit gets Kazuma into trouble the most?",
+      "options": ["Gambling or skimming money with 'Steal' attempts gone wrong", "Training too hard", "Talking to animals", "Collecting herbs"],
+      "answer": "Gambling or skimming money with 'Steal' attempts gone wrong"
+    },
+    {
+      "question": "What is a distinct trait of the Crimson Demon Village’s appearance and culture?",
+      "options": ["Bright, flashy costumes and chūnibyō culture", "Monk-like robes", "Steampunk machinery", "Nomadic tents"],
+      "answer": "Bright, flashy costumes and chūnibyō culture"
+    },
+    {
+      "question": "Which character is best at spatial/teleportation type magic in the party?",
+      "options": ["Finana (or similar ally) — but among main cast, Finral Roulacase (ally)", "Aqua", "Megumin", "Wiz"],
+      "answer": "Finral Roulacase (ally)"
+    },
+    {
+      "question": "Which of these is a running gag with Megumin after casting her spell?",
+      "options": ["She falls unconscious from using Explosion", "She transforms into a frog", "She loses her voice permanently", "She grows a second head"],
+      "answer": "She falls unconscious from using Explosion"
+    },
+    {
+      "question": "Which member of the cast occasionally acts as a self-proclaimed hero idol and fanboy?",
+      "options": ["Kyouya Mitsurugi (fan of heroes)", "Aqua", "Wiz", "Yunyun"],
+      "answer": "Kyouya Mitsurugi (fan of heroes)"
+    },
+    {
+      "question": "Which of these best describes Aqua's combat specialty?",
+      "options": ["Purification and healing magic", "Long-range sniping", "Summoning dragons", "Trap-setting"],
+      "answer": "Purification and healing magic"
+    },
+    {
+      "question": "What usually happens to Kazuma's savings?",
+      "options": ["They get spent quickly due to party expenses and poor investments", "They multiply magically", "They are stored in a royal vault", "They are always kept safe"],
+      "answer": "They get spent quickly due to party expenses and poor investments"
+    },
+    {
+      "question": "Which festival feature often brings the cast into strange side-quests?",
+      "options": ["Consolation prizes and contest mishaps", "Royal edicts", "Seasonal floods", "Meteor showers"],
+      "answer": "Consolation prizes and contest mishaps"
+    },
+    {
+      "question": "Which of the following is a common reason villagers fear Aqua despite her being a goddess?",
+      "options": ["Her poor common sense and tendency to attract trouble", "Her monstrous size", "Her divine wrath", "Her habit of turning people to stone"],
+      "answer": "Her poor common sense and tendency to attract trouble"
+    },
+    {
+      "question": "What role does the Adventurer’s Guild play in the series?",
+      "options": ["Assigns quests, handles bounties and rankups", "Produces magic items", "Runs the royal treasury", "Governs the kingdom"],
+      "answer": "Assigns quests, handles bounties and rankups"
+    },
+    {
+      "question": "What is Kazuma notoriously bad at when interacting with townsfolk?",
+      "options": ["Long-term financial planning", "Basic conversation", "Cooking entirely", "Using weapons"],
+      "answer": "Long-term financial planning"
+    },
+    {
+      "question": "Which of these is an occasional ally to Kazuma’s party (appears as a friendly NPC)?",
+      "options": ["Wiz (and other shopkeepers/clerics)", "A Demon Lord in disguise", "A Dragon King", "An evil knight leader"],
+      "answer": "Wiz (and other shopkeepers/clerics)"
+    },
+    {
+      "question": "Which of these items is often the cause of comedic conflict (treasure disputes)?",
+      "options": ["Spoils and rare items from quests", "Magic tomes of apathy", "Godly crowns", "Royal swords used for baking"],
+      "answer": "Spoils and rare items from quests"
+    },
+    {
+      "question": "What best describes Kazuma's leadership style of the party?",
+      "options": ["Pragmatic, money-minded, and opportunistic", "Stoic and battle-first", "Purely diplomatic", "Magical-focused"],
+      "answer": "Pragmatic, money-minded, and opportunistic"
+    },
+    {
+      "question": "Which character is known for having a childish-but-competent personality and often competes academically in Crimson Demon Village?",
+      "options": ["Yunyun", "Aqua", "Darkness", "Wiz"],
+      "answer": "Yunyun"
+    },
+    {
+      "question": "What is the most celebrated thing about Megumin among Crimson Demons?",
+      "options": ["Her single-minded devotion to Explosion magic", "Her cooking", "Her merchant skills", "Her singing"],
+      "answer": "Her single-minded devotion to Explosion magic"
+    },
+    {
+      "question": "Which type of establishment often hosts town announcements and prize drawings that the party attends?",
+      "options": ["Taverns and squares", "Royal throne rooms", "Temples only", "Mages' towers"],
+      "answer": "Taverns and squares"
+    },
+    {
+      "question": "Which of the following is a recurring activity Kazuma tries to exploit for profit?",
+      "options": ["Consolation prizes, contests, and side quests", "Looting royal tombs", "Training dragons for sport", "Reality TV shows"],
+      "answer": "Consolation prizes, contests, and side quests"
+    },
+    {
+      "question": "What is a major source of embarrassment for Aqua when dealing with other deities or godly matters?",
+      "options": ["Her tendency to behave immaturely and be easily flustered", "Her inability to fly", "Her lack of a grimoire", "Her allergy to sunlight"],
+      "answer": "Her tendency to behave immaturely and be easily flustered"
+    },
+    {
+      "question": "Which member of the party is most likely to volunteer for the most dangerous front-line duty?",
+      "options": ["Darkness (because she enjoys taking hits)", "Aqua", "Megumin", "Kazuma"],
+      "answer": "Darkness (because she enjoys taking hits)"
+    },
+    {
+      "question": "Which of these activities is Megumin surprisingly bad at due to her obsession with Explosion?",
+      "options": ["Everyday chores and multi-spell tactics", "Explosive precision", "One-shot tactics", "Dramatic posing"],
+      "answer": "Everyday chores and multi-spell tactics"
+    },
+    {
+      "question": "Which term best describes the typical tone of Konosuba episodes and events?",
+      "options": ["Comedy and parody of isekai tropes", "Grimdark drama", "Systematic procedural", "Psychological thriller"],
+      "answer": "Comedy and parody of isekai tropes"
+    },
+    {
+      "question": "Which of these creatures is commonly fought by Kazuma's party early in the series?",
+      "options": ["Slimes and low-tier monsters", "Gods of old", "Ancient dragons immediately", "Celestial beings exclusively"],
+      "answer": "Slimes and low-tier monsters"
+    },
+    {
+      "question": "Which member of the Crimson Demon clan is most academically inclined and earnest?",
+      "options": ["Yunyun", "Megumin", "Aqua", "Darkness"],
+      "answer": "Yunyun"
+    },
+    {
+      "question": "Which of these is a real in-universe award or event that the party sometimes tries to win?",
+      "options": ["Consolation prize contests and town competitions", "World Conquest Cup", "Godly Ascension Exam", "Dragonslayer League"],
+      "answer": "Consolation prize contests and town competitions"
+    },
+    {
+      "question": "Which of these best describes the relationship between Megumin and Yunyun?",
+      "options": ["Childhood rivals and friends from Crimson Demon Village", "Mother and daughter", "Strangers", "Teacher and student"],
+      "answer": "Childhood rivals and friends from Crimson Demon Village"
+    },
+    {
+      "question": "Which of the following is Kazuma's pragmatic solution when the party lacks money?",
+      "options": ["Take odd jobs, enter contests, or use stealthy skills", "Challenge the king", "Sell party members", "Harass nobles publicly"],
+      "answer": "Take odd jobs, enter contests, or use stealthy skills"
+    },
+    {
+      "question": "Which of these is a known effect after Megumin uses Explosion on large scale fights?",
+      "options": ["Huge destruction and her subsequent collapse from exhaustion", "Instant evolution into a dragon", "Glowing permanently", "Becoming immortal"],
+      "answer": "Huge destruction and her subsequent collapse from exhaustion"
+    },
+    {
+      "question": "Which of these is an occasional side-plot involving Aqua's divine status?",
+      "options": ["Her being called back to the goddess realm for ridiculous reasons", "She becomes emperor", "She builds a spaceship", "She becomes a dragon"],
+      "answer": "Her being called back to the goddess realm for ridiculous reasons"
+    },
+    {
+      "question": "Which character is most frequently responsible for healing the party during or after battles?",
+      "options": ["Aqua (healing and purification)", "Darkness", "Megumin", "Kazuma"],
+      "answer": "Aqua (healing and purification)"
+    },
+    {
+      "question": "Which of these best explains why Konosuba focuses on small-town antics rather than constant world-saving battles?",
+      "options": ["The series is a comedic slice-of-life take on isekai tropes", "Budget constraints in-universe", "Lack of monsters", "Strict royal decrees"],
+      "answer": "The series is a comedic slice-of-life take on isekai tropes"
+    },
+    {
+      "question": "What is a frequent outcome when the party obtains a 'rare item' in the series Konosuba?",
+      "options": ["Arguments over ownership or quick attempts to sell it for cash", "They immediately become heroes", "They hide it forever", "They return it to the demon lord"],
+      "answer": "Arguments over ownership or quick attempts to sell it for cash"
+    },
+    {
+      "question": "Which of these best describes Megumin's typical attire style?",
+      "options": ["Chūnibyō-inspired crimson robe and hat", "Knight's heavy armor", "Simple peasant clothes", "Royal garb"],
+      "answer": "Chūnibyō-inspired crimson robe and hat"
+    },
+    {
+      "question": "Which of the following is an occasional challenge Kazuma must overcome to survive in Axel?",
+      "options": ["Evading debt collectors and odd mishaps", "Sailing across the ocean", "Becoming the Wizard King", "Fighting in the Olympics"],
+      "answer": "Evading debt collectors and odd mishaps"
+    },
+    {
+      "question": "Which character often inadvertently causes the party to be blamed by townsfolk?",
+      "options": ["Aqua (through her antics)", "Megumin", "Yunyun", "Darkness"],
+      "answer": "Aqua (through her antics)"
+    },
+    {
+      "question": "Which of these is an emotion Kazuma commonly displays regarding his party’s antics?",
+      "options": ["Exasperated pragmatism and bemused irritation", "Blissful ignorance", "Unending joy", "Absolute fear of them"],
+      "answer": "Exasperated pragmatism and bemused irritation"
+    }
+  ],
+  "Horimiya": [
+    {
+      "question": "Who is the male lead in Horimiya?",
+      "options": ["Izumi Miyamura", "Kyoko Hori", "Tooru Ishikawa", "Sota Hori"],
+      "answer": "Izumi Miyamura"
+    },
+    {
+      "question": "What is Kyoko Hori's younger brother's name?",
+      "options": ["Sota", "Tooru", "Izumi", "Kakeru"],
+      "answer": "Sota"
+    },
+    {
+      "question": "What color is Miyamura's hair before school?",
+      "options": ["Black", "Brown", "Blue", "Purple"],
+      "answer": "Black"
+    },
+    {
+      "question": "Who is Miyamura's close friend at school?",
+      "options": ["Tooru Ishikawa", "Kyoko Hori", "Sota Hori", "Rem"],
+      "answer": "Tooru Ishikawa"
+    },
+    {
+      "question": "Where do Hori and Miyamura frequently meet after school?",
+      "options": ["Miyamura's house", "School", "Cafe", "Park"],
+      "answer": "Miyamura's house"
+    },
+    {
+      "question": "Which club is Tooru Ishikawa part of?",
+      "options": ["Soccer Club", "Art Club", "Drama Club", "Music Club"],
+      "answer": "Soccer Club"
+    },
+    {
+      "question": "What is Hori's favorite snack?",
+      "options": ["Chocolate", "Candy", "Chips", "Ice Cream"],
+      "answer": "Chocolate"
+    },
+    {
+      "question": "Who helps Miyamura with his piercings?",
+      "options": ["Kyoko Hori", "Tooru Ishikawa", "Sota Hori", "Rem"],
+      "answer": "Kyoko Hori"
+    },
+    {
+      "question": "What is the theme of Horimiya?",
+      "options": ["Romance", "Action", "Comedy", "Horror"],
+      "answer": "Romance"
+    }
+  ],
+  "Steins;Gate": [
+    {
+      "question": "In 'Steins;Gate', what gadget does Okabe Rintarou use to send messages to the past?",
+      "options": ["Phone Microwave", "Time Turner", "Chrono Trigger", "Future Gadget 101"],
+      "answer": "Phone Microwave"
+    },
+    {
+      "question": "In 'Steins;Gate', what is Kurisu Makise's nickname?",
+      "options": ["Christina", "Kuricha", "Makisen", "Kurisu-chan"],
+      "answer": "Kurisu-chan"
+    }
+  ],
+  "Fullmetal Alchemist": [
+    {
+      "question": "In 'Fullmetal Alchemist: Brotherhood', who is the Father of the Homunculi?",
+      "options": ["Father", "Father Cornello", "Lust", "Envy"],
+      "answer": "Father"
+    },
+    {
+      "question": "Which anime follows the adventures of Edward and Alphonse Elric as they seek the Philosopher's Stone?",
+      "options": ["Fullmetal Alchemist", "Blue Exorcist", "Black Clover", "Noragami"],
+      "answer": "Fullmetal Alchemist"
+    }
+  ],
+  "Code Geass": [
+    {
+      "question": "In 'Code Geass', what is the Geass power given to Lelouch?",
+      "options": ["Power of Absolute Obedience", "Time Travel", "Mind Reading", "Invincibility"],
+      "answer": "Power of Absolute Obedience"
+    }
+  ],
+  "Tokyo Ghoul": [
+    {
+      "question": "In 'Tokyo Ghoul', what is the name of Kaneki's ghoul mask designer?",
+      "options": ["Uta", "Touka", "Nishiki", "Yoshimura"],
+      "answer": "Uta"
+    }
+  ],
+  "Naruto": [
+    {
+      "question": "In 'Naruto', who was the first person to awaken the Mangekyō Sharingan?",
+      "options": ["Indra Ōtsutsuki", "Itachi Uchiha", "Sasuke Uchiha", "Madara Uchiha"],
+      "answer": "Indra Ōtsutsuki"
+    },
+    {
+      "question": "Which anime features a group of ninjas including Naruto, Sasuke, and Sakura?",
+      "options": ["Naruto", "Bleach", "Fairy Tail", "One Piece"],
+      "answer": "Naruto"
+    }
+  ],
+  "Demon Slayer": [
+    {
+      "question": "In 'Demon Slayer', what is the total number of forms in Tanjiro's Water Breathing techniques?",
+      "options": ["10", "12", "15", "8"],
+      "answer": "10"
+    },
+    {
+      "question": "Who is the Demon Slayer Corps’ pillar known as the Flame Hashira?",
+      "options": ["Kyojuro Rengoku", "Giyu Tomioka", "Sanemi Shinazugawa", "Tengen Uzui"],
+      "answer": "Kyojuro Rengoku"
+    }
+  ],
+  "My Hero Academia": [
+    {
+      "question": "In 'My Hero Academia', what is Shoto Todoroki's quirk?",
+      "options": ["Half-Cold Half-Hot", "Explosion", "One For All", "Acid"],
+      "answer": "Half-Cold Half-Hot"
+    },
+    {
+      "question": "What is the name of the school attended by the characters in My Hero Academia?",
+      "options": ["U.A. High School", "Konoha Academy", "Orange High School", "Soul Society Academy"],
+      "answer": "U.A. High School"
+    }
+  ],
+  "Soul Eater": [
+    {
+      "question": "Which character is the creator of the Death Scythe in 'Soul Eater'?",
+      "options": ["Spirit Albarn", "Maka Albarn", "Death", "Black☆Star"],
+      "answer": "Spirit Albarn"
+    }
+  ],
+  "Erased": [
+    {
+      "question": "What is the title of the anime where the main character travels back in time to save his friends?",
+      "options": ["Erased (Boku dake ga Inai Machi)", "Steins;Gate", "Your Name", "Re:Zero"],
+      "answer": "Erased (Boku dake ga Inai Machi)"
+    }
+  ],
+  "Dragon Ball": [
+    {
+      "question": "In which anime do characters collect Dragon Balls to summon a wish-granting dragon?",
+      "options": ["Dragon Ball", "Naruto", "One Piece", "Bleach"],
+      "answer": "Dragon Ball"
+    }
+  ],
+  "Sword Art Online": [
+    {
+      "question": "In Sword Art Online, what virtual reality game do the characters get trapped in?",
+      "options": ["Sword Art Online", "Log Horizon", "Accel World", "Overlord"],
+      "answer": "Sword Art Online"
+    }
+  ],
+  "My Neighbor Totoro": [
+    {
+      "question": "What is the name of the cat-like creature that accompanies the main character in My Neighbor Totoro?",
+      "options": ["Totoro", "Jiji", "Happy", "Luna"],
+      "answer": "Totoro"
+    }
+  ],
+  "Fairy Tail": [
+    {
+      "question": "What is the name of the organization that opposes the main characters in Fairy Tail?",
+      "options": ["Grimoire Heart", "Akatsuki", "Homunculi", "Phantom Troupe"],
+      "answer": "Grimoire Heart"
+    }
+  ],
+  "Jujutsu Kaisen": [
+  {"question":"Who becomes the vessel that ingests Sukuna's fingers and hosts Sukuna?","options":["Yuji Itadori","Megumi Fushiguro","Nobara Kugisaki","Satoru Gojo"],"answer":"Yuji Itadori"},
+  {"question":"Who is Yuji, Megumi, and Nobara's teacher at Tokyo Jujutsu High?","options":["Satoru Gojo","Kento Nanami","Masamichi Yaga","Geto Suguru"],"answer":"Satoru Gojo"},
+  {"question":"What is the name of Megumi Fushiguro's innate technique that summons shikigami?","options":["Ten Shadows Technique","Cursed Speech","Domain Expansion","Binding Vow"],"answer":"Ten Shadows Technique"},
+  {"question":"What is Satoru Gojo's powerful technique that gives him near-invincible defenses and the Infinity?","options":["Limitless (Infinity)","Domain Amplification","Reversed Cursed Technique","Cursed Speech"],"answer":"Limitless (Infinity)"},
+  {"question":"Which domain expansion is used by Satoru Gojo?","options":["Unlimited Void","Malevolent Shrine","Coffin of the Iron Mountain","Hidden Warehouse"],"answer":"Unlimited Void"},
+  {"question":"What is the legendary King of Curses' name in the series?","options":["Ryomen Sukuna","Jogo","Mahito","Dagon"],"answer":"Ryomen Sukuna"},
+  {"question":"Which cursed spirit is known for the ability called Idle Transfiguration (shape manipulation)?","options":["Mahito","Jogo","Hanami","Dagon"],"answer":"Mahito"},
+  {"question":"Who is the creator/teacher figure behind the Tokyo Jujutsu High's cursed corpse 'Panda'?","options":["Masamichi Yaga","Satoru Gojo","Kento Nanami","Suguru Geto"],"answer":"Masamichi Yaga"},
+  {"question":"Which sorcerer is known for using a 7:3 Ratio Technique and works as a salaryman?","options":["Kento Nanami","Nanami Kento","Satoru Gojo","Yuta Okkotsu"],"answer":"Kento Nanami"},
+  {"question":"Which student is known for using Cursed Speech as his primary technique?","options":["Toge Inumaki","Maki Zenin","Panda","Megumi Fushiguro"],"answer":"Toge Inumaki"},
+  {"question":"Which Grade of sorcerer is Satoru Gojo generally classified as?","options":["Special Grade","Grade 1","Grade 2","Grade 3"],"answer":"Special Grade"},
+  {"question":"What is the name of Yuuta Okkotsu’s bound spirit (central to JJK 0)?","options":["Rika Orimoto","Sukuna","Mahito","Choso"],"answer":"Rika Orimoto"},
+  {"question":"Which cursed technique user has the Domain Expansion called 'Malevolent Shrine'?","options":["Ryomen Sukuna","Satoru Gojo","Mahito","Jogo"],"answer":"Ryomen Sukuna"},
+  {"question":"Which character is a member of the Zenin family and is notable for wielding cursed tools despite lacking strong cursed energy?","options":["Maki Zenin","Mai Zenin","Naobito Zenin","Toji Fushiguro"],"answer":"Maki Zenin"},
+  {"question":"Who is the sorcerer that specializes in spatial/teleportation techniques often used to transport allies in battle?","options":["Finrod/Finral Roulacase","Kento Nanami","Satoru Gojo","Panda"],"answer":"Finral Roulacase"},
+  {"question":"Which antagonist is known as the organizer behind the large-scale Shibuya Incident (planning and manipulation)?","options":["Kenjaku (pseudo-Geto)","Mahito","Jogo","Sukuna"],"answer":"Kenjaku (pseudo-Geto)"},
+  {"question":"Which cursed spirit is associated with volcanic/earthquake-like power and fought early in the story?","options":["Jogo","Mahito","Dagon","Hanami"],"answer":"Jogo"},
+  {"question":"What is the nature of Sukuna’s curse—how does he typically regain power?","options":["By having his preserved fingers consumed by a vessel","Absorbing domain expansions","Killing special grade sorcerers","Using reverse cursed technique"],"answer":"By having his preserved fingers consumed by a vessel"},
+  {"question":"Which Tokyo Jujutsu High student is a stoic shikigami user who often commands divine beasts and shikigami?","options":["Megumi Fushiguro","Yuji Itadori","Nobara Kugisaki","Panda"],"answer":"Megumi Fushiguro"},
+  {"question":"Which character is notable for cross-shaped nails and voodoo-like straw doll techniques (Kyoto student)?","options":["Nobara Kugisaki","Maki Zenin","Mei Mei","Kasumi Miwa"],"answer":"Nobara Kugisaki"},
+  {"question":"Which of the following is a defining mechanic of an Authority (Witch/unique power) contrasted with normal cursed techniques in Jujutsu Kaisen universe?","options":["Not consuming cursed energy but altering reality/risking user’s self", "Always requires a grimoire", "Works only under moonlight", "Is limited to non-human users"],"answer":"Not consuming cursed energy but altering reality/risking user’s self"},
+  {"question":"Who is known as the sorcerer that uses the 'Black Flash' technique frequently in early battles?","options":["Yuji Itadori","Megumi Fushiguro","Nobara Kugisaki","Kento Nanami"],"answer":"Yuji Itadori"},
+  {"question":"Which special-grade human antagonist is revealed to be manipulating bodies across generations (body-hopping), later revealed as Kenjaku?","options":["Kenjaku","Suguru Geto","Jogo","Dagon"],"answer":"Kenjaku"},
+  {"question":"Which sorcerer often acts as the Tokyo Jujutsu High principal and created Cursed Corpses like Panda?","options":["Masamichi Yaga","Satoru Gojo","Kento Nanami","Mei Mei"],"answer":"Masamichi Yaga"},
+  {"question":"Who among the following is known as a sorcerer who primarily uses 'Binding Vows' and strategic planning (mentor-type)?","options":["Kento Nanami","Satoru Gojo","Yuta Okkotsu","Panda"],"answer":"Kento Nanami"},
+  {"question":"Which character is a cursed spirit-human hybrid born from manipulations and later allies with the heroes (brother of Choso)?","options":["Choso","Mahito","Jogo","Hanami"],"answer":"Choso"},
+  {"question":"Who famously sealed Satoru Gojo during the Shibuya Incident using the Prison Realm?","options":["Kenjaku (via his plan)","Mahito","Sukuna","Suguru Geto"],"answer":"Kenjaku (via his plan)"},
+  {"question":"Which technique allows a user to create a space that overwhelms the opponent with information (used by Gojo)?","options":["Unlimited Void (Domain Expansion)","Malevolent Shrine","Coffin Domain","Infinite Cage"],"answer":"Unlimited Void (Domain Expansion)"},
+  {"question":"Which student is known for being able to manipulate and control cursed spirit-type powers and has ties to the Zenin family history (including a notorious ancestor)?","options":["Toji Fushiguro (historical figure)","Yuji Itadori","Nobara Kugisaki","Panda"],"answer":"Toji Fushiguro (historical figure)"}
+  ],
+  "Classroom of the Elite": [
+  {"question":"What is the full name of the protagonist who intentionally hides his true abilities?","options":["Kiyotaka Ayanokōji","Suzune Horikita","Kikyō Kushida","Manabu Horikita"],"answer":"Kiyotaka Ayanokōji"},
+  {"question":"What is the official name of the school that the series centers on?","options":["Tokyo Metropolitan Advanced Nurturing High School","Tokyo Elite Academy","National Training Institute","Metropolitan Special School"],"answer":"Tokyo Metropolitan Advanced Nurturing High School"},
+  {"question":"Which class is the protagonist Kiyotaka initially placed in at the start of the story?","options":["Class D","Class A","Class B","Class C"],"answer":"Class D"},
+  {"question":"Who is Kiyotaka’s diligent, ambitious classmate who initially refuses to accept help from others?","options":["Suzune Horikita","Kikyō Kushida","Kaori Kanzaki","Airi Sakura"],"answer":"Suzune Horikita"},
+  {"question":"Which popular and outwardly friendly student hides a manipulative side and is often contrasted with Horikita?","options":["Kikyō Kushida","Kei Karuizawa","Manabu Horikita","Chabashira"],"answer":"Kikyō Kushida"},
+  {"question":"What is the name of the school system that determines class privileges and rankings using points?","options":["Class points (merit/score) system","Exam-only ranking","Lottery-based status","Teacher vote"],"answer":"Class points (merit/score) system"},
+  {"question":"Who is the older brother of Suzune Horikita and holds a position of authority among students?","options":["Manabu Horikita","Kiyotaka Ayanokōji","Kouhei Katsuragi","Kei Karuizawa"],"answer":"Manabu Horikita"},
+  {"question":"Which student from Class D becomes a close ally and eventually a key friend to Kiyotaka?","options":["Kei Karuizawa","Kikyō Kushida","Suzune Horikita","Airi Sakura"],"answer":"Kei Karuizawa"},
+  {"question":"What is the name of the highly mysterious educational upbringing that Kiyotaka is implied to have come from?","options":["The White Room","The Black Institute","Elite Nursery","Project Athena"],"answer":"The White Room"},
+  {"question":"Which event tests students' social, physical, and intellectual skills and heavily influences class rankings?","options":["Inter-class competitions and special exams","Monthly attendance","Uniform inspection","Library quiz"],"answer":"Inter-class competitions and special exams"},
+  {"question":"Who frequently serves as Class D's moral center and leader figure (reliable, straightforward student)?","options":["Yōsuke Hirata","Kiyotaka Ayanokōji","Suzune Horikita","Kikyō Kushida"],"answer":"Yōsuke Hirata"},
+  {"question":"What is one common tactic Kiyotaka uses to manipulate outcomes?","options":["Hidden planning and exploiting opponents' expectations","Open boasting","Physical intimidation","Random guessing"],"answer":"Hidden planning and exploiting opponents' expectations"},
+  {"question":"Which class is known publicly for containing the 'lowest-ranked' students at the school?","options":["Class D","Class A","Class B","Class C"],"answer":"Class D"},
+  {"question":"Which character first volunteers to befriend Kei Karuizawa and later becomes crucial to her growth?","options":["Kiyotaka Ayanokōji","Suzune Horikita","Kikyō Kushida","Yōsuke Hirata"],"answer":"Kiyotaka Ayanokōji"},
+  {"question":"What is the common consequence of poor performance in battles/exams for a class?","options":["Loss of class points and privileges","Immediate expulsion","Forced labor","Private tutoring"],"answer":"Loss of class points and privileges"},
+  {"question":"Which faculty figure is responsible for issuing the harsh but influential tests and rules that shape class strategies?","options":["Faculty and administration (school staff)","Student council only","Student volunteers","External examiners only"],"answer":"Faculty and administration (school staff)"},
+  {"question":"Which of these describes Kiyotaka Ayanokōji’s public persona at school?","options":["Deliberately average and unremarkable","Arrogant and loud","Brilliant and overtly competitive","Absent-minded and forgetful"],"answer":"Deliberately average and unremarkable"},
+  {"question":"Which student is known for being extremely serious about climbing the class ranks and initially distrusts cooperation?","options":["Suzune Horikita","Kiyotaka Ayanokōji","Kei Karuizawa","Yōsuke Hirata"],"answer":"Suzune Horikita"},
+  {"question":"Which character is a pivotal antagonist in later arcs who leads a violent student faction?","options":["Kakeru Ryūen","Kiyotaka Ayanokōji","Manabu Horikita","Kei Karuizawa"],"answer":"Kakeru Ryūen"},
+  {"question":"What is the school’s overarching goal for students attending the facility (officially)?","options":["To produce competent leaders through harsh selection and education","To provide a normal high school life","To train only athletes","To prepare children for farming"],"answer":"To produce competent leaders through harsh selection and education"},
+  {"question":"Which class is typically perceived as the most privileged due to point totals and influence?","options":["Class A","Class D","Class C","Class B"],"answer":"Class A"},
+  {"question":"Who is known as a subtle strategist and one of Kiyotaka’s rare close confidants (later arcs)?","options":["Aoi Honami / Horikita's circle (varies)","Yōsuke Hirata","Kikyō Kushida","Kei Karuizawa"],"answer":"Yōsuke Hirata"},
+  {"question":"What is a frequent motif used to test students beyond academics in the series Classroom of the Elite?","options":["Morality, manipulation, and social strategy tests","Sports endurance only","Musical performance","Cooking contests"],"answer":"Morality, manipulation, and social strategy tests"},
+  {"question":"Which of the following best describes the narrative tone and focus of Classroom of the Elite?","options":["Psychological drama about meritocracy and social manipulation","Light romantic comedy","Supernatural horror","Historical epic"],"answer":"Psychological drama about meritocracy and social manipulation"},
+  {"question":"Which student is famous for a charismatic smile that masks calculating social tactics (class representative turned schemer)?","options":["Kikyō Kushida","Suzune Horikita","Kei Karuizawa","Yōsuke Hirata"],"answer":"Kikyō Kushida"},
+  {"question":"What secret background detail about Kiyotaka is a key plot point that gradually unfolds?","options":["He was raised/trained in the White Room to be emotionless and highly capable","He is the school’s principal in disguise","He was an orphan with no education","He’s secretly not human"],"answer":"He was raised/trained in the White Room to be emotionless and highly capable"},
+  {"question":"Which factor often determines promotion of an entire class to a higher status within the school?","options":["Accumulated class points and performance in official tests","Student popularity votes","Random lottery","Teacher favoritism alone"],"answer":"Accumulated class points and performance in official tests"},
+  {"question":"Which of these best describes Suzune Horikita’s attitude toward teamwork at first?","options":["Skeptical and distrustful; she prefers individual effort","Fully trusting and cooperative","Indifferent and lazy","Openly hostile to all classmates"],"answer":"Skeptical and distrustful; she prefers individual effort"}
+  ],
+  "The Angel Next Door Spoils Me Rotten": [
+     {
+    "question": "What nickname is Mahiru Shiina known by at school?",
+    "options": ["The Angel", "The Idol Queen", "The Scholar", "The Phantom"],
+    "answer": "The Angel"
   },
   {
-    "question": "Who is the Demon Slayer Corps’ pillar known as the Flame Hashira?",
-    "options": ["Kyojuro Rengoku", "Giyu Tomioka", "Sanemi Shinazugawa", "Tengen Uzui"],
-    "answer": "Kyojuro Rengoku"
+    "question": "Which item did Amane Fujimiya first find and return to Mahiru, starting their initial contact?",
+    "options": ["Her wallet", "Her umbrella", "Her phone", "Her keys"],
+    "answer": "Her wallet"
   },
   {
-    "question": "In 'Attack on Titan', who inherits the Armored Titan from Reiner?",
-    "options": ["Porco Galliard", "Eren Yeager", "Annie Leonhart", "Pieck Finger"],
-    "answer": "Porco Galliard"
+    "question": "After returning her wallet, what event next brought Amane and Mahiru together?",
+    "options": ["He lent her his umbrella while she sat in the rain", "They partnered for a school project", "They bumped into each other at a festival", "They met at a café by chance"],
+    "answer": "He lent her his umbrella while she sat in the rain"
   },
   {
-    "question": "In 'One Piece', which Marine Admiral is nicknamed 'Akainu'?",
-    "options": ["Sakazuki", "Borsalino", "Kuzan", "Fujitora"],
-    "answer": "Sakazuki"
+    "question": "Which volumes correspond to Phase 1, 'The Beginning & Growing Closeness'?",
+    "options": ["Volumes 1-2", "Volumes 3-4", "Volume 5", "Volumes 6-7"],
+    "answer": "Volumes 1-2"
   },
   {
-    "question": "What is the true identity of the 'Black Reaper' in 'Black Clover'?",
-    "options": ["Yami Sukehiro", "Luck Voltia", "Asta", "Noelle Silva"],
-    "answer": "Yami Sukehiro"
+    "question": "Which volumes cover the 'Recognition of Feelings & First Steps' phase?",
+    "options": ["Volumes 3-4", "Volumes 1-2", "Volume 5", "Volumes 6-7"],
+    "answer": "Volumes 3-4"
   },
   {
-    "question": "In 'My Hero Academia', what is Shoto Todoroki's quirk?",
-    "options": ["Half-Cold Half-Hot", "Explosion", "One For All", "Acid"],
-    "answer": "Half-Cold Half-Hot"
+    "question": "In which volume does Amane finally confess and their relationship officially begins, per the summary?",
+    "options": ["Volume 5", "Volume 4", "Volume 6", "Volume 3"],
+    "answer": "Volume 5"
   },
   {
-    "question": "Who manipulates memories in 'Re:Zero' using the Witch Factor?",
-    "options": ["Echidna", "Satella", "Beatrice", "Crusch"],
-    "answer": "Echidna"
+    "question": "From which volume onward does the story focus on 'Life as a Couple'?",
+    "options": ["Volume 6 onwards", "Volumes 1-2", "Volume 5 only", "Volumes 3-4"],
+    "answer": "Volume 6 onwards"
   },
   {
-    "question": "Which character is the creator of the Death Scythe in 'Soul Eater'?",
-    "options": ["Spirit Albarn", "Maka Albarn", "Death", "Black☆Star"],
-    "answer": "Spirit Albarn"
+    "question": "Which friend of Amane is described as his best friend who notices his growth and supports the relationship?",
+    "options": ["Itsuki Akazawa", "Chitose Shirakawa", "Felix Argyle", "Kakeru Ryūen"],
+    "answer": "Itsuki Akazawa"
   },
   {
-    "question": "In 'Konosuba', what is Aqua’s official title?",
-    "options": ["Goddess of Water", "Archwizard", "Saint", "Crusader"],
-    "answer": "Goddess of Water"
-  },
-   {
-    "question": "What is the title of the anime where the main character travels back in time to save his friends?",
-    "answer": "Erased (Boku dake ga Inai Machi)"
+    "question": "Who is Mahiru's energetic, teasing, and fiercely protective best friend?",
+    "options": ["Chitose Shirakawa", "Itsuki Akazawa", "Kikyō Kushida", "Yōsuke Hirata"],
+    "answer": "Chitose Shirakawa"
   },
   {
-    "question": "In which anime do characters collect Dragon Balls to summon a wish-granting dragon?",
-    "answer": "Dragon Ball"
+    "question": "Which holiday is explicitly mentioned as one they spend together early in their relationship?",
+    "options": ["New Year's", "Valentine's Day", "Golden Week", "Halloween"],
+    "answer": "New Year's"
   },
   {
-    "question": "Which anime features a group of ninjas including Naruto, Sasuke, and Sakura?",
-    "answer": "Naruto"
+    "question": "How is Amane's apartment described before Mahiru helps him?",
+    "options": ["Disastrously messy", "Pristine and minimal", "Elegantly decorated", "Filled with antiques"],
+    "answer": "Disastrously messy"
   },
   {
-    "question": "What is the name of the school attended by the characters in My Hero Academia?",
-    "answer": "U.A. High School"
+    "question": "Which of these best captures Mahiru’s true private personality (as opposed to her school 'Angel' persona)?",
+    "options": ["A homebody who enjoys domestic chores", "A wild partygoer", "An aloof loner who hates people", "A competitive athlete"],
+    "answer": "A homebody who enjoys domestic chores"
   },
   {
-    "question": "What is the main theme of Attack on Titan?",
-    "answer": "Humanity's battle against giant humanoid creatures known as Titans."
+    "question": "Why does Mahiru take it upon herself to care for Amane, according to the summary?",
+    "options": ["She hates seeing people neglect themselves and genuinely enjoys his company", "She wants to become famous through him", "She is ordered by a teacher to help him", "She hopes to use him for a school project"],
+    "answer": "She hates seeing people neglect themselves and genuinely enjoys his company"
   },
   {
-    "question": "In Sword Art Online, what virtual reality game do the characters get trapped in?",
-    "answer": "Sword Art Online"
+    "question": "What critical moment during the school field trip reveals Mahiru's fierce devotion to Amane?",
+    "options": ["She defends him when another student badmouths him", "She confesses to the whole school", "She wins a contest for him", "She moves away suddenly"],
+    "answer": "She defends him when another student badmouths him"
   },
   {
-    "question": "What is the name of the cat-like creature that accompanies the main character in My Neighbor Totoro?",
-    "answer": "Totoro"
+    "question": "What happens to Mahiru after the field trip that triggers a role reversal between the two?",
+    "options": ["She falls ill and Amane skips school to nurse her", "She gets suspended from school", "She leaves town for a month", "She becomes a pop idol overnight"],
+    "answer": "She falls ill and Amane skips school to nurse her"
   },
   {
-    "question": "Which anime follows the adventures of Edward and Alphonse Elric as they seek the Philosopher's Stone?",
-    "answer": "Fullmetal Alchemist"
+    "question": "Which character trait best describes Amane at the start of the story?",
+    "options": ["Apathetic with low self-esteem", "Arrogant and popular", "Outgoing and flashy", "Scheming and manipulative"],
+    "answer": "Apathetic with low self-esteem"
   },
   {
-    "question": "What is the name of the organization that opposes the main characters in Fairy Tail?",
-    "answer": "Grimoire Heart"
+    "question": "What is the main driver for Amane's self-improvement throughout the series?",
+    "options": ["His desire to become worthy of standing by Mahiru's side", "A scholarship competition", "A personal vendetta against rivals", "A dream to become an idol"],
+    "answer": "His desire to become worthy of standing by Mahiru's side"
   },
   {
-    "question": "In One Punch Man, what is Saitama's main issue with being a hero?",
-    "answer": "He is too strong and defeats every enemy with one punch."
+    "question": "How do both characters feel about publicly expressing their love immediately after recognizing it in Phase 2?",
+    "options": ["They consciously acknowledge it but keep it to themselves", "They have a huge public display immediately", "They break up and never speak again", "They both move cities the next day"],
+    "answer": "They consciously acknowledge it but keep it to themselves"
   },
   {
-    "question": "What is the primary occupation of the characters in the anime Cowboy Bebop?",
-    "answer": "Bounty Hunters"
+    "question": "Why does Mahiru initially misunderstand Amane's confession during the pivotal moment in Volume 5?",
+    "options": ["Her insecurities make her think he is rejecting the real her", "She believes he is joking", "She thinks he is confessing to someone else", "She is asleep and misses it"],
+    "answer": "Her insecurities make her think he is rejecting the real her"
   },
   {
-    "question": "In Demon Slayer, what is the name of the main character's sister who is turned into a demon?",
-    "answer": "Nezuko Kamado"
+    "question": "After they become an official couple, how do Itsuki and Chitose react when told?",
+    "options": ["They are ecstatic and supportive", "They are angry and cut them off", "They ignore the news", "They attempt to break them up"],
+    "answer": "They are ecstatic and supportive"
   },
   {
-    "question": "What is the name of the group of students in Assassination Classroom tasked with killing their teacher?",
-    "answer": "Class 3-E"
+    "question": "Which theme from the summary best encapsulates Mahiru's dual life?",
+    "options": ["The gap between persona and reality", "The rise of political conspiracies", "A quest for magical relics", "An interstellar voyage"],
+    "answer": "The gap between persona and reality"
   },
   {
-    "question": "In the anime Steins;Gate, what is the main character's profession?",
-    "answer": "A self-proclaimed mad scientist"
+    "question": "Which 'love language' is described as the core way their relationship is built?",
+    "options": ["Acts of service (cooking, cleaning, emotional support)", "Physical gifts", "Verbal praise only", "Competitive games"],
+    "answer": "Acts of service (cooking, cleaning, emotional support)"
   },
   {
-    "question": "Which anime features a love story between a high school girl and a boy who can see ghosts?",
-    "answer": "Another"
+    "question": "How is the central drama of the series characterized in the summary?",
+    "options": ["Internal — insecurities and self-doubt rather than external rivals", "An all-out war with other schools", "A supernatural horror element", "A sports tournament"],
+    "answer": "Internal — insecurities and self-doubt rather than external rivals"
   },
   {
-    "question": "In the anime Your Lie in April, what instrument does the main character play?",
-    "answer": "Piano"
+    "question": "Which of these is a recurring aspect of Mahiru’s private life that gives her a sense of purpose?",
+    "options": ["Caring for others due to parental absence and emotional neglect", "Leading a student council", "Training for national competitions", "Collecting rare books"],
+    "answer": "Caring for others due to parental absence and emotional neglect"
   },
   {
-    "question": "What is the main character's goal in the anime Hunter x Hunter?",
-    "answer": "To become a Hunter and find his father."
+    "question": "Which action best demonstrates Amane's perceptiveness early in the story?",
+    "options": ["He notices Mahiru's true, lonely nature behind the 'angelic' front", "He immediately becomes a pop idol manager", "He starts a rival gossip column", "He organizes a flash mob"],
+    "answer": "He notices Mahiru's true, lonely nature behind the 'angelic' front"
   },
   {
-    "question": "In the anime Code Geass, what is the name of the protagonist who gains the power of Geass?",
-    "answer": "Lelouch vi Britannia"
+    "question": "Which volume-phase pairing correctly matches the story beats where both acknowledge their feelings but do not confess publicly?",
+    "options": ["Phase 2 (Volumes 3-4)", "Phase 1 (Volumes 1-2)", "Phase 3 (Volume 5)", "Phase 4 (Volume 6+)"],
+    "answer": "Phase 2 (Volumes 3-4)"
   },
   {
-    "question": "What is the main setting of the anime No Game No Life?",
-    "answer": "A fantasy world where all disputes are resolved through games."
+    "question": "Which adjective from the summary best fits Mahiru’s private romantic tendency?",
+    "options": ["Slightly clingy / possessive", "Indifferent", "Aggressively jealous", "Cold and distant"],
+    "answer": "Slightly clingy / possessive"
   },
   {
-    "question": "In the anime The Seven Deadly Sins, what sin does Meliodas represent?",
-    "answer": "The Dragon's Sin of Wrath"
+    "question": "What is the tone and pacing of the story of anime The Angel Next Door Spoils Me Rotten?",
+    "options": ["Slow-burn, wholesome romance", "Fast-paced action thriller", "Dark psychological horror", "High-school battle royale"],
+    "answer": "Slow-burn, wholesome romance"
+  }
+  ],
+  "Witch Watch": [
+  {
+    "question": "Who is the main witch protagonist of Witch Watch?",
+    "options": ["Nico Wakatsuki", "Shinobu", "Chitose", "Mio"],
+    "answer": "Nico Wakatsuki"
   },
   {
-    "question": "Which anime revolves around a group of friends who play a virtual reality MMORPG?",
-    "answer": "Sword Art Online"
+    "question": "What kind of supernatural being is Morihito 'Moi' Otogi?",
+    "options": ["Ogre", "Werewolf", "Tengu", "Fox Spirit"],
+    "answer": "Ogre"
   },
   {
-    "question": "In the anime Tokyo Ghoul, what is the name of the main character who becomes a half-ghoul?",
-    "answer": "Ken Kaneki"
+    "question": "What is Nico’s personality like?",
+    "options": ["Stoic and serious", "Bubbly and clumsy", "Cold and arrogant", "Quiet and shy"],
+    "answer": "Bubbly and clumsy"
+  },
+  {
+    "question": "How are Nico’s spells usually cast?",
+    "options": ["Through weapons", "By drawing symbols", "Using words and music", "With potions"],
+    "answer": "Using words and music"
+  },
+  {
+    "question": "What is Moi’s main role in Nico’s life?",
+    "options": ["Her rival", "Her guardian", "Her teacher", "Her enemy"],
+    "answer": "Her guardian"
+  },
+  {
+    "question": "Which supernatural being can manipulate wind and fly?",
+    "options": ["Keigo", "Moi", "Kanshi", "Shinobu"],
+    "answer": "Kanshi"
+  },
+  {
+    "question": "Which character is a werewolf who dreams of being a baker?",
+    "options": ["Moi", "Kanshi", "Keigo", "Nico"],
+    "answer": "Keigo"
+  },
+  {
+    "question": "What usually happens when Nico tries new spells?",
+    "options": ["They fail harmlessly", "They work perfectly", "They backfire in absurd ways", "They never activate"],
+    "answer": "They backfire in absurd ways"
+  },
+  {
+    "question": "What is Kanshi secretly obsessed with despite his cool persona?",
+    "options": ["Cooking shows", "Idols and anime", "Sports", "Fashion design"],
+    "answer": "Idols and anime"
+  },
+  {
+    "question": "What quality makes Keigo different from typical werewolves?",
+    "options": ["He avoids violence", "He hates the moon", "He prefers solitude", "He has no transformation"],
+    "answer": "He avoids violence"
+  },
+  {
+    "question": "What arc involves a corporation exploiting supernatural beings?",
+    "options": ["Blue Ogre Arc", "Training Arc", "Mo~tto Company Arc", "Festival Arc"],
+    "answer": "Mo~tto Company Arc"
+  },
+  {
+    "question": "Which arc explores Moi’s past and ogre traditions?",
+    "options": ["Mo~tto Company Arc", "Blue Ogre Arc", "Festival Arc", "Training Arc"],
+    "answer": "Blue Ogre Arc"
+  },
+  {
+    "question": "What is the central theme of the bond between Nico and Moi?",
+    "options": ["Loyalty and duty", "Rivalry", "Jealousy", "Revenge"],
+    "answer": "Loyalty and duty"
+  },
+  {
+    "question": "What is the recurring gag involving Kanshi?",
+    "options": ["He always falls asleep", "His cool image constantly breaks", "He forgets his spells", "He cooks badly"],
+    "answer": "His cool image constantly breaks"
+  },
+  {
+    "question": "Why does Keigo dislike his werewolf transformation?",
+    "options": ["It makes him violent", "It drains his energy", "It shortens his life", "It removes his memory"],
+    "answer": "It makes him violent"
+  },
+  {
+    "question": "What do witches like Nico usually receive during apprenticeship?",
+    "options": ["A magical wand", "A guardian protector", "A spell book", "A broom"],
+    "answer": "A guardian protector"
+  },
+  {
+    "question": "Which character often acts as the 'straight man' to the group’s chaos?",
+    "options": ["Kanshi", "Moi", "Keigo", "Nico"],
+    "answer": "Moi"
+  },
+  {
+    "question": "What is one of Nico’s greatest emotional struggles?",
+    "options": ["Fear of being weak", "Insecurity about her power control", "Fear of losing popularity", "Loneliness in crowds"],
+    "answer": "Insecurity about her power control"
+  },
+  {
+    "question": "How are ogres described in terms of their duty?",
+    "options": ["Natural-born protectors", "Hunters of witches", "Leaders of tengu", "Neutral wanderers"],
+    "answer": "Natural-born protectors"
+  },
+  {
+    "question": "Which supernatural race is tied to manipulating feathers?",
+    "options": ["Werewolves", "Tengu", "Ogres", "Vampires"],
+    "answer": "Tengu"
+  },
+  {
+    "question": "What bond exists between a witch and her guardian?",
+    "options": ["Temporary contract", "Lifelong commitment", "Short apprenticeship", "Casual friendship"],
+    "answer": "Lifelong commitment"
+  },
+  {
+    "question": "What aspect of Moi contrasts most with Nico?",
+    "options": ["His stoic personality", "His magical power", "His clumsiness", "His humor"],
+    "answer": "His stoic personality"
+  },
+  {
+    "question": "Which character has the strongest physical durability?",
+    "options": ["Kanshi", "Keigo", "Moi", "Nico"],
+    "answer": "Moi"
+  },
+  {
+    "question": "What theme does Keigo represent strongly?",
+    "options": ["Acceptance of self", "Revenge against fate", "Obsession with power", "Loyalty to tradition"],
+    "answer": "Acceptance of self"
+  },
+  {
+    "question": "What often fuels Nico’s spells, making them unstable?",
+    "options": ["Her emotions", "Moon phases", "Ogre protection", "Ancient relics"],
+    "answer": "Her emotions"
+  },
+  {
+    "question": "What is the hidden romantic tension between Nico and Moi?",
+    "options": ["Both love each other but won’t confess", "Nico likes Moi, Moi hates her", "They compete for attention", "They’re forced into marriage"],
+    "answer": "Both love each other but won’t confess"
+  },
+  {
+    "question": "What kind of supernatural antagonist is central to the Mo~tto Company Arc?",
+    "options": ["Fox spirit (Kitsune)", "Vampire", "Ghost", "Tengu"],
+    "answer": "Fox spirit (Kitsune)"
+  },
+  {
+    "question": "Which character is most likely to panic when things go wrong?",
+    "options": ["Moi", "Nico", "Kanshi", "Keigo"],
+    "answer": "Nico"
+  },
+  {
+    "question": "What is Nico’s ultimate goal as a witch?",
+    "options": ["To control her magic responsibly", "To defeat the Blue Ogre", "To become school idol", "To rule the supernatural world"],
+    "answer": "To control her magic responsibly"
+  },
+  {
+    "question": "What theme is central to the entire cast’s relationship?",
+    "options": ["Found family", "Revenge", "Competition", "Isolation"],
+    "answer": "Found family"
   }
 ]
+}
