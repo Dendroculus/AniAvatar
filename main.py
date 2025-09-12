@@ -3,11 +3,12 @@ from dotenv import load_dotenv
 import discord
 from discord.ext import commands
 
+
 intents = discord.Intents.default()
 intents.members = True
 intents.message_content = True
 
-class AniAvatar(commands.Bot):
+class Minori(commands.Bot):
     def __init__(self):
         super().__init__(command_prefix='!', intents=intents, help_command=None)
 
@@ -16,13 +17,16 @@ class AniAvatar(commands.Bot):
         extensions = [
             "cogs.general",
             "cogs.search",
+            "cogs.progression",
+            "cogs.roles",
             "cogs.events",
-            "cogs.games",
+            "cogs.games",   
             "cogs.fun",
-            "cogs.profile",
+            "cogs.errors",
+            "cogs.trading"
         ]
         for ext in extensions:  
-            try:    
+            try:        
                 await self.load_extension(ext)
             except Exception as e:
                 print(f"❌ Failed to load {ext}: {e}")
@@ -32,13 +36,13 @@ class AniAvatar(commands.Bot):
         except Exception as e:
             print(f"❌ Failed to sync slash commands: {e}")
 
-    async def on_ready(self): 
+    async def on_ready(self):   
         print(f'✅ Logged in as {self.user}')
 
 if __name__ == "__main__":
     load_dotenv()
     TOKEN = os.getenv("DISCORD_TOKEN")
 
-    bot = AniAvatar()
+    bot = Minori()
     bot.run(TOKEN)
-
+    
