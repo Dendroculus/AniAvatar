@@ -6,7 +6,6 @@ import random
 from urllib.parse import quote
 import os
 from dotenv import load_dotenv
-import re
 
 sent_image_cache = {}
 anilist_cache = {}  # cache for characters
@@ -16,7 +15,6 @@ GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 SEARCH_ENGINE_ID = os.getenv("SEARCH_ENGINE_ID")
 
 ANILIST_API = "https://graphql.anilist.co"
-
 
 sent_media_cache = {}   
 
@@ -91,7 +89,7 @@ class Search(commands.Cog):
             ))
 
         async def select_callback(interaction: discord.Interaction):
-            await interaction.response.defer() # prevent interaction timeout
+            await interaction.response.defer() 
             anime_id = int(interaction.data["values"][0])
             anime_data = next(a for a in results if a["id"] == anime_id)
 
@@ -164,6 +162,7 @@ class Search(commands.Cog):
             return await ctx.send("❌ Please provide a character name.")
 
         NOISE_WORDS = {"pfp", "pfps", "hd", "avatar", "icon", "anime", "wallpaper", "image", "picture", "pic", "profile"}
+        timeout = aiohttp.ClientTimeout(total=10)
 
         async def fetch_anilist_character(query_name: str):
             query_str = """
@@ -176,14 +175,39 @@ class Search(commands.Cog):
             }"""
             variables = {"search": query_name}
             try:
-                async with aiohttp.ClientSession() as session:
-                    async with session.post(ANILIST_API, json={"query": query_str, "variables": variables}, timeout=10) as resp:
+                async with aiohttp.ClientSession(timeout=timeout) as session:
+                    async with session.post(ANILIST_API, json={"query": query_str, "variables": variables}) as resp:
                         if resp.status != 200:
                             return None
-                        data = await resp.json()
+                        try:
+                            data = await resp.json()
+                        except Exception:
+                            return None
             except Exception:
                 return None
             return data.get("data", {}).get("Character")
+
+        async def fetch_jikan_character(query_name: str):
+            url = f"https://api.jikan.moe/v4/characters?q={quote(query_name)}&limit=1"
+            try:
+                async with aiohttp.ClientSession(timeout=timeout) as session:
+                    async with session.get(url) as resp:
+                        if resp.status != 200:
+                            return None
+                        try:
+                            data = await resp.json()
+                        except Exception:
+                            return None
+            except Exception:
+                return None
+
+            results = data.get("data") or []
+            if not results:
+                return None
+
+            c = results[0]
+            image = (c.get("images") or {}).get("jpg", {}).get("image_url")
+            return {"id": c.get("mal_id"), "name": {"full": c.get("name")}, "image": {"large": image, "medium": image}}
 
         original_query = name
         cleaned_words = [w for w in original_query.split() if w.lower() not in NOISE_WORDS]
@@ -197,6 +221,9 @@ class Search(commands.Cog):
         char = await fetch_anilist_character(original_query)
         if not char and cleaned_query != original_query:
             char = await fetch_anilist_character(cleaned_query)
+
+        if not char:
+            char = await fetch_jikan_character(name)
 
         if not char:
             return await ctx.send("❌ Could not find an anime character matching your query. Try a full character name (e.g. `Kaoruko Waguri`).")
@@ -227,8 +254,8 @@ class Search(commands.Cog):
             )
 
             try:
-                async with aiohttp.ClientSession() as session:
-                    async with session.get(url, timeout=10) as resp:
+                async with aiohttp.ClientSession(timeout=timeout) as session:
+                    async with session.get(url) as resp:
                         try:
                             data = await resp.json()
                         except Exception:
@@ -261,7 +288,6 @@ class Search(commands.Cog):
             anilist_cache[cache_key]["google"].append(selected_image)
             source = "Google API"
 
-        # Send embed
         embed = discord.Embed(title=f"Anime PFP for {character_name}", color=discord.Color.purple())
         embed.set_image(url=selected_image)
         embed.set_footer(text=f"Source: {source}")
