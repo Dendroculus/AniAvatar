@@ -1,5 +1,19 @@
 import discord
 from discord.ext import commands
+from discord import ui, ButtonStyle
+
+class DeleteView(ui.View):
+    def __init__(self, user, timeout = None):
+        super().__init__(timeout=timeout)
+        self.user = user
+        
+    @discord.ui.button(label="Delete", style=ButtonStyle.danger)
+    async def delete(self, interaction: discord.Interaction, button: ui.Button):
+        if interaction.user.id == self.user.id:
+            await interaction.message.delete()
+        else :
+            await interaction.response.send_message("You can't delete this message.", ephemeral=True)
+            return
 
 class General(commands.Cog):
     def __init__(self, bot):
@@ -13,13 +27,12 @@ class General(commands.Cog):
     @commands.hybrid_command(name="help", description="Show bot commands")
     async def help(self, ctx):
         embed = discord.Embed(
-            title="✨ AniAvatar Help",
+            title=" <:MinoriWink:1414899695209418762>  Minori - your anime profile & fun companion!",
             description="Here’s a list of available commands, organized by category.",
             color=discord.Color.purple()
         )
         embed.set_thumbnail(url=self.bot.user.display_avatar.url)
 
-        # Loop through all cogs
         for cog_name, cog in self.bot.cogs.items():
             commands_list = []
             for command in cog.get_commands():
@@ -34,8 +47,8 @@ class General(commands.Cog):
                 )
 
         embed.set_footer(text=f"Requested by {ctx.author}", icon_url=ctx.author.display_avatar.url)
-
-        await ctx.send(embed=embed)
+        view = DeleteView(user=ctx.author)
+        await ctx.send(embed=embed, view=view)
     
 async def setup(bot):
     await bot.add_cog(General(bot))
