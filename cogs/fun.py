@@ -180,7 +180,7 @@ class Fun(commands.Cog):
         embed = discord.Embed(title="Here's a random waifu for you!")
         embed.set_image(url=image_url)
         await ctx.send(embed=embed)
-
+        
     @commands.hybrid_command(name="poll", description="Create a poll with custom options")
     @commands.guild_only()
     @app_commands.describe(
@@ -362,7 +362,10 @@ class Fun(commands.Cog):
 
             if random.random() < win_chance:
                 await progression_cog.add_coins(user_id, guild_id, amount)
-                result_text = f"<:MinoriAmazed:1416024121837490256> You won {amount} <:Coins:1415353285270966403>!"
+                if amount == user_total_coins:
+                    result_text = f"<:MinoriAmazed:1416024121837490256> WOOOAA JACKPOT! You just doubled everything you own!"
+                else :
+                    result_text = f"<:MinoriAmazed:1416024121837490256> You won {amount} <:Coins:1415353285270966403>!"
             else:
                 await progression_cog.remove_coins(user_id, guild_id, amount)
                 result_text = f"<:MinoriDissapointed:1416016691430821958> You lost {amount} <:Coins:1415353285270966403>."
