@@ -22,17 +22,34 @@ def format_coins(coins: int) -> str:
         return f"{coins / 1_000_000_000:.2f}B".rstrip("0").rstrip(".")
     
 class CloseButton(discord.ui.Button):
-    def __init__(self, owner_id: int, close_text: str, label: str = "Close"):
+    def __init__(self, owner_id: int, close_text: str, label: str = "Close", menu_type: str = None, cog=None):
         super().__init__(label=label, style=discord.ButtonStyle.danger)
         self.owner_id = owner_id
         self.close_text = close_text
+        self.menu_type = menu_type
+        self.cog = cog
 
     async def callback(self, interaction: discord.Interaction):
         if interaction.user.id != self.owner_id:
             await interaction.response.send_message("⚠️ This is not your menu!", ephemeral=True)
             return
 
+        stored = None
+        if self.menu_type == "shop":
+            stored = self.cog.open_shops.pop(self.owner_id, None)
+        elif self.menu_type == "inventory":
+            stored = self.cog.open_inventories.pop(self.owner_id, None)
+
+        try:
+            if getattr(stored, "_timeout_task", None):
+                stored._timeout_task.cancel()
+            elif hasattr(stored, "view") and getattr(stored.view, "_timeout_task", None):
+                stored.view._timeout_task.cancel()
+        except Exception:
+            pass
+
         await interaction.response.edit_message(content=self.close_text, embed=None, view=None)
+
 
 
 class InventorySelect(discord.ui.Select):
@@ -163,7 +180,7 @@ class InventoryView(discord.ui.View):
 
         select = InventorySelect(cog, user_id, guild_id, items, self)
         self.add_item(select)
-        close_button = CloseButton(owner_id=user_id, close_text="❌ Inventory closed.", label="Close Inventory")
+        close_button = CloseButton(owner_id=user_id, close_text="❌ Inventory closed.", label="Close Inventory", menu_type="inventory", cog=self.cog)
         self.add_item(close_button)
 
         self.start_timeout()
@@ -180,6 +197,11 @@ class InventoryView(discord.ui.View):
                 child.disabled = True
             if self.message:
                 await self.message.edit(view=self)
+            try:
+                if self.cog:
+                    self.cog.open_inventories.pop(self.user_id, None)
+            except Exception:
+                pass
         except asyncio.CancelledError:
             return
 
@@ -199,7 +221,10 @@ class ShopSelect(discord.ui.Select):
         if interaction.user.id != self.user_id:
             await interaction.response.send_message("⚠️ You can only buy items for yourself.", ephemeral=True)
             return
-
+        
+        if hasattr(self.parent_view, "reset_timer"):
+            self.parent_view.reset_timer()
+            
         selected_item = self.values[0]
 
         c = self.progression_cog.c
@@ -256,13 +281,68 @@ class ShopSelect(discord.ui.Select):
             
         await interaction.followup.send(f"You bought **1x {selected_item}** {emoji}!", ephemeral=True)
 
+class ShopView(discord.ui.View):
+    def __init__(self, progression_cog, user_id, guild_id, options, parent_cog, timeout=180):
+        super().__init__(timeout=None) 
+        self.progression_cog = progression_cog
+        self.user_id = user_id
+        self.guild_id = guild_id
+        self.options = options
+        self.parent_cog = parent_cog  
+        self.message = None
+        self.timeout_seconds = timeout
+        self._timeout_task = None
+
+        self.select = ShopSelect(self.progression_cog, self.user_id, self.guild_id, self.options, self)
+        self.add_item(self.select)
+
+        close_button = CloseButton(
+            owner_id=self.user_id,
+            close_text="❌ Shop closed.",
+            label="Close Shop",
+            menu_type="shop",
+            cog=self.parent_cog
+        )
+        self.add_item(close_button)
+
+        self.start_timeout()
+
+    def start_timeout(self):
+        if self._timeout_task:
+            self._timeout_task.cancel()
+        self._timeout_task = asyncio.create_task(self._timeout_loop())
+
+    async def _timeout_loop(self):
+        try:
+            await asyncio.sleep(self.timeout_seconds)
+            for child in self.children:
+                child.disabled = True
+            if self.message:
+                try:
+                    await self.message.edit(view=self)
+                except Exception:
+                    pass
+            try:
+                if self.parent_cog:
+                    self.parent_cog.open_shops.pop(self.user_id, None)
+            except Exception:
+                pass
+        except asyncio.CancelledError:
+            return
+
+    def reset_timer(self):
+        self.start_timeout()
+
+
 class Trading(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.progression_cog = None
         self.user_locks = {}
         self.donate_cooldowns = {}
-        self.active_views = {}
+        self.open_inventories = {}
+        self.open_shops = {} 
+
 
     async def cog_load(self):
         self.progression_cog = self.bot.get_cog("Progression")
@@ -417,21 +497,19 @@ class Trading(commands.Cog):
     @commands.hybrid_command(name="shop", description="View the shop and buy items!")
     @commands.guild_only()
     async def shop(self, ctx):
-        user_id = ctx.author.id
-        guild_id = ctx.guild.id
-        
-        if self.active_views.get(user_id, {}).get("shop"):
-            await ctx.send("⚠️ You already have the shop open!", ephemeral=True)
-            return
-        
         if not self.progression_cog:
             await ctx.send("Progression cog not loaded. Shop unavailable.")
             return
 
         user_id = ctx.author.id
         guild_id = ctx.guild.id
-        c = self.progression_cog.c
 
+        # Prevent opening a second shop
+        if user_id in self.open_shops:
+            await ctx.send("⚠️ You already have a shop open! Close it first.", ephemeral=True)
+            return
+
+        c = self.progression_cog.c
         c.execute("SELECT name, price, emoji FROM shop_items")
         items = c.fetchall()
         if not items:
@@ -456,37 +534,28 @@ class Trading(commands.Cog):
             for name, price, emoji in items
         ]
 
-        view = discord.ui.View(timeout=None)        
-        shop_select = ShopSelect(self.progression_cog, user_id, guild_id, options, view)
-        view.add_item(shop_select)
-        close_button = CloseButton(owner_id=user_id, close_text="❌ Shop closed.", label="Close Shop")
-        view.add_item(close_button)              
-        
-        self.active_views.setdefault(user_id, {})["shop"] = view
-
+        view = ShopView(self.progression_cog, user_id, guild_id, options, parent_cog=self, timeout=180)
         msg = await ctx.send(embed=embed, view=view)
-        view.message = msg
-        shop_select.message = msg
-        
-        async def on_view_stop():
-            self.active_views.get(user_id, {}).pop("shop", None)
-        view.on_timeout = on_view_stop
 
+        # wire the message to the view/select and track the open shop
+        view.message = msg
+        view.select.message = msg  
+        self.open_shops[user_id] = view
+
+        
     @commands.hybrid_command(name="inventory", description="Check your inventory and items")
     @commands.guild_only()
     async def inventory(self, ctx):
-        user_id = ctx.author.id
-        guild_id = ctx.guild.id
-        
-        if self.active_views.get(user_id, {}).get("inventory"):
-            return await ctx.send("⚠️ You already have the inventory open!", ephemeral=True)
-        
         if not self.progression_cog:
             await ctx.send("Progression cog not loaded. Inventory unavailable.")
             return
 
         user_id = ctx.author.id
         guild_id = ctx.guild.id
+        if user_id in self.open_inventories:
+            await ctx.send("⚠️ You already have an inventory open! Close it first.", ephemeral=True)
+            return
+    
         c = self.progression_cog.c
         c.execute("SELECT item_name, quantity FROM user_inventory WHERE user_id = ? AND guild_id = ?", (user_id, guild_id))
         raw_items = c.fetchall()
@@ -513,14 +582,10 @@ class Trading(commands.Cog):
         embed.set_thumbnail(url=ctx.author.display_avatar.url)
 
         view = InventoryView(self, user_id, guild_id, items)
-        self.active_views.setdefault(user_id, {})["inventory"] = view
         msg = await ctx.send(embed=embed, view=view)
         view.message = msg 
+        self.open_inventories[user_id] = msg
         
-        async def on_view_stop():
-            self.active_views.get(user_id, {}).pop("inventory", None)
-        view.on_timeout = on_view_stop
-
     @commands.hybrid_command(name="donate", description="Give an item to another user")
     @commands.guild_only()
     async def donate(self, ctx, member: discord.Member):
@@ -648,7 +713,7 @@ class Trading(commands.Cog):
             self.progression_cog.conn.commit()
 
             # 2-hour cooldown to donate
-            self.donate_cooldowns[donor_id] = datetime.now(timezone.utc) + timedelta(hours=2) # DONATION COOLDOWN MARKER
+            self.donate_cooldowns[donor_id] = datetime.now(timezone.utc) + timedelta(hours=2)
 
             for child in view.children:
                 child.disabled = True
