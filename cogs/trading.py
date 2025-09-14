@@ -262,6 +262,7 @@ class Trading(commands.Cog):
         self.progression_cog = None
         self.user_locks = {}
         self.donate_cooldowns = {}
+        self.active_views = {}
 
     async def cog_load(self):
         self.progression_cog = self.bot.get_cog("Progression")
@@ -416,6 +417,13 @@ class Trading(commands.Cog):
     @commands.hybrid_command(name="shop", description="View the shop and buy items!")
     @commands.guild_only()
     async def shop(self, ctx):
+        user_id = ctx.author.id
+        guild_id = ctx.guild.id
+        
+        if self.active_views.get(user_id, {}).get("shop"):
+            await ctx.send("⚠️ You already have the shop open!", ephemeral=True)
+            return
+        
         if not self.progression_cog:
             await ctx.send("Progression cog not loaded. Shop unavailable.")
             return
@@ -453,14 +461,26 @@ class Trading(commands.Cog):
         view.add_item(shop_select)
         close_button = CloseButton(owner_id=user_id, close_text="❌ Shop closed.", label="Close Shop")
         view.add_item(close_button)              
+        
+        self.active_views.setdefault(user_id, {})["shop"] = view
 
         msg = await ctx.send(embed=embed, view=view)
         view.message = msg
         shop_select.message = msg
+        
+        async def on_view_stop():
+            self.active_views.get(user_id, {}).pop("shop", None)
+        view.on_timeout = on_view_stop
 
     @commands.hybrid_command(name="inventory", description="Check your inventory and items")
     @commands.guild_only()
     async def inventory(self, ctx):
+        user_id = ctx.author.id
+        guild_id = ctx.guild.id
+        
+        if self.active_views.get(user_id, {}).get("inventory"):
+            return await ctx.send("⚠️ You already have the inventory open!", ephemeral=True)
+        
         if not self.progression_cog:
             await ctx.send("Progression cog not loaded. Inventory unavailable.")
             return
@@ -493,8 +513,13 @@ class Trading(commands.Cog):
         embed.set_thumbnail(url=ctx.author.display_avatar.url)
 
         view = InventoryView(self, user_id, guild_id, items)
+        self.active_views.setdefault(user_id, {})["inventory"] = view
         msg = await ctx.send(embed=embed, view=view)
         view.message = msg 
+        
+        async def on_view_stop():
+            self.active_views.get(user_id, {}).pop("inventory", None)
+        view.on_timeout = on_view_stop
 
     @commands.hybrid_command(name="donate", description="Give an item to another user")
     @commands.guild_only()
@@ -623,7 +648,7 @@ class Trading(commands.Cog):
             self.progression_cog.conn.commit()
 
             # 2-hour cooldown to donate
-            self.donate_cooldowns[donor_id] = datetime.now(timezone.utc) + timedelta(hours=2)
+            self.donate_cooldowns[donor_id] = datetime.now(timezone.utc) + timedelta(hours=2) # DONATION COOLDOWN MARKER
 
             for child in view.children:
                 child.disabled = True
