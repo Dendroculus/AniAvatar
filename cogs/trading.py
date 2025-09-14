@@ -50,8 +50,6 @@ class CloseButton(discord.ui.Button):
 
         await interaction.response.edit_message(content=self.close_text, embed=None, view=None)
 
-
-
 class InventorySelect(discord.ui.Select):
     def __init__(self, cog, user_id, guild_id, items, parent_view):
         self.cog = cog
@@ -193,10 +191,11 @@ class InventoryView(discord.ui.View):
     async def _timeout_loop(self):
         try:
             await asyncio.sleep(self.timeout_seconds)
-            for child in self.children:
-                child.disabled = True
             if self.message:
-                await self.message.edit(view=self)
+                try:
+                    await self.message.edit(content="❌ Inventory closed.", embed=None, view=None)
+                except Exception:
+                    pass
             try:
                 if self.cog:
                     self.cog.open_inventories.pop(self.user_id, None)
@@ -315,11 +314,9 @@ class ShopView(discord.ui.View):
     async def _timeout_loop(self):
         try:
             await asyncio.sleep(self.timeout_seconds)
-            for child in self.children:
-                child.disabled = True
             if self.message:
                 try:
-                    await self.message.edit(view=self)
+                    await self.message.edit(content="❌ Shop closed.", embed=None, view=None)
                 except Exception:
                     pass
             try:
@@ -329,6 +326,7 @@ class ShopView(discord.ui.View):
                 pass
         except asyncio.CancelledError:
             return
+
 
     def reset_timer(self):
         self.start_timeout()
