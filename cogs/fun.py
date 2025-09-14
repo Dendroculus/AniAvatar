@@ -2,7 +2,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 import aiohttp
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import asyncio
 import random
 
@@ -14,7 +14,7 @@ class PollView(discord.ui.View):
         self.votes = {opt: set() for opt in options}
         self.author = author
         self.message: discord.Message | None = None
-        self.end_time = datetime.utcnow() + timedelta(seconds=timeout)
+        self.end_time = datetime.now(timezone.utc) + timedelta(seconds=timeout)
         self.updater_task: asyncio.Task | None = None
 
         select = discord.ui.Select(
@@ -162,6 +162,7 @@ class Fun(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.gamble_cooldowns = {}
+        self.active_views = {}
 
     @commands.hybrid_command(name="waifu", description="Get a random waifu image")
     async def waifu(self, ctx):
@@ -223,23 +224,30 @@ class Fun(commands.Cog):
     @commands.hybrid_command(name="gamble", description="Gamble your coins!")
     @commands.guild_only()
     async def gamble(self, ctx: commands.Context):
+        user_id = ctx.author.id
+        guild_id = ctx.guild.id
+        
+        if self.active_views.get(user_id, {}).get("gamble"):
+            return await ctx.send("⚠️ You already have the gamble view open!", ephemeral=True)
+        
         progression_cog = self.bot.get_cog("Progression")
         if not progression_cog:
             return await ctx.send("❌ Progression cog not loaded. Coins unavailable.")
 
-        user_id = ctx.author.id
-        guild_id = ctx.guild.id
         user_coins = await progression_cog.get_coins(user_id, guild_id)
         if user_coins <= 0:
             return await ctx.send("❌ You don't have any coins to gamble!")
 
         class GambleSelect(discord.ui.View):
-            def __init__(self, bot, user_id, guild_id):
-                super().__init__(timeout=120)
+            def __init__(self, bot, user_id, guild_id, active_views, timeout=120):
+                super().__init__(timeout=None)  # we'll use our own timeout_task
                 self.bot = bot
                 self.user_id = user_id
                 self.guild_id = guild_id
+                self.active_views = active_views
                 self.timeout_task = None
+                self.timeout_seconds = timeout
+                self.message = None
 
                 # Dropdown options
                 self.options_list = [
@@ -260,13 +268,17 @@ class Fun(commands.Cog):
                 self.exit_button.callback = self.exit_callback
                 self.add_item(self.exit_button)
 
+                # start timeout
+                self.reset_timeout()
+
             def create_select(self):
                 select = discord.ui.Select(
                     placeholder="Select amount to gamble",
                     options=[
                         discord.SelectOption(label=label, value=str(value), emoji=emoji)
                         for label, value, emoji in self.options_list
-                    ]
+                    ],
+                    min_values=1, max_values=1
                 )
                 select.callback = self.select_callback
                 return select
@@ -277,7 +289,9 @@ class Fun(commands.Cog):
                         "⚠️ This is not your gamble session.", ephemeral=True
                     )
 
+                # restart timeout on interaction
                 self.reset_timeout()
+
                 user_coins = await progression_cog.get_coins(self.user_id, self.guild_id)
                 value = int(self.select.values[0])
 
@@ -317,42 +331,88 @@ class Fun(commands.Cog):
                     else:
                         await process_gamble(interaction, value)
 
-                # Reset the dropdown
+                # Reset the dropdown UI so the user can choose again
                 self.remove_item(self.select)
                 self.select = self.create_select()
                 self.add_item(self.select)
+
                 new_coins = await progression_cog.get_coins(self.user_id, self.guild_id)
-                await interaction.message.edit(
-                    content=f"You have {new_coins} <:Coins:1415353285270966403>. Select amount to gamble:",
-                    view=self
-                )
+                try:
+                    await interaction.message.edit(
+                        content=f"You have {new_coins} <:Coins:1415353285270966403>. Select amount to gamble:",
+                        view=self
+                    )
+                except Exception:
+                    # fallback: attempt to edit via response if the interaction still allows it
+                    try:
+                        await interaction.response.edit_message(
+                            content=f"You have {new_coins} <:Coins:1415353285270966403>. Select amount to gamble:",
+                            view=self
+                        )
+                    except Exception:
+                        pass
 
             async def exit_callback(self, interaction: discord.Interaction):
                 if interaction.user.id != self.user_id:
                     return await interaction.response.send_message(
                         "⚠️ This is not your gamble session.", ephemeral=True
                     )
-                for child in self.children:
-                    child.disabled = True
-                await interaction.message.edit(view=self)
-                await interaction.response.send_message("❌ Gamble exited.", ephemeral=True)
+
+                # pop stored view so user can reopen
+                try:
+                    self.active_views.get(self.user_id, {}).pop("gamble", None)
+                except Exception:
+                    pass
+
+                # cancel timeout task if running
+                try:
+                    if self.timeout_task:
+                        self.timeout_task.cancel()
+                except Exception:
+                    pass
+
+                # replace message with clean closed message
+                try:
+                    await interaction.response.edit_message(content="❌ Gamble exited.", embed=None, view=None)
+                except Exception:
+                    # if edit_message isn't available, fall back
+                    try:
+                        await interaction.message.edit(content="❌ Gamble exited.", embed=None, view=None)
+                    except Exception:
+                        pass
+
+                # stop the view
                 self.stop()
 
             def reset_timeout(self):
-                if hasattr(self, "timeout_task") and self.timeout_task:
-                    self.timeout_task.cancel()
+                # cancel previous task
+                try:
+                    if self.timeout_task:
+                        self.timeout_task.cancel()
+                except Exception:
+                    pass
+                # schedule a new one
                 self.timeout_task = self.bot.loop.create_task(self.timeout_handler())
 
             async def timeout_handler(self):
-                await asyncio.sleep(self.timeout)
-                for child in self.children:
-                    child.disabled = True
-                if hasattr(self, "message") and self.message:
+                try:
+                    await asyncio.sleep(self.timeout_seconds)
+                    # on timeout, auto-close message and remove lock
                     try:
-                        await self.message.edit(view=self)
-                    except:
+                        if hasattr(self, "message") and self.message:
+                            await self.message.edit(content="❌ Gamble timed out.", embed=None, view=None)
+                    except Exception:
                         pass
-                self.stop()
+
+                    try:
+                        self.active_views.get(self.user_id, {}).pop("gamble", None)
+                    except Exception:
+                        pass
+
+                    self.stop()
+                except asyncio.CancelledError:
+                    return
+
 
         async def process_gamble(interaction: discord.Interaction, amount: int):
             user_total_coins = await progression_cog.get_coins(user_id, guild_id)
@@ -380,16 +440,14 @@ class Fun(commands.Cog):
                     f"{result_text} Your new balance: {new_balance} <:Coins:1415353285270966403>."
                 )
 
-        view = GambleSelect(self.bot, user_id, guild_id)
+        view = GambleSelect(self.bot, user_id, guild_id, self.active_views)
+        self.active_views.setdefault(user_id, {})["gamble"] = view
+        
         message = await ctx.send(
             f"You have {user_coins} <:Coins:1415353285270966403>. Select amount to gamble:",
             view=view
         )
         view.message = message
-        view.reset_timeout()
-
-
-
 
 async def setup(bot):
     await bot.add_cog(Fun(bot))
