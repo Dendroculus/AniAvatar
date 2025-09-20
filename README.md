@@ -1,7 +1,8 @@
 # AniAvatar Discord Bot  
 
-<img src="assets/aniavatar.png" width="200" />  
+<img src="assets/Minori.png" width="400" />  
 
+AniAvatar is the project name. The bot appears on Discord as **Minori**.<br>
 AniAvatar is a **Discord bot** built with Python and [discord.py](https://discordpy.readthedocs.io/).  
 It automates anime-related tasks — search anime info, fetch profile pictures, play trivia, and level up your profile.  
 
