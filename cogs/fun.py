@@ -1,62 +1,71 @@
 import discord
-from discord import app_commands
+from discord import app_commands, ui
 from discord.ext import commands
 import aiohttp
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone 
 import asyncio
 import random
+from typing import List, Optional
 
 class PollView(discord.ui.View):
-    def __init__(self, question: str, options: list[str], author: discord.Member, timeout: int = 60):
+    def __init__(self, question: str, options: List[str], author: discord.Member, timeout: Optional[int] = None):
         super().__init__(timeout=timeout)
         self.question = question
         self.options = options
         self.votes = {opt: set() for opt in options}
         self.author = author
-        self.message: discord.Message | None = None
-        self.end_time = datetime.now(timezone.utc) + timedelta(seconds=timeout)
-        self.updater_task: asyncio.Task | None = None
+        self.message: Optional[discord.Message] = None
+        self.updater_task: Optional[asyncio.Task] = None
+        self.ended = False
+        self.end_time = (datetime.now(timezone.utc) + timedelta(seconds=timeout)) if timeout else None
 
+        add_button = discord.ui.Button(label="Add Option", style=discord.ButtonStyle.green)
+        add_button.callback = self.add_option
+        self.add_item(add_button)
+            
         select = discord.ui.Select(
             placeholder="Select one answer",
-            options=[discord.SelectOption(label=opt, value=opt) for opt in options],  # ✅ force value = opt
-            custom_id="poll_select"
+            options=[discord.SelectOption(label=opt, value=str(i)) for i, opt in enumerate(options)],
+            min_values=1,
+            max_values=1
         )
-
         select.callback = self.select_callback
         self.add_item(select)
 
-        remove_button = discord.ui.Button(
-            label="Remove Vote",
-            style=discord.ButtonStyle.danger,
-            custom_id="remove_vote"
-        )
+        remove_button = discord.ui.Button(label="Remove Vote", style=discord.ButtonStyle.danger)
         remove_button.callback = self.remove_vote
         self.add_item(remove_button)
-        
-        end_button = discord.ui.Button(
-            label="End Poll",
-            style=discord.ButtonStyle.red,
-            custom_id="end_poll"
-        )
+
+        end_button = discord.ui.Button(label="End Poll", style=discord.ButtonStyle.red)
         end_button.callback = self.end_poll
         self.add_item(end_button)
+        
+    async def add_option(self, interaction: discord.Interaction):
+        if interaction.user.id != self.author.id:
+            return await interaction.response.send_message("⚠️ Only the poll creator can add options.", ephemeral=True)
+        
+        modal = AddOptionModal(self)
+        await interaction.response.send_modal(modal)
 
     async def select_callback(self, interaction: discord.Interaction):
-        choice = interaction.data["values"][0]
+        try:
+            val = interaction.data["values"][0]   # index as string
+            idx = int(val)
+        except Exception:
+            return await interaction.response.send_message("⚠️ Invalid selection.", ephemeral=True)
 
-        if choice not in self.votes:
-            return await interaction.response.send_message(
-                "⚠️ Invalid choice, please try again.", ephemeral=True
-            )
+        if idx < 0 or idx >= len(self.options):
+            return await interaction.response.send_message("⚠️ Invalid choice.", ephemeral=True)
 
+        choice_label = self.options[idx]
+
+        # remove previous votes by user
         for opt in self.votes:
             self.votes[opt].discard(interaction.user.id)
+        self.votes[choice_label].add(interaction.user.id)
+        await self.update_poll(interaction, f"<:VERIFIED:1418921885692989532> You voted for **{choice_label}**")
 
-        self.votes[choice].add(interaction.user.id)
-        await self.update_poll(interaction, f"✅ You voted for **{choice}**")
-
-
+    
     async def remove_vote(self, interaction: discord.Interaction):
         removed = False
         for opt in self.votes:
@@ -67,96 +76,205 @@ class PollView(discord.ui.View):
             await self.update_poll(interaction, "❌ Your vote was removed.")
         else:
             await interaction.response.send_message("⚠️ You haven't voted yet.", ephemeral=True)
-            
+
     async def end_poll(self, interaction: discord.Interaction):
         if interaction.user.id != self.author.id:
-            return await interaction.response.send_message(
-                "⚠️ Only the poll creator can end this poll.", ephemeral=True
-            )
+            return await interaction.response.send_message("⚠️ Only the poll creator can end this poll.", ephemeral=True)
+
         if self.updater_task and not self.updater_task.done():
             self.updater_task.cancel()
+
+        await interaction.response.defer(ephemeral=True)
         await self.on_timeout()
-        await interaction.response.send_message("✅ Poll ended.", ephemeral=True)
 
     async def update_poll(self, interaction: discord.Interaction, ephemeral_msg: str):
-        embed = self.make_poll_embed(interaction.user.id)
-        await self.message.edit(embed=embed, view=self)
-        await interaction.response.send_message(ephemeral_msg, ephemeral=True)
+        embed = self.make_poll_embed()
+        if self.message:
+            await self.message.edit(embed=embed, view=self)
+        try:
+            await interaction.response.send_message(ephemeral_msg, ephemeral=True)
+        except discord.errors.InteractionResponded:
+            await interaction.followup.send(ephemeral_msg, ephemeral=True)
 
-    def make_poll_embed(self, user_id: int):
-        total_votes = sum(len(users) for users in self.votes.values())
+    def make_poll_embed(self, closed: bool = False):
+        total_votes = sum(len(v) for v in self.votes.values())
         lines = []
+        colors = ["🟦", "🟥", "🟩", "🟨", "🟪", "🟧", "🟫", "🟦", "🟥", "🟩", "🟨", "🟪", "🟧", "🟫", "🟦"]
 
-        # ✅ find the longest option length
-        max_len = max(len(opt) for opt in self.options)
-
-        for opt, users in self.votes.items():
+        for i, (opt, users) in enumerate(self.votes.items()):
             count = len(users)
             percent = (count / total_votes * 100) if total_votes > 0 else 0
-            blocks = int(percent // 10)
-            bar = "█" * blocks + "▬" * (10 - blocks)
-            check = "[x]" if user_id in users else "[ ]"
+            filled = int(percent // 10)
+            empty = 10 - filled
+            color = colors[i % len(colors)]
+            bar = color * filled + "<:Gray_Large_Square:1418999479557685380>" * empty
+            lines.append(f"{opt}\n{bar} `{percent:.0f}% ({count})`")
 
-            # pad options dynamically
-            lines.append(
-                f"```{check} {opt.ljust(max_len)} | {bar} | {count:>2} votes ({percent:>3.0f}%)```"
-            )
+        description = f"{total_votes} votes\n\n" + "\n\n".join(lines)
 
-        remaining = max(0, int((self.end_time - datetime.utcnow()).total_seconds()))
-        mins, secs = divmod(remaining, 60)
-        hours, mins = divmod(mins, 60)
-
-        if remaining > 0:
-            if hours > 0:
-                timer = f"{hours}h {mins}m {secs}s left"
-            elif mins > 0:
-                timer = f"{mins}m {secs}s left"
-            else:
-                timer = f"{secs}s left"
-            footer = f"{total_votes} vote(s) • {timer}"
+        if closed:
+            description += "\n\n<:Locked:1419005340812316893> Poll closed\n <:SecretBox:1418986878949916722> Votes are anonymous"
         else:
-            footer = f"{total_votes} vote(s) • Poll closed"
+            if self.end_time:
+                unix_ts = int(self.end_time.timestamp())
+                description += f"\n\n<:TIME:1415961777912545341> Poll closes <t:{unix_ts}:R>\n <:SecretBox:1418986878949916722> Votes are anonymous"
 
-        embed = discord.Embed(
-            title=f"{self.question}",
-            description="\n".join(lines) + f"\n\n{footer}",
-            color=discord.Color.blurple()
-        )
+        title = f"<:CHART:1418908749749420085>  {self.question}"
+        embed = discord.Embed(title=title, description=description, color=discord.Color.blurple())
         return embed
 
-    async def start_updater(self):
-        """Background task to auto-update poll timer."""
-        try:
-            while datetime.utcnow() < self.end_time and self.message:
-                await asyncio.sleep(0.5)  
-                embed = self.make_poll_embed(0)
-                await self.message.edit(embed=embed, view=self)
-        except Exception as e:
-            print(f"[Poll Updater Error] {e}")
-
-        await self.on_timeout()
-
     async def on_timeout(self):
-        for child in self.children:
-            child.disabled = True
+        if self.ended:
+            return
+        self.ended = True
+        self.clear_items()
         if self.message:
-            final_embed = self.make_poll_embed(0)
-            final_embed.title = f"Poll Ended — {self.question}"
-            desc = final_embed.description.rsplit("•", 1)[0] + "• Poll closed"
-            final_embed.description = desc
-            await self.message.edit(embed=final_embed, view=self)
-
             results = {opt: len(users) for opt, users in self.votes.items()}
+            winner_text = ""
             if results:
                 max_votes = max(results.values())
                 winners = [opt for opt, count in results.items() if count == max_votes]
-
-                if len(winners) == 1:
-                    winner_text = f"<:CHAMPION:1414508304448749568> The winner is **{winners[0]}** with {max_votes} vote(s)!"
+                if max_votes > 0:
+                    if len(winners) == 1:
+                        winner_text = f"\n\n<:MinoriPray:1418919979272896634> Poll ended. The highest vote goes to **{winners[0]}** with {max_votes} vote{'s' if max_votes!=1 else ''}."
+                    else:
+                        winner_text = f"\n\n<:MinoriPray:1418919979272896634> Poll ended. It's a tie between {', '.join(winners)} — each with {max_votes} votes."
                 else:
-                    winner_text = f"🤝 It's a tie between: {', '.join(winners)} ({max_votes} vote(s) each)."
-
+                    winner_text = "\n\n<:MinoriWink:1414899695209418762> Poll ended. No votes were cast."
+            final_embed = self.make_poll_embed(closed=True)
+            await self.message.edit(embed=final_embed, view=self)
+            if winner_text:
                 await self.message.channel.send(winner_text)
+
+class AddOptionModal(ui.Modal, title="Add Poll Options"):
+    # 5 optional inputs
+    opt1 = ui.TextInput(label="Option 1 (optional)", required=False, max_length=100,
+                        placeholder="Leave empty if not needed")
+    opt2 = ui.TextInput(label="Option 2 (optional)", required=False, max_length=100,
+                        placeholder="Leave empty if not needed")
+    opt3 = ui.TextInput(label="Option 3 (optional)", required=False, max_length=100,
+                        placeholder="Leave empty if not needed")
+    opt4 = ui.TextInput(label="Option 4 (optional)", required=False, max_length=100,
+                        placeholder="Leave empty if not needed")
+    opt5 = ui.TextInput(label="Option 5 (optional)", required=False, max_length=100,
+                        placeholder="Leave empty if not needed")
+
+    def __init__(self, poll_view: "PollView"):
+        super().__init__()
+        self.poll_view = poll_view
+        self.description = "Note: Discord only allows a maximum of 25 options per select menu."
+
+    async def on_submit(self, interaction: discord.Interaction):
+        new_opts_raw = [
+            self.opt1.value.strip(),
+            self.opt2.value.strip(),
+            self.opt3.value.strip(),
+            self.opt4.value.strip(),
+            self.opt5.value.strip()
+        ]
+        new_opts = [o for o in new_opts_raw if o]
+
+        if not new_opts:
+            return await interaction.response.send_message(
+                "⚠️ No new options were added.", ephemeral=True
+            )
+
+        normalized_existing = [o.lower() for o in self.poll_view.options]
+        for opt in new_opts:
+            if opt.lower() in normalized_existing:
+                return await interaction.response.send_message(
+                    "<:MinoriConfused:1415707082988060874> You can't add duplicate options.",
+                    ephemeral=True
+                )
+
+        if len(self.poll_view.options) + len(new_opts) > 15:
+            return await interaction.response.send_message(
+                "⚠️ You can only add up to 15 options.", ephemeral=True
+            )
+
+        for opt in new_opts:
+            self.poll_view.options.append(opt)
+            self.poll_view.votes[opt] = set()
+            select: discord.ui.Select = next(
+                (i for i in self.poll_view.children if isinstance(i, discord.ui.Select)), None
+            )
+            if select:
+                select.options = [discord.SelectOption(label=opt, value=str(idx)) 
+                                for idx, opt in enumerate(self.poll_view.options)]
+
+        embed = self.poll_view.make_poll_embed()
+        await self.poll_view.message.edit(embed=embed, view=self.poll_view)
+        await interaction.response.send_message(f"<:VERIFIED:1418921885692989532> Added {len(new_opts)} option(s).", ephemeral=True)
+
+class PollInputModal(ui.Modal, title="Create Poll"):
+    question = ui.TextInput(label="Question", placeholder="What's the poll about?", required=True, max_length=200)
+    opt1 = ui.TextInput(label="Option 1 (required)", placeholder="First option (required)", required=True, max_length=100)
+    opt2 = ui.TextInput(label="Option 2 (required)", placeholder="Second option (required)", required=True, max_length=100)
+    opt3 = ui.TextInput(label="Option 3 (optional)", placeholder="Third option (optional)", required=False, max_length=100)
+    opt4 = ui.TextInput(label="Option 4 (optional)", placeholder="Fourth option (optional)", required=False, max_length=100)
+
+    def __init__(self, ctx: commands.Context, timeout_seconds: Optional[int] = None):
+        super().__init__()
+        self.ctx = ctx
+        self.timeout_seconds = timeout_seconds
+
+    async def select_callback(self, interaction: discord.Interaction):
+        try:
+            val = interaction.data["values"][0]   # index as string
+            idx = int(val)
+        except Exception:
+            return await interaction.response.send_message("⚠️ Invalid selection.", ephemeral=True)
+
+        if idx < 0 or idx >= len(self.options):
+            return await interaction.response.send_message("⚠️ Invalid choice.", ephemeral=True)
+
+        choice_label = self.options[idx]
+
+        # remove previous votes by user
+        for opt in self.votes:
+            self.votes[opt].discard(interaction.user.id)
+        self.votes[choice_label].add(interaction.user.id)
+        await self.update_poll(interaction, f"<:VERIFIED:1418921885692989532> You voted for **{choice_label}**")
+        
+    async def on_submit(self, interaction: discord.Interaction):
+        raw_opts = [
+            self.opt1.value.strip(),
+            self.opt2.value.strip(),
+            self.opt3.value.strip(),
+            self.opt4.value.strip()
+        ]
+        opts = [o for o in raw_opts if o]
+
+        # require at least 2 options
+        if len(opts) < 2:
+            return await interaction.response.send_message(
+                "⚠️ Please provide at least two options (Option 1 and Option 2 are required).",
+                ephemeral=True
+            )
+
+        # Duplicate check (normalize: trim + lower)
+        normalized = [o.strip().lower() for o in opts]
+        if len(set(normalized)) != len(normalized):
+            return await interaction.response.send_message(
+                "<:MinoriConfused:1415707082988060874> You cant make same options",
+                ephemeral=True
+            )
+        try:
+            view = PollView(self.question.value, opts, self.ctx.author, timeout=self.timeout_seconds)
+            embed = view.make_poll_embed()
+            msg = await self.ctx.send(embed=embed, view=view)
+            view.message = msg
+            try:
+                await interaction.response.send_message("<:VERIFIED:1418921885692989532> Poll successfully created!", ephemeral=True)
+            except discord.errors.InteractionResponded:
+                await interaction.followup.send("<:VERIFIED:1418921885692989532> Poll successfully created!", ephemeral=True)
+        except Exception as e:
+            print(f"[Poll Create Error] {e}")
+            try:
+                await interaction.response.send_message(f"⚠️ Failed to create poll: {e}", ephemeral=True)
+            except discord.errors.InteractionResponded:
+                await interaction.followup.send(f"⚠️ Failed to create poll: {e}", ephemeral=True)
+
                 
 class Fun(commands.Cog):
     def __init__(self, bot):
@@ -183,43 +301,28 @@ class Fun(commands.Cog):
         await ctx.send(embed=embed)
         
     @commands.hybrid_command(name="poll", description="Create a poll with custom options")
-    @commands.guild_only()
-    @app_commands.describe(
-        question="The question to ask",
-        duration="How long should the poll last?",
-        custom_minutes="(Only if you selected Custom) Enter duration in minutes",
-        options="Options separated by commas (e.g. A, B, C)"
-    )
-    @app_commands.choices(duration=[
-        app_commands.Choice(name="5 minutes", value=300),
-        app_commands.Choice(name="20 minutes", value=1200),
-        app_commands.Choice(name="1 hour", value=3600),
-        app_commands.Choice(name="1 day", value=86400),
-        app_commands.Choice(name="Half a day", value=43200),
-        app_commands.Choice(name="Custom", value=-1),  
-    ])
-    async def poll(self, ctx, question: str, duration: app_commands.Choice[int], custom_minutes: int = None, *, options: str):
-        options = options.split(", ")
-        if len(options) < 2:
-            return await ctx.send("❌ Please provide at least two options.")
-        if len(options) > 5:
-            return await ctx.send("⚠️ Max 5 options allowed.")
+    @app_commands.describe(duration="How long should the poll last in minutes?")
+    async def poll(self, ctx: commands.Context, duration: int):
+        if not getattr(ctx, "interaction", None):
+            return await ctx.send("<:MinoriConfused:1415707082988060874> Please use the slash (/) version of this command so the bot can open modals.")
 
-        if duration.value == -1:  # custom
-            if not custom_minutes or custom_minutes <= 0:
-                return await ctx.send("⚠️ Please provide a valid custom duration in minutes.")
-            time = custom_minutes * 60
-        else:
-            time = duration.value
-            
-        if time > 604800:  
-            return await ctx.send("⚠️ Poll duration cannot exceed 7 days.")
+        if duration < 1:
+            return await ctx.interaction.response.send_message(
+                "<:MinoriDisapointed:1416016691430821958> Duration must be at least 1 minute.",
+                ephemeral=True
+            )
+        if duration > 7*24*60:
+            return await ctx.interaction.response.send_message(
+                "<:MinoriDisapointed:1416016691430821958> Duration cannot exceed 7 days.",
+                ephemeral=True
+            )
 
-        view = PollView(question, options, ctx.author, timeout=time)
-        embed = view.make_poll_embed(ctx.author.id)
-        msg = await ctx.send(embed=embed, view=view)
-        view.message = msg
-        view.updater_task = ctx.bot.loop.create_task(view.start_updater())
+        timeout_seconds = duration * 60
+
+        # open modal for poll options
+        poll_modal = PollInputModal(ctx, timeout_seconds=timeout_seconds)
+        await ctx.interaction.response.send_modal(poll_modal)
+
 
     @commands.hybrid_command(name="gamble", description="Gamble your coins!")
     @commands.guild_only()
@@ -289,16 +392,15 @@ class Fun(commands.Cog):
                         "⚠️ This is not your gamble session.", ephemeral=True
                     )
 
-                # restart timeout on interaction
                 self.reset_timeout()
 
                 user_coins = await progression_cog.get_coins(self.user_id, self.guild_id)
                 value = int(self.select.values[0])
 
-                if value == -2:  # All In
+                if value == -2:  
                     value = user_coins
 
-                if value == -1:  # Custom modal
+                if value == -1:  
                     class CustomModal(discord.ui.Modal):
                         def __init__(self):
                             super().__init__(title="Custom Gamble")
@@ -331,7 +433,6 @@ class Fun(commands.Cog):
                     else:
                         await process_gamble(interaction, value)
 
-                # Reset the dropdown UI so the user can choose again
                 self.remove_item(self.select)
                 self.select = self.create_select()
                 self.add_item(self.select)
@@ -343,7 +444,6 @@ class Fun(commands.Cog):
                         view=self
                     )
                 except Exception:
-                    # fallback: attempt to edit via response if the interaction still allows it
                     try:
                         await interaction.response.edit_message(
                             content=f"You have {new_coins} <:Coins:1415353285270966403>. Select amount to gamble:",
@@ -358,46 +458,38 @@ class Fun(commands.Cog):
                         "⚠️ This is not your gamble session.", ephemeral=True
                     )
 
-                # pop stored view so user can reopen
                 try:
                     self.active_views.get(self.user_id, {}).pop("gamble", None)
                 except Exception:
                     pass
 
-                # cancel timeout task if running
                 try:
                     if self.timeout_task:
                         self.timeout_task.cancel()
                 except Exception:
                     pass
 
-                # replace message with clean closed message
                 try:
                     await interaction.response.edit_message(content="❌ Gamble exited.", embed=None, view=None)
                 except Exception:
-                    # if edit_message isn't available, fall back
                     try:
                         await interaction.message.edit(content="❌ Gamble exited.", embed=None, view=None)
                     except Exception:
                         pass
 
-                # stop the view
                 self.stop()
 
             def reset_timeout(self):
-                # cancel previous task
                 try:
                     if self.timeout_task:
                         self.timeout_task.cancel()
                 except Exception:
                     pass
-                # schedule a new one
                 self.timeout_task = self.bot.loop.create_task(self.timeout_handler())
 
             async def timeout_handler(self):
                 try:
                     await asyncio.sleep(self.timeout_seconds)
-                    # on timeout, auto-close message and remove lock
                     try:
                         if hasattr(self, "message") and self.message:
                             await self.message.edit(content="❌ Gamble timed out.", embed=None, view=None)
