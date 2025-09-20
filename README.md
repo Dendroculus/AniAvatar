@@ -1,6 +1,6 @@
 # AniAvatar Discord Bot  
 
-<img src="assets/Minori.png" width="400" />  
+<img src="assets/Minori_Mascot.png" width="400" />  
 
 AniAvatar is the project name. The bot appears on Discord as **Minori**.<br>
 AniAvatar is a **Discord bot** built with Python and [discord.py](https://discordpy.readthedocs.io/).  
