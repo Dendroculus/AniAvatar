@@ -6,6 +6,9 @@ from datetime import datetime, timedelta, timezone
 import asyncio
 import random
 from typing import List, Optional
+import json
+import os
+from itertools import cycle
 
 class PollView(discord.ui.View):
     def __init__(self, question: str, options: List[str], author: discord.Member, timeout: Optional[int] = None):
@@ -49,7 +52,7 @@ class PollView(discord.ui.View):
 
     async def select_callback(self, interaction: discord.Interaction):
         try:
-            val = interaction.data["values"][0]   # index as string
+            val = interaction.data["values"][0]   
             idx = int(val)
         except Exception:
             return await interaction.response.send_message("⚠️ Invalid selection.", ephemeral=True)
@@ -147,7 +150,6 @@ class PollView(discord.ui.View):
                 await self.message.channel.send(winner_text)
 
 class AddOptionModal(ui.Modal, title="Add Poll Options"):
-    # 5 optional inputs
     opt1 = ui.TextInput(label="Option 1 (optional)", required=False, max_length=100,
                         placeholder="Leave empty if not needed")
     opt2 = ui.TextInput(label="Option 2 (optional)", required=False, max_length=100,
@@ -281,6 +283,47 @@ class Fun(commands.Cog):
         self.bot = bot
         self.gamble_cooldowns = {}
         self.active_views = {}
+        self.lock = asyncio.Lock()
+        
+        self.data_path = os.path.join(os.path.dirname(__file__), "..", "data", "quotes.json")
+        try:
+            with open(self.data_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except FileNotFoundError:
+            data = {}
+
+        if isinstance(data, dict):
+            self.quotes_dict = data 
+        elif isinstance(data, list):
+            self.quotes_dict = {"Mixed": data}
+        else:
+            self.quotes_dict = {"Mixed": []}
+
+        self.used_quotes = set()
+
+    def get_balanced_quotes(self, num_quotes: int):
+            titles = list(self.quotes_dict.keys())
+            if not titles:
+                return []
+
+            random.shuffle(titles)
+            quotes = []
+            title_cycle = cycle(titles)
+
+            while len(quotes) < num_quotes:
+                title = next(title_cycle)
+                cat_list = self.quotes_dict.get(title, [])
+                available = [q for q in cat_list if q.get("quote") and q["quote"] not in self.used_quotes]
+                if available:
+                    q = random.choice(available)
+                    self.used_quotes.add(q["quote"])
+                    quotes.append({"anime": title, **q})
+
+                total_quotes = sum(len(qs) for qs in self.quotes_dict.values())
+                if total_quotes and len(self.used_quotes) >= total_quotes:
+                    self.used_quotes.clear()
+
+            return quotes
 
     @commands.hybrid_command(name="waifu", description="Get a random waifu image")
     async def waifu(self, ctx):
@@ -301,6 +344,7 @@ class Fun(commands.Cog):
         await ctx.send(embed=embed)
         
     @commands.hybrid_command(name="poll", description="Create a poll with custom options")
+    @commands.guild_only()
     @app_commands.describe(duration="How long should the poll last in minutes?")
     async def poll(self, ctx: commands.Context, duration: int):
         if not getattr(ctx, "interaction", None):
@@ -322,7 +366,6 @@ class Fun(commands.Cog):
         # open modal for poll options
         poll_modal = PollInputModal(ctx, timeout_seconds=timeout_seconds)
         await ctx.interaction.response.send_modal(poll_modal)
-
 
     @commands.hybrid_command(name="gamble", description="Gamble your coins!")
     @commands.guild_only()
@@ -510,8 +553,8 @@ class Fun(commands.Cog):
             user_total_coins = await progression_cog.get_coins(user_id, guild_id)
             base_chance = 0.5
             bet_ratio = amount / user_total_coins
-            win_chance = max(0.13, base_chance - bet_ratio * 0.5)
-
+            win_chance = max(0.201, base_chance - bet_ratio * 0.5)
+            
             if random.random() < win_chance:
                 await progression_cog.add_coins(user_id, guild_id, amount)
                 if amount == user_total_coins:
@@ -540,6 +583,26 @@ class Fun(commands.Cog):
             view=view
         )
         view.message = message
+        
+    @commands.hybrid_command(name="animequotes", description="Give a random anime quote")
+    async def animequotes(self, ctx: commands.Context):
+        async with self.lock:
+            result = self.get_balanced_quotes(1)
+            if not result:
+                return await ctx.send("❌ No quotes available.")
+            q = result[0]
+
+        quote_text = q.get("quote", "")[:1900]  
+        character = q.get("character", "Unknown")
+        anime = q.get("anime", "Unknown")
+
+        embed = discord.Embed(
+            title=f"   {anime}",
+            description=f"```“{quote_text}”```",
+            color=discord.Color.random()
+        )
+        embed.set_footer(text=f" {character}")
+        await ctx.send(embed=embed)
 
 async def setup(bot):
     await bot.add_cog(Fun(bot))
