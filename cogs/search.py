@@ -23,7 +23,6 @@ class Search(commands.Cog):
         self.bot = bot
 
     @commands.hybrid_command(name="anime", description="Search for an anime by name")
-    @commands.guild_only()
     async def anime(self, ctx: commands.Context, *, query: str):
 
         query_str = """
@@ -453,4 +452,5 @@ class Search(commands.Cog):
 async def setup(bot):
     await bot.add_cog(Search(bot))
     print("📦 Loaded search cog.")
+
 
