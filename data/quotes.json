@@ -1,0 +1,18 @@
+{
+  "Naruto": [
+    {
+      "character": "Naruto Uzumaki",
+      "quote": "Hard work is worthless for those that don’t believe in themselves."
+    },
+    {
+      "character": "Kakashi Hatake",
+      "quote": "In society, those who don’t have many abilities, tend to complain more."
+    }
+  ],
+  "One Piece": [
+    {
+      "character": "Monkey D. Luffy",
+      "quote": "If you don’t take risks, you can’t create a future."
+    }
+  ]
+}
