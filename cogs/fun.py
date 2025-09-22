@@ -597,12 +597,13 @@ class Fun(commands.Cog):
         anime = q.get("anime", "Unknown")
 
         embed = discord.Embed(
-            title=f"   {anime}",
-            description=f"```“{quote_text}”```",
-            color=discord.Color.random()
+            title=f"{anime}",
+            description=f"*“{quote_text}”*",
+            color=discord.Color.blue() 
         )
-        embed.set_footer(text=f" {character}")
+        embed.set_footer(text=f"~ {character}")
         await ctx.send(embed=embed)
+
 
 async def setup(bot):
     await bot.add_cog(Fun(bot))
