@@ -1,9 +1,67 @@
 from PIL import Image, ImageDraw, ImageFont
 from cogs.utils.constants import *
+import hashlib
 import traceback
 import discord
 import os
 import io
+import random
+import colorsys
+
+TITLE_COLORS = {
+    "Novice": discord.Color.light_gray(),
+    "Warrior": discord.Color.red(),
+    "Elite": discord.Color.orange(),
+    "Champion": discord.Color.gold(),
+    "Hero": discord.Color.green(),
+    "Legend": discord.Color.blue(),
+    "Mythic": discord.Color.purple(),
+    "Ascendant": discord.Color.teal(),
+    "Immortal": discord.Color.dark_red(),
+    "Celestial": discord.Color.dark_blue(),
+    "Transcendent": discord.Color.dark_purple(),
+    "Aetherborn": discord.Color.dark_teal(),
+    "Cosmic": discord.Color.dark_magenta(),
+    "Divine": discord.Color.green(),
+    "Eternal": discord.Color.red(),
+    "Enlightened": discord.Color.blue(),
+}
+
+def get_title(level: int):
+    if level < 5: return "Novice"
+    elif level < 10: return "Warrior"
+    elif level < 15: return "Elite"
+    elif level < 20: return "Champion"
+    elif level < 25: return "Hero"
+    elif level < 30: return "Legend"
+    elif level < 35: return "Mythic"
+    elif level < 40: return "Ascendant"
+    elif level < 50: return "Immortal"
+    elif level < 60: return "Celestial"
+    elif level < 70: return "Transcendent"
+    elif level < 80: return "Aetherborn"
+    elif level < 90: return "Cosmic"
+    elif level < 100: return "Divine"
+    elif level < 125: return "Eternal"
+    else: return "Enlightened"
+
+def get_title_emoji(level: int):
+    if level < 5: return "<:NOVICE:1414508405002862663>"
+    elif level < 10: return "<:WARRIOR:1414508311650242661>"
+    elif level < 15: return "<:ELITE:1414508395301699724>"
+    elif level < 20: return "<:CHAMPION:1414508304448749568>"
+    elif level < 25: return "<:HERO:1414508388812853258>"
+    elif level < 30: return "<:LEGEND:1414508296269856768>"
+    elif level < 35: return "<:MYTHIC:1414508380172587099>"
+    elif level < 40: return "<:ASCENDANT:1414508291341684776>"
+    elif level < 50: return "<:IMMORTAL:1414508281543524454>"
+    elif level < 60: return "<:CELESTIAL:1414508342520320070>"
+    elif level < 70: return "<:TRANSCENDENT:1414508273767288832>"
+    elif level < 80: return "<:AETHERBORN:1414508333951483904>"
+    elif level < 90: return "<:COSMIC:1414508264695005184>"
+    elif level < 100: return "<:DIVINE:1414508323763388446>"
+    elif level < 125: return "<:ETERNAL:1414508351676481536>"
+    else: return "<:ENLIGHTENED:1414508255744360510>"
 
 
 def render_profile_image(
@@ -235,61 +293,6 @@ def render_profile_image(
         traceback.print_exc()
         return None
 
-TITLE_COLORS = {
-    "Novice": discord.Color.light_gray(),
-    "Warrior": discord.Color.red(),
-    "Elite": discord.Color.orange(),
-    "Champion": discord.Color.gold(),
-    "Hero": discord.Color.green(),
-    "Legend": discord.Color.blue(),
-    "Mythic": discord.Color.purple(),
-    "Ascendant": discord.Color.teal(),
-    "Immortal": discord.Color.dark_red(),
-    "Celestial": discord.Color.dark_blue(),
-    "Transcendent": discord.Color.dark_purple(),
-    "Aetherborn": discord.Color.dark_teal(),
-    "Cosmic": discord.Color.dark_magenta(),
-    "Divine": discord.Color.green(),
-    "Eternal": discord.Color.red(),
-    "Enlightened": discord.Color.blue(),
-}
-
-def get_title(level: int):
-    if level < 5: return "Novice"
-    elif level < 10: return "Warrior"
-    elif level < 15: return "Elite"
-    elif level < 20: return "Champion"
-    elif level < 25: return "Hero"
-    elif level < 30: return "Legend"
-    elif level < 35: return "Mythic"
-    elif level < 40: return "Ascendant"
-    elif level < 50: return "Immortal"
-    elif level < 60: return "Celestial"
-    elif level < 70: return "Transcendent"
-    elif level < 80: return "Aetherborn"
-    elif level < 90: return "Cosmic"
-    elif level < 100: return "Divine"
-    elif level < 125: return "Eternal"
-    else: return "Enlightened"
-
-def get_title_emoji(level: int):
-    if level < 5: return "<:NOVICE:1414508405002862663>"
-    elif level < 10: return "<:WARRIOR:1414508311650242661>"
-    elif level < 15: return "<:ELITE:1414508395301699724>"
-    elif level < 20: return "<:CHAMPION:1414508304448749568>"
-    elif level < 25: return "<:HERO:1414508388812853258>"
-    elif level < 30: return "<:LEGEND:1414508296269856768>"
-    elif level < 35: return "<:MYTHIC:1414508380172587099>"
-    elif level < 40: return "<:ASCENDANT:1414508291341684776>"
-    elif level < 50: return "<:IMMORTAL:1414508281543524454>"
-    elif level < 60: return "<:CELESTIAL:1414508342520320070>"
-    elif level < 70: return "<:TRANSCENDENT:1414508273767288832>"
-    elif level < 80: return "<:AETHERBORN:1414508333951483904>"
-    elif level < 90: return "<:COSMIC:1414508264695005184>"
-    elif level < 100: return "<:DIVINE:1414508323763388446>"
-    elif level < 125: return "<:ETERNAL:1414508351676481536>"
-    else: return "<:ENLIGHTENED:1414508255744360510>"
-
 def load_font(path, size):
     try:
         return ImageFont.truetype(path, size)
@@ -303,221 +306,414 @@ def _safe_load_font(path, size):
     except Exception:
         return ImageFont.load_default()
 
+
+_AVATAR_CACHE = {}
+
+
+def _lerp(a, b, t):
+    """Linear interpolation."""
+    return int(round(a + (b - a) * t))
+
+def _interpolate_color(c1, c2, t):
+    return (
+        _lerp(c1[0], c2[0], t),
+        _lerp(c1[1], c2[1], t),
+        _lerp(c1[2], c2[2], t),
+        _lerp(c1[3] if len(c1) > 3 else 255, c2[3] if len(c2) > 3 else 255, t)
+    )
+
+def _random_color(hue=None, sat=None, val=None, alpha=255):
+    h = hue if hue is not None else random.random()
+    s = sat if sat is not None else random.uniform(0.5, 0.9)
+    v = val if val is not None else random.uniform(0.6, 0.95)
+    r, g, b = [int(x * 255) for x in colorsys.hsv_to_rgb(h, s, v)]
+    return (r, g, b, alpha)
+
+def _random_gradient(size, direction=None, colors=None, noise=False, seed=None):
+    if seed is not None:
+        random.seed(seed)
+    w, h = size
+    if direction is None:
+        direction = random.choice(['vertical', 'horizontal', 'diagonal'])
+    if not colors:
+        if random.random() < 0.3:
+            colors = [_random_color(), _random_color(), _random_color()]
+        else:
+            colors = [_random_color(), _random_color()]
+    colors = [tuple(c if len(c) == 4 else (c[0], c[1], c[2], 255)) for c in colors]
+    img = Image.new("RGBA", (w, h))
+    pix = img.load()
+
+    if len(colors) == 2:
+        c0, c1 = colors
+        for y in range(h):
+            for x in range(w):
+                if direction == 'vertical':
+                    t = y / max(h-1,1)
+                elif direction == 'horizontal':
+                    t = x / max(w-1,1)
+                else:
+                    t = (x + y) / max(w + h - 2, 1)
+                pix[x, y] = _interpolate_color(c0, c1, t)
+    else:
+        c0, c1, c2 = colors
+        for y in range(h):
+            for x in range(w):
+                if direction == 'vertical':
+                    t = y / max(h-1,1)
+                elif direction == 'horizontal':
+                    t = x / max(w-1,1)
+                else:
+                    t = (x + y) / max(w + h - 2, 1)
+                if t <= 0.5:
+                    pix[x, y] = _interpolate_color(c0, c1, t / 0.5)
+                else:
+                    pix[x, y] = _interpolate_color(c1, c2, (t-0.5)/0.5)
+
+    if noise:
+        noise_img = Image.new("RGBA", (w,h))
+        npx = noise_img.load()
+        for y in range(h):
+            for x in range(w):
+                alpha = int(random.uniform(6,18))
+                npx[x,y] = (0,0,0,alpha)
+        img = Image.alpha_composite(img, noise_img)
+    return img
+
+def _make_linear_gradient(size, colors, direction="horizontal"):
+    w, h = size
+    grad = Image.new("RGBA", (w,h))
+    draw = ImageDraw.Draw(grad)
+    if direction=="horizontal":
+        for x in range(w):
+            t = x / max(w-1,1)
+            r = int(colors[0][0]*(1-t) + colors[1][0]*t)
+            g = int(colors[0][1]*(1-t) + colors[1][1]*t)
+            b = int(colors[0][2]*(1-t) + colors[1][2]*t)
+            draw.line([(x,0),(x,h)], fill=(r,g,b,255))
+    else:
+        for y in range(h):
+            t = y / max(h-1,1)
+            r = int(colors[0][0]*(1-t) + colors[1][0]*t)
+            g = int(colors[0][1]*(1-t) + colors[1][1]*t)
+            b = int(colors[0][2]*(1-t) + colors[1][2]*t)
+            draw.line([(0,y),(w,y)], fill=(r,g,b,255))
+    return grad
+
+def _load_avatar_cached(avatar_bytes, size):
+    key = (hashlib.md5(avatar_bytes).hexdigest(), int(size))
+    img = _AVATAR_CACHE.get(key)
+    if img is None:
+        avatar = Image.open(io.BytesIO(avatar_bytes)).convert("RGBA")
+        avatar = avatar.resize((int(size), int(size)), Image.Resampling.LANCZOS)
+        _AVATAR_CACHE[key] = avatar
+        img = avatar
+    return img
+
+def draw_text_gradient(im, position, text, font, gradient_colors, direction="vertical"):
+    if not text: return
+    bbox = font.getbbox(text)
+    text_w = bbox[2]-bbox[0]
+    text_h = bbox[3]-bbox[1]
+    pad_x = max(4,int(0.06*text_w))
+    pad_y = max(6,int(0.18*text_h))
+    mask_w = text_w+pad_x*2
+    mask_h = text_h+pad_y*2
+    mask = Image.new("L",(mask_w,mask_h),0)
+    md = ImageDraw.Draw(mask)
+    md.text((pad_x - bbox[0], pad_y - bbox[1]), text, font=font, fill=255)
+    grad = Image.new("RGBA",(mask_w,mask_h),(0,0,0,0))
+    gd = grad.load()
+    length = mask_w if direction=="horizontal" else mask_h
+    for i in range(length):
+        t = i/max(1,length-1)
+        seg_count = len(gradient_colors)-1
+        seg = min(max(0,int(t*seg_count)), seg_count-1) if seg_count>0 else 0
+        local_t = (t - seg/seg_count)*seg_count if seg_count>0 else 0
+        c1 = gradient_colors[seg]
+        c2 = gradient_colors[min(seg+1,len(gradient_colors)-1)]
+        col = (int(c1[0]+(c2[0]-c1[0])*local_t),
+               int(c1[1]+(c2[1]-c1[1])*local_t),
+               int(c1[2]+(c2[2]-c1[2])*local_t),255)
+        if direction=="horizontal":
+            for y in range(mask_h):
+                gd[i,y] = col
+        else:
+            for x in range(mask_w):
+                gd[x,i] = col
+    im.paste(grad,(int(position[0]-pad_x),int(position[1]-pad_y)),mask)
+
 def create_leaderboard_image(
     rows,
-    width: int = 820,
-    row_height: int = 96,
-    padding: int = 12,
-    fonts: dict = None,
-    exp_icon_path: str = None,
+    width=820,
+    row_height=48,
+    padding=12,
+    fonts=None,
+    exp_icon_path=None,
     background_color=(38,40,43),
     panel_color=(55,58,61),
-    header_height: int = 0
-):
-    fonts = fonts or FONTS
-    rows = list(rows)
-    n = len(rows)
+    header_height=0,
+    gradient=True,
+    gradient_colors=None,
+    gradient_direction=None,
+    gradient_noise=True,
+    gradient_seed=None,
+    debug_save_path: str = None,
+    rank_offset: int = -3   # negative -> move rank text UP, positive -> move DOWN
+) -> bytes:
+    """
+    Dynamic leaderboard with:
+     - fixed per-row height (row_height)
+     - exp centered using exp_center_x
+     - name area computed so level/badge/exp never overlap
+     - rank_offset to nudge rank vertically
+     - optional debug_save_path to save output file for inspection
+    """
+    try:
+        fonts = fonts or FONTS
+        rows = list(rows or [])
+        n = len(rows)
 
-    height = padding * 2 + header_height + (n * (row_height + 10))
-    im = Image.new("RGBA", (width, height), background_color)
-    draw = ImageDraw.Draw(im)
+        # DEBUG: print number of rows received so you can verify it's 10
+        print(f"[create_leaderboard_image] rows received: {n}")
 
-    # fonts (kept)
-    font_bold = _safe_load_font(fonts.get("bold"), 30)
-    font_medium = _safe_load_font(fonts.get("medium"), 24)
-    font_small = _safe_load_font(fonts.get("regular"), 20)
-    font_rank = _safe_load_font(fonts.get("bold"), 36)
+        # height: each row has same fixed height
+        gap_between_rows = max(8, int(row_height * 0.2))
+        height = padding*2 + header_height + n * (row_height + gap_between_rows)
 
-    # EXP icon (optional)
-    exp_icon = None
-    if exp_icon_path and os.path.exists(exp_icon_path):
+        # background
+        if gradient:
+            bg_img = _random_gradient(
+                (width, height),
+                direction=gradient_direction,
+                colors=gradient_colors,
+                noise=gradient_noise,
+                seed=gradient_seed
+            )
+            im = bg_img.convert("RGBA")
+        else:
+            im = Image.new("RGBA", (width, height), background_color)
+
+        draw = ImageDraw.Draw(im)
+
+        # font scaling from row_height
+        font_rank = _safe_load_font(fonts.get("bold"), max(12, int(row_height * 0.75)))
+        font_name = _safe_load_font(fonts.get("bold"), max(12, int(row_height * 0.65)))
+        font_medium = _safe_load_font(fonts.get("medium"), max(10, int(row_height * 0.45)))
+        font_bold = _safe_load_font(fonts.get("bold"), max(11, int(row_height * 0.55)))
+
+        # safe load exp icon
+        exp_icon = None
+        if exp_icon_path and os.path.exists(exp_icon_path):
+            try:
+                icon_sz = max(12, int(row_height * 0.65))
+                exp_icon = Image.open(exp_icon_path).convert("RGBA").resize((icon_sz, icon_sz), Image.Resampling.LANCZOS)
+            except Exception:
+                exp_icon = None
+
+        left_x = padding
+        right_x = width - padding
+        panel_radius = max(6, int(row_height * 0.25))
+        start_y = padding + header_height
+
+        # layout constants
+        avatar_gap_left = max(8, int(row_height * 0.25))
+        avatar_size = max(16, int(row_height - max(6, row_height * 0.2)))
+        avatar_x_offset = avatar_gap_left
+        between_avatar_and_rank = max(8, int(row_height * 0.25))
+        after_rank_gap = max(10, int(row_height * 0.3))
+        bullet_spacing = max(8, int(row_height * 0.2))
+        bullet_r = max(2, int(row_height * 0.12))
+        bullet_vertical_nudge = max(1, int(row_height * 0.12))
+        name_min_w = max(80, int(width * 0.18))
+        extra_edge_margin = max(30, int(width * 0.07))
+
+        # pre-measure
         try:
-            exp_icon = Image.open(exp_icon_path).convert("RGBA").resize((32,32), Image.Resampling.LANCZOS)
-        except:
-            exp_icon = None
-
-    left_x = padding
-    right_x = width - padding
-    panel_radius = 12
-
-    header_y = padding
-    start_y = header_y + header_height
-
-    if header_height > 0:
-        draw.rounded_rectangle((left_x, header_y, width - left_x, header_y + header_height - 8),
-                               radius=12, fill=tuple(max(0, c - 8) for c in panel_color))
-
-
-    fixed_name_width = 288   
-    badge_size = 60         
-    extra_edge_margin = 60   
-    bullet2_extra = 5       
-    title_gap = 12           
-    bullet_vertical_nudge = 7
-    min_badge_shrink = 20   
-
-    max_rank_w = 0
-    for r in rows:
-        rank_test = f"#{int(r.get('rank', 0))}"
-        w = draw.textlength(rank_test, font=font_rank)
-        if w > max_rank_w:
-            max_rank_w = w
-
-    max_total_exp_w = 0
-    for r in rows:
-        exp_text_test = "MAX" if r.get("next_exp") is None else f"{r.get('exp',0):,}/{r.get('next_exp',0):,}"
-        exp_w = draw.textlength(exp_text_test, font=font_bold)
-        icon_gap = (exp_icon.width + 8) if exp_icon else 0
-        total_w = exp_w + icon_gap
-        if total_w > max_total_exp_w:
-            max_total_exp_w = total_w
-
-    exp_center_x = right_x - extra_edge_margin - (max_total_exp_w // 2)
-
-    for i, r in enumerate(rows):
-        y = start_y + i * (row_height + 10)
-        panel_w = width - padding * 2
-        panel_h = row_height
-        panel_xy = (left_x, y, left_x + panel_w, y + panel_h)
-        panel_fill = panel_color if i % 2 == 0 else tuple(max(0, c - 6) for c in panel_color)
-        draw.rounded_rectangle(panel_xy, radius=panel_radius, fill=panel_fill)
-
-        avatar_size = panel_h - 22
-        av_x = left_x + 14
-        center_y = y + panel_h // 2
-        av_y = int(center_y - avatar_size / 2)
-        try:
-            avatar_bytes = r.get("avatar_bytes") or b""
-            if avatar_bytes:
-                avatar = Image.open(io.BytesIO(avatar_bytes)).convert("RGBA").resize((avatar_size, avatar_size), Image.Resampling.LANCZOS)
-                mask = Image.new("L", (avatar_size, avatar_size), 0)
-                ImageDraw.Draw(mask).ellipse((0,0,avatar_size,avatar_size), fill=255)
-                im.paste(avatar, (av_x, av_y), mask)
-            else:
-                raise Exception("no avatar bytes")
+            max_rank_val = max((int(r.get("rank", 0)) for r in rows), default=1)
         except Exception:
-            draw.ellipse((av_x, av_y, av_x + avatar_size, av_y + avatar_size), fill=(100,100,100))
+            max_rank_val = 99
+        rank_placeholder = "#999" if max_rank_val > 99 else "#99"
+        max_rank_w = draw.textlength(rank_placeholder, font=font_rank)
 
-        rank_idx = int(r.get("rank", 0))
-        if rank_idx == 1:
-            rank_color = (255,215,0)
-        elif rank_idx == 2:
-            rank_color = (192,192,192)
-        elif rank_idx == 3:
-            rank_color = (205,127,50)
-        else:
-            rank_color = (200,200,200)
-
-        rank_str = f"#{rank_idx}"
-        rbbox = font_rank.getbbox(rank_str)
-        r_h = rbbox[3] - rbbox[1]
-        rx = av_x + avatar_size + 14
-        ry = int(center_y - r_h / 2)
-        draw.text((rx, ry), rank_str, font=font_rank, fill=rank_color)
-
-        rank_w_actual = draw.textlength(rank_str, font=font_rank)
-        bullet_r = 4
-        bullet1_x = rx + rank_w_actual + 18
-        bullet1_y = int(center_y - bullet_r + bullet_vertical_nudge)
-        draw.ellipse((bullet1_x, bullet1_y, bullet1_x + bullet_r*2, bullet1_y + bullet_r*2), fill=(150,150,150))
-
-        name_start_x = av_x + avatar_size + 14 + max_rank_w + 18 + (bullet_r*2) + 12
-        nx = name_start_x
-
-        name = r.get("name", "Unknown") or "Unknown"
-        if len(name) > 15:
-            nm = name[:13] + ".."
-        else:
-            nm = name
-
-        nbbox = font_bold.getbbox(nm)
-        n_h = nbbox[3] - nbbox[1]
-        ny = int(center_y - n_h / 2)
-        draw.text((nx, ny), nm, font=font_bold, fill=(255,255,255))
-
-        bullet2_x = nx + fixed_name_width + bullet2_extra
-        bullet2_y = int(center_y - bullet_r + bullet_vertical_nudge)
-        draw.ellipse((bullet2_x, bullet2_y, bullet2_x + bullet_r*2, bullet2_y + bullet_r*2), fill=(150,150,150))
-
-        level_text = f"LVL {r.get('level')}"
-        lbbox = font_medium.getbbox(level_text)
-        l_h = lbbox[3] - lbbox[1]
-        lvl_x = bullet2_x + bullet_r*2 + 12
-        lvl_y = int(center_y - l_h / 2)
-        draw.text((lvl_x, lvl_y), level_text, font=font_medium, fill=(180,180,180))
-
-
-        level_placeholder = "LVL 100" 
+        level_placeholder = "LVL 100"
         fixed_level_w = draw.textlength(level_placeholder, font=font_medium)
 
-        title_name = (r.get("title") or "").strip()
-        badge_path = TITLE_EMOJI_FILES.get(title_name)
-        badge_right_x = None
-        if badge_path and os.path.exists(badge_path):
+        # measure max exp width
+        max_total_exp_w = 0
+        for r in rows:
             try:
-                initial_bx = int(lvl_x + fixed_level_w + 8)
-
-                exp_block_start = int(exp_center_x - (max_total_exp_w // 2))
-                space_right = exp_block_start - initial_bx - 12
-
-                badge_draw_size = badge_size
-                bx = initial_bx
-                if space_right >= badge_size:
-                    badge_draw_size = badge_size
-                    bx = initial_bx
-                elif space_right >= 24:
-                    badge_draw_size = max(min_badge_shrink, int(space_right))
-                    bx = initial_bx
-                else:
-                    badge_draw_size = min(badge_size, max(min_badge_shrink, int(badge_size * 0.6)))
-                    bx_candidate = int(lvl_x - badge_draw_size - 12)
-                    min_left = int(nx + draw.textlength(nm, font=font_bold) + 8)
-                    bx = max(min_left, bx_candidate)
-
-                badge_img = Image.open(badge_path).convert("RGBA")
-                badge_img = badge_img.resize((int(badge_draw_size), int(badge_draw_size)), Image.Resampling.LANCZOS)
-                by = int(center_y - badge_draw_size / 2 + 6)
-                im.paste(badge_img, (int(bx), int(by)), badge_img)
-                badge_right_x = int(bx + badge_draw_size)
+                exp_text = "MAX" if r.get("next_exp") is None else f"{int(r.get('exp',0)):,}/{int(r.get('next_exp',0)):,}"
             except Exception:
-                badge_right_x = None
+                exp_text = "0/0"
+            w = draw.textlength(exp_text, font=font_bold)
+            icon_gap = (exp_icon.width + 6) if exp_icon else 0
+            total_w = w + icon_gap
+            if total_w > max_total_exp_w:
+                max_total_exp_w = total_w
 
-        exp_text = "MAX" if r.get("next_exp") is None else f"{r.get('exp', 0):,}/{r.get('next_exp', 0):,}"
-        exp_w = draw.textlength(exp_text, font=font_bold)
-        icon_gap = (exp_icon.width + 8) if exp_icon else 0
-        total_w = exp_w + icon_gap
-        start_x = int(exp_center_x - total_w / 2 + 10)
+        # restore exp center (your original)
+        exp_center_x = right_x - extra_edge_margin - max_total_exp_w // 2
 
-        if badge_right_x is not None:
-            min_start = badge_right_x + 8
-            if start_x < min_start:
-                shift_left = (min_start - start_x)
-                new_bx = int((badge_right_x - (badge_right_x - bx)) - shift_left)
-                min_bx = int(lvl_x + draw.textlength(level_text, font=font_medium) + 6)
-                if new_bx < min_bx:
-                    new_bx = min_bx
+        # compute reserved widths & name area
+        badge_size = max(14, int(row_height * 0.75))
+        right_reserved = (bullet_r*2 + 12) + fixed_level_w + 8 + badge_size + 8 + max_total_exp_w + extra_edge_margin
+        left_reserved = left_x + avatar_x_offset + avatar_size + between_avatar_and_rank + max_rank_w + after_rank_gap + (bullet_r*2 + 12)
+        name_area_width = int(right_x - right_reserved - left_reserved)
+        if name_area_width < name_min_w:
+            delta = name_min_w - name_area_width
+            right_reserved = max(0, right_reserved - delta)
+            name_area_width = int(right_x - right_reserved - left_reserved)
+            if name_area_width < 40:
+                name_area_width = 40
+
+        # draw rows
+        for i, r in enumerate(rows):
+            try:
+                rank_idx = int(r.get("rank", i+1))
+            except Exception:
+                rank_idx = i+1
+            name_raw = (r.get("name") or "Unknown")
+            try:
+                level_val = int(r.get("level", 0))
+            except Exception:
+                level_val = 0
+            try:
+                exp_val = int(r.get("exp", 0) or 0)
+            except Exception:
+                exp_val = 0
+            next_val = r.get("next_exp")
+            try:
+                next_val = None if next_val is None else int(next_val)
+            except Exception:
+                next_val = None
+
+            y = start_y + i * (row_height + gap_between_rows)
+            panel_w = width - padding*2
+            panel_h = row_height
+            panel_xy = (left_x, y, left_x + panel_w, y + panel_h)
+
+            # panel coloring/gradient
+            colors = None
+            if rank_idx == 1:
+                colors = [(255,223,0),(255,140,0)]
+            elif rank_idx == 2:
+                colors = [(220,220,220),(169,169,169)]
+            elif rank_idx == 3:
+                colors = [(205,127,50),(139,69,19)]
+
+            if colors:
+                grad_panel = _make_linear_gradient((panel_w, panel_h), colors, direction=gradient_direction or "horizontal")
+                mask = Image.new("L", (panel_w, panel_h), 0)
+                ImageDraw.Draw(mask).rounded_rectangle((0,0,panel_w,panel_h), radius=panel_radius, fill=255)
+                im.paste(grad_panel, (left_x, y), mask)
+            else:
+                panel_fill = panel_color if i % 2 == 0 else tuple(max(0, c-6) for c in panel_color)
+                draw.rounded_rectangle(panel_xy, radius=panel_radius, fill=panel_fill)
+
+            # avatar
+            av_x = left_x + avatar_x_offset
+            center_y = y + panel_h // 2
+            av_y = int(center_y - avatar_size / 2)
+            try:
+                avatar_bytes = r.get("avatar_bytes") or b""
+                if avatar_bytes:
+                    avatar = _load_avatar_cached(avatar_bytes, avatar_size)
+                    if avatar is not None:
+                        mask = Image.new("L", (avatar_size, avatar_size), 0)
+                        ImageDraw.Draw(mask).ellipse((0,0,avatar_size,avatar_size), fill=255)
+                        im.paste(avatar, (av_x, av_y), mask)
+                    else:
+                        raise Exception("avatar None")
+                else:
+                    raise Exception("no avatar")
+            except Exception:
+                draw.ellipse((av_x, av_y, av_x + avatar_size, av_y + avatar_size), fill=(100,100,100))
+
+            # rank: center inside fixed box, use rank_offset to nudge vertically
+            rank_color = {1:(255,255,255),2:(255,255,255),3:(255,255,255)}.get(rank_idx,(200,200,200))
+            rank_str = f"#{rank_idx}"
+            rank_w = draw.textlength(rank_str, font=font_rank)
+            rank_box_x = av_x + avatar_size + between_avatar_and_rank
+            rx = int(rank_box_x + (max_rank_w - rank_w) / 2)
+            rbbox = font_rank.getbbox(rank_str)
+            r_h = rbbox[3] - rbbox[1]
+            ry = int(center_y - r_h/2) + rank_offset
+            draw.text((rx, ry), rank_str, font=font_rank, fill=rank_color)
+
+            # first bullet
+            bullet1_x = rank_box_x + max_rank_w + after_rank_gap
+            bullet1_y = int(center_y - bullet_r + bullet_vertical_nudge)
+            draw.ellipse((bullet1_x, bullet1_y, bullet1_x + bullet_r*2, bullet1_y + bullet_r*2), fill=(255,255,255))
+
+            # name area truncation
+            nm = str(name_raw).strip()
+            if draw.textlength(nm, font=font_name) > name_area_width:
+                while nm and draw.textlength(nm + "..", font=font_name) > name_area_width:
+                    nm = nm[:-1]
+                nm = nm + ".."
+            name_start_x = bullet1_x + bullet_r*2 + 12
+            draw.text((name_start_x, ry), nm, font=font_name, fill=(255,255,255))
+
+            # second bullet
+            bullet2_x = name_start_x + name_area_width + bullet_spacing
+            bullet2_y = int(center_y - bullet_r + bullet_vertical_nudge)
+            draw.ellipse((bullet2_x, bullet2_y, bullet2_x + bullet_r*2, bullet2_y + bullet_r*2), fill=(255,255,255))
+
+            # level
+            lvl_x = bullet2_x + bullet_r*2 + 12
+            lvl_y = int(center_y - (font_medium.getbbox("Ay")[3] - font_medium.getbbox("Ay")[1]) / 2)
+            level_text = f"LVL {level_val}"
+            draw.text((lvl_x, lvl_y), level_text, font=font_medium, fill=(255,255,255))
+
+            # badge
+            title_name = (r.get("title") or "").strip()
+            badge_path = TITLE_EMOJI_FILES.get(title_name) if isinstance(TITLE_EMOJI_FILES, dict) else None
+            if badge_path and os.path.exists(badge_path):
                 try:
-                    badge_img2 = Image.open(badge_path).convert("RGBA")
-                    bsize = int(min(badge_size, max(min_badge_shrink, badge_img2.size[0] * 0.6)))
-                    badge_img2 = badge_img2.resize((bsize, bsize), Image.Resampling.LANCZOS)
-                    im.paste(badge_img2, (int(new_bx), int(center_y - bsize/2 + 6)), badge_img2)
-                    badge_right_x = int(new_bx + bsize)
+                    bx = lvl_x + fixed_level_w + 8
+                    by = int(center_y - badge_size/2)
+                    badge_img = Image.open(badge_path).convert("RGBA").resize((badge_size, badge_size), Image.Resampling.LANCZOS)
+                    im.paste(badge_img, (int(bx), int(by)), badge_img)
                 except Exception:
                     pass
 
-        if exp_icon:
-            icon_y = int(center_y - exp_icon.height / 2)
-            im.paste(exp_icon, (int(start_x), icon_y), exp_icon)
-            text_x = start_x + exp_icon.width + 8
-        else:
-            text_x = start_x
+            # EXP anchored around exp_center_x
+            exp_text = "MAX" if next_val is None else f"{exp_val:,}/{next_val:,}"
+            exp_text_w = draw.textlength(exp_text, font=font_bold)
+            icon_gap = (exp_icon.width + 6) if exp_icon else 0
+            exp_block_w = exp_text_w + icon_gap
+            exp_start = int(exp_center_x - exp_block_w // 2) + 12
+            if exp_icon:
+                try:
+                    icon_y = int(center_y - exp_icon.height / 2)
+                    im.paste(exp_icon, (int(exp_start), icon_y), exp_icon)
+                    text_x = exp_start + exp_icon.width + 6
+                except Exception:
+                    text_x = exp_start
+            else:
+                text_x = exp_start
+            tbbox = font_bold.getbbox("Ay")
+            t_h = tbbox[3] - tbbox[1]
+            text_y = int(center_y - t_h / 2)
+            draw.text((text_x, text_y), exp_text, font=font_bold, fill=(255,255,255))
 
-        tbbox = font_bold.getbbox("Ay")
-        t_h = tbbox[3] - tbbox[1]
-        text_y = int(center_y - t_h / 2)
-        draw.text((text_x, text_y), exp_text, font=font_bold, fill=(255,255,255))
+        # save/return
+        out = io.BytesIO()
+        im.save(out, format="PNG")
+        out.seek(0)
+        if debug_save_path:
+            try:
+                with open(debug_save_path, "wb") as fh:
+                    fh.write(out.getvalue())
+            except Exception:
+                pass
+        return out.getvalue()
 
-    out = io.BytesIO()
-    im.save(out, format="PNG")
-    out.seek(0)
-    return out.getvalue()
+    except Exception:
+        traceback.print_exc()
+        fallback = Image.new("RGBA", (4,4), (255,0,0,255))
+        b = io.BytesIO()
+        fallback.save(b, format="PNG")
+        b.seek(0)
+        return b.getvalue()
