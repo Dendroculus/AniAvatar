@@ -1,7 +1,8 @@
 from discord.ext import commands
 import discord
 import os
-from .progression import get_title, get_title_emoji
+from cogs.utils.pUtils import *
+from cogs.utils.constants import *
 import random
 from datetime import datetime, timedelta, timezone
 import asyncio
@@ -727,3 +728,4 @@ class Trading(commands.Cog):
 async def setup(bot):
     await bot.add_cog(Trading(bot))
     print("📦 Loaded shop cog.")
+
