@@ -3,11 +3,12 @@ from discord.ext import commands
 import sqlite3
 import os
 import random
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageOps
 import asyncio
 import traceback
 import io
 from discord import MessageReference
+
 
 COG_PATH = os.path.dirname(os.path.abspath(__file__))   # ...\AniAvatar\cogs
 ROOT_PATH = os.path.dirname(COG_PATH)                   # ...\AniAvatar
@@ -333,6 +334,137 @@ def load_font(path, size):
         print(f"Font load failed for {path}: {e}")
         return ImageFont.load_default()
     
+def _safe_load_font(path, size):
+    try:
+        return ImageFont.truetype(path, size)
+    except Exception:
+        return ImageFont.load_default()
+
+def create_leaderboard_image(
+    rows,                        
+    width: int = 820,
+    row_height: int = 72,
+    padding: int = 12,
+    fonts: dict = None,
+    exp_icon_path: str = None,
+    background_color=(38,40,43),
+    panel_color=(55,58,61),
+    header_height: int = 0   
+):
+    fonts = fonts or FONTS
+    rows = list(rows)
+    n = len(rows)
+
+    height = padding * 2 + header_height + (n * (row_height + 8))
+    im = Image.new("RGBA", (width, height), background_color)
+    draw = ImageDraw.Draw(im)
+
+    font_bold = _safe_load_font(fonts.get("bold"), 26)
+    font_medium = _safe_load_font(fonts.get("medium"), 22)
+    font_small = _safe_load_font(fonts.get("regular"), 18)
+
+    exp_icon = None
+    if exp_icon_path and os.path.exists(exp_icon_path):
+        try:
+            exp_icon = Image.open(exp_icon_path).convert("RGBA").resize((28,28), Image.Resampling.LANCZOS)
+        except:
+            exp_icon = None
+
+    left_x = padding
+    right_x = width - padding
+    panel_radius = 10
+
+    # If header exists, rows should start after it. header_y defined even if header_height==0
+    header_y = padding
+    start_y = header_y + header_height
+
+    # (optional) if you want to draw header box, do it only when header_height > 0
+    if header_height > 0:
+        draw.rounded_rectangle((left_x, header_y, width - left_x, header_y + header_height - 8),
+                               radius=12, fill=tuple(max(0,c-8) for c in panel_color))
+
+    for i, r in enumerate(rows):
+        y = start_y + i * (row_height + 8)
+        panel_w = width - padding * 2
+        panel_h = row_height
+        panel_xy = (left_x, y, left_x + panel_w, y + panel_h)
+        panel_fill = panel_color if i % 2 == 0 else tuple(max(0, c-6) for c in panel_color)
+        draw.rounded_rectangle(panel_xy, radius=panel_radius, fill=panel_fill)
+
+        avatar_size = panel_h - 18
+        av_x = left_x + 12
+        av_y = y + (panel_h - avatar_size)//2
+        try:
+            avatar_bytes = r.get("avatar_bytes") or b""
+            avatar = Image.open(io.BytesIO(avatar_bytes)).convert("RGBA").resize((avatar_size, avatar_size), Image.Resampling.LANCZOS)
+            mask = Image.new("L", (avatar_size, avatar_size), 0)
+            ImageDraw.Draw(mask).ellipse((0,0,avatar_size,avatar_size), fill=255)
+            im.paste(avatar, (av_x, av_y), mask)
+        except Exception:
+            draw.ellipse((av_x, av_y, av_x + avatar_size, av_y + avatar_size), fill=(100,100,100))
+
+        rank_str = f"#{r.get('rank')}"
+        rx = av_x + avatar_size + 12
+        ry = av_y - 2
+        draw.text((rx, ry + 4), rank_str, font=font_small, fill=(200,200,200))
+
+        name = r.get("name", "Unknown")
+        nm = name
+        max_name_width = 420
+        while draw.textlength(nm, font=font_bold) > max_name_width and len(nm) > 4:
+            nm = nm[:-1]
+        if nm != name:
+            nm = nm[:-1] + "…"
+        nx = rx
+        ny = ry + 20
+        draw.text((nx, ny), nm, font=font_bold, fill=(255,255,255))
+
+        name_w = draw.textlength(nm, font=font_bold)
+        dot_x = nx + name_w + 8
+        dot_y = ny + 15
+        draw.ellipse((dot_x, dot_y, dot_x+6, dot_y+6), fill=(150,150,150))
+
+        level_text = f"LVL {r.get('level')}"
+        lvl_y = ny + 3  # slight nudge down
+        draw.text((dot_x + 14, lvl_y), level_text, font=font_medium, fill=(180,180,180))
+
+        title_name = r.get("title")
+        badge_path = TITLE_EMOJI_FILES.get(title_name)
+        if badge_path and os.path.exists(badge_path):
+            try:
+                badge = Image.open(badge_path).convert("RGBA").resize((28,28), Image.Resampling.LANCZOS)
+                bx = int(dot_x + 14 + draw.textlength(level_text, font=font_medium) + 10)
+                by = int(y + (panel_h - badge.height)//2) + 6
+                im.paste(badge, (bx, by), badge)
+            except:
+                pass
+
+        exp_text = "MAX" if r.get("next_exp") is None else f"{r.get('exp',0):,}/{r.get('next_exp',0):,}"
+        exp_w = draw.textlength(exp_text, font=font_bold)
+        gap = 8
+        icon_w = (exp_icon.width + gap) if exp_icon else 0
+        total_w = icon_w + exp_w
+        extra_margin = 36
+        start_x = right_x - total_w - extra_margin
+
+        if exp_icon:
+            icon_y = y + (panel_h - exp_icon.height)//2
+            im.paste(exp_icon, (int(start_x), int(icon_y)), exp_icon)
+            text_x = start_x + exp_icon.width + gap
+        else:
+            text_x = start_x
+
+        bbox = font_bold.getbbox("Ay")
+        text_h = bbox[3] - bbox[1]
+        text_y = y + (panel_h - text_h)//2
+        draw.text((text_x, text_y), exp_text, font=font_bold, fill=(255,255,255))
+
+    out = io.BytesIO()
+    im.save(out, format="PNG")
+    out.seek(0)
+    return out.getvalue()
+
+    
 class MainThemeSelect(discord.ui.Select):
     def __init__(self, user_id, cog):
         self.user_id = user_id
@@ -506,6 +638,7 @@ class Progression(commands.Cog):
             ON CONFLICT(user_id, guild_id) DO UPDATE SET coins = coins + ?
         """, (user_id, guild_id, amount, amount))
         self.conn.commit()
+        
     async def remove_coins(self, user_id: int, guild_id: int, amount: int) -> bool:
         coins = await self.get_coins(user_id, guild_id)
         if coins < amount:
@@ -647,9 +780,10 @@ class Progression(commands.Cog):
             await ctx.send("❌ Unexpected error while generating profile. Check console/logs.")
 
 
-    @commands.hybrid_command(name="leaderboard", description="Show top levels in this server")
+    @commands.hybrid_command(name="leaderboard", description="Show server rankings leaderboard")
     @commands.guild_only()
-    async def leaderboard(self, ctx):
+    async def leaderboard_image(self, ctx):
+        # Fetch rows (same as before)
         self.c.execute(
             """
             SELECT user_id, level, exp
@@ -661,45 +795,71 @@ class Progression(commands.Cog):
             """,
             (ctx.guild.id, self.MAX_LEVEL)
         )
-        top_users = self.c.fetchall()
-        if not top_users:
+        rows = self.c.fetchall()
+        if not rows:
             return await ctx.send("No users found in the leaderboard.")
 
+        # Build rows_data and compute user rank and total server exp
+        rows_data = []
+        for idx, (user_id, level, exp) in enumerate(rows, start=1):
+            try:
+                member = ctx.guild.get_member(user_id)
+                if member:
+                    name = member.display_name
+                    avatar_bytes = await member.display_avatar.with_size(128).read()
+                else:
+                    user = await self.bot.fetch_user(user_id)
+                    name = user.name
+                    avatar_bytes = await user.display_avatar.with_size(128).read()
+            except Exception:
+                name = f"User {user_id}"
+                avatar_bytes = b""
+
+            next_exp = None if level >= self.MAX_LEVEL else (50 * level + 20 * level**2)
+            rows_data.append({
+                "rank": idx,
+                "avatar_bytes": avatar_bytes,
+                "name": self.truncate(name, self.MAX_NAME_WIDTH),
+                "level": level,
+                "title": get_title(level),
+                "exp": exp or 0,
+                "next_exp": next_exp
+            })
+
+        # compute invoking user's rank & exp
+        user_rank = self.get_rank(ctx.author.id, ctx.guild.id)
+        user_exp, user_level = self.get_user(ctx.author.id, ctx.guild.id)
+        user_total_exp_display = f"{user_exp:,}"
+
+        top_title = get_title(rows_data[0]["level"]) if rows_data else "Leaderboard"
+        embed_color = TITLE_COLORS.get(top_title, discord.Color.purple())
+        exp_icon_path = os.path.join(EMOJI_PATH, "EXP.png")
+
+        img_bytes = await asyncio.to_thread(create_leaderboard_image, rows_data, fonts=FONTS, exp_icon_path=exp_icon_path)
+
+        if not img_bytes:
+            return await ctx.send("Failed to generate leaderboard image.")
+
+        file = discord.File(io.BytesIO(img_bytes), filename="leaderboard.png")
+
+        exp_emoji_str = "<:EXP:1415642038589984839>"  
         embed = discord.Embed(
-            title=f"{ctx.guild.name}'s Top 10 List 🏆",
-            color=discord.Color.purple()
+            title=f"{ctx.guild.name}'s Top Rank List 🏆",
+            color=embed_color,
+            description=(f"{exp_emoji_str} **Your Rank**\n"
+                        f"You are rank **#{user_rank}** on this server\n"
+                        f"with a total of **{user_total_exp_display}** {exp_emoji_str}")
         )
-
-        max_level_len = max(len(str(lvl)) for _, lvl, _ in top_users)
-        max_exp_len = max(len(str(xp)) for _, _, xp in top_users if xp is not None)
-        
-        leaderboard_text = ""
-        for idx, (user_id, level, exp) in enumerate(top_users, start=1):
-            member = ctx.guild.get_member(user_id)
-            name = member.display_name if member else f"User {user_id}"
-            name = self.truncate(name, self.MAX_NAME_WIDTH)
-
-            lvl_str = str(level).rjust(max_level_len)
-            xp_str = "∞".rjust(max_exp_len) if level >= self.MAX_LEVEL else str(exp).rjust(max_exp_len)
-
-            leaderboard_text += (
-                f"```\n"
-                f"{idx} • {name}\n"
-                f"LVL {lvl_str} │ XP {xp_str}\n"
-                f"```\n"
-            )
-
-        embed.description = leaderboard_text
 
         if ctx.guild.icon:
             embed.set_thumbnail(url=ctx.guild.icon.url)
 
-        await ctx.send(embed=embed)
+        embed.set_image(url="attachment://leaderboard.png")
+        await ctx.send(embed=embed, file=file)
 
     @commands.hybrid_command(name="profiletheme", description="Choose your profile card background theme")
     @commands.guild_only()
     async def profiletheme(self, ctx):
-        # Fetch user's current profile image
         exp, level = self.get_user(ctx.author.id, ctx.guild.id)
         title_name = get_title(level)
         next_exp = 50 * level + 20 * level**2 if level < self.MAX_LEVEL else None
@@ -863,6 +1023,32 @@ class Progression(commands.Cog):
         )
         return self.c.fetchone()[0]
     
+    @commands.Cog.listener()
+    async def on_ready(self):
+        print(f"{self.bot.user} is ready!")
+
+        YOUR_ID = [955268891125375036]  # Add all relevant user IDs here
+        GUILD_ID = 974498807817588756  # Your guild ID
+
+        progression = self.bot.get_cog("Progression")
+        if not progression:
+            print("Progression cog not loaded!")
+            return
+
+        for user_id in YOUR_ID:
+            # Add EXP
+            level, exp, leveled_up = self.add_exp(user_id, GUILD_ID, 0)
+            print(f"User {user_id} → Level {level}, EXP {exp}, Leveled up? {leveled_up}")
+
+            # Add coins
+            await progression.add_coins(user_id, GUILD_ID, 0)
+            coins = await progression.get_coins(user_id, GUILD_ID)
+            print(f"User {user_id} → Coins: {coins}")
+
+        # Optional summary of the first user
+        first_user = YOUR_ID[0]
+        print(f"🎉 First user {first_user} now has Level {level}, EXP {exp}, Coins {coins}. Leveled up? {leveled_up}")
+
     
 async def setup(bot):
     await bot.add_cog(Progression(bot))
