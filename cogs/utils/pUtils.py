@@ -6,6 +6,7 @@ import discord
 import os
 import io
 import random
+import sqlite3
 import colorsys
 
 TITLE_COLORS = {
@@ -63,6 +64,30 @@ def get_title_emoji(level: int):
     elif level < 125: return "<:ETERNAL:1414508351676481536>"
     else: return "<:ENLIGHTENED:1414508255744360510>"
 
+DB_PATH = os.path.join(ROOT_PATH, "data", "minori.db")
+
+def get_user_rank(user_id: int, guild_id: int, max_level: int):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+
+    c.execute(
+        """
+        SELECT user_id
+        FROM users
+        WHERE guild_id = ?
+        AND ((exp > 0 AND level >= 1) OR level = ?)
+        ORDER BY level DESC, exp DESC
+        """,
+        (guild_id, max_level)
+    )
+    rows = c.fetchall()
+    conn.close()
+
+    for i, row in enumerate(rows, start=1):
+        if row[0] == user_id:
+            return i
+    return None
+
 
 def render_profile_image(
     avatar_bytes: bytes,
@@ -76,6 +101,7 @@ def render_profile_image(
     bg_file: str = None,
     theme_name: str = "default",
     font_color: tuple = None,
+    user_rank: int = None
 ) -> bytes:
     try:
         def _load_font(path, size):
@@ -197,10 +223,16 @@ def render_profile_image(
                     stroke_width=stroke_width,
                     stroke_fill=stroke_fill
                 )
+        username_text = display_name
+        
+        if len(username_text) > 12 :
+            username_text = username_text[:12] + "..."
+        if user_rank is not None:
+            username_text += f"  #{user_rank}"
 
-
-        draw_text((x, y), display_name, font_username, font_color, small=True)
+        draw_text((x, y), username_text, font_username, font_color, small=True)
         y += 40
+
 
         labels = ["Title ", "Level ", "EXP "]
         values = [
@@ -222,11 +254,11 @@ def render_profile_image(
                 emoji_path = title_emoji_files.get(title_name)
                 if emoji_path and os.path.exists(emoji_path):
                     try:
-                        badge = Image.open(emoji_path).convert("RGBA").resize((51, 46))
+                        badge = Image.open(emoji_path).convert("RGBA").resize((49, 44))
                         bx = int(value_x + draw.textlength(value, font=font_medium) + 10)
                         bbox = font_medium.getbbox(value)
                         text_height = bbox[3] - bbox[1]
-                        by = int(y + text_height / 2 - badge.height / 2 + 7)
+                        by = int(y + text_height / 2 - badge.height / 2 + 8)
                         img.paste(badge, (bx, by), badge)
                     except:
                         pass
@@ -283,7 +315,7 @@ def render_profile_image(
                         fill=(255, 255, 255, 100),
                         width=1
                     )
-
+                    
         final_img = img.resize((360,155), Image.Resampling.LANCZOS)
         out = io.BytesIO()
         final_img.save(out, format="PNG")
