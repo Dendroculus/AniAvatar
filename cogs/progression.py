@@ -2,7 +2,6 @@ import discord
 from discord.ext import commands
 import sqlite3
 import os
-import tempfile
 import random
 import asyncio
 import traceback
@@ -266,6 +265,10 @@ class Progression(commands.Cog):
     @commands.guild_only()
     async def profile(self, ctx, member: discord.Member = None):
         member = member or ctx.author
+        if member.bot:
+            await ctx.send(f"{member.display_name} is a bot and cannot have a profile.")
+            return
+        
         try:
             # Get EXP and level
             exp, level = self.get_user(member.id, ctx.guild.id)
@@ -274,10 +277,8 @@ class Progression(commands.Cog):
             # Next EXP
             
             if level >= self.MAX_LEVEL:
-                exp_text = "∞"
                 next_exp = None  # skip progress bar logic
             else:
-                exp_text = exp
                 next_exp = 50 * level + 20 * level**2
 
             # Fetch avatar bytes
@@ -290,6 +291,8 @@ class Progression(commands.Cog):
             # Fetch user theme from DB
             theme_name, bg_file, font_color = self.get_user_theme(member.id)
 
+            user_rank = get_user_rank(member.id, ctx.guild.id, self.MAX_LEVEL)
+            
             # Render profile image in a thread
             img_bytes = await asyncio.to_thread(
                 render_profile_image,
@@ -303,7 +306,8 @@ class Progression(commands.Cog):
                 TITLE_EMOJI_FILES,
                 bg_file=bg_file,
                 theme_name=theme_name,
-                font_color=font_color
+                font_color=font_color,
+                user_rank=user_rank
             )
 
             if not img_bytes:
@@ -651,7 +655,7 @@ class Progression(commands.Cog):
     async def on_ready(self):
         print(f"{self.bot.user} is ready!")
 
-        YOUR_ID = [955268891125375036]  # Add all relevant user IDs here
+        YOUR_ID = [955268891125375036, 550201320074903563, 736068611017539585]  # Add all relevant user IDs here
         GUILD_ID = 974498807817588756  # Your guild ID
 
         progression = self.bot.get_cog("Progression")
@@ -661,7 +665,7 @@ class Progression(commands.Cog):
 
         for user_id in YOUR_ID:
             # Add EXP
-            level, exp, leveled_up = self.add_exp(user_id, GUILD_ID, 9000000)
+            level, exp, leveled_up = self.add_exp(user_id, GUILD_ID, 0)
             print(f"User {user_id} → Level {level}, EXP {exp}, Leveled up? {leveled_up}")
 
             # Add coins
