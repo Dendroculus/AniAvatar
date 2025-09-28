@@ -2,6 +2,7 @@ import discord
 from discord.ext import commands
 import sqlite3
 import os
+import tempfile
 import random
 import asyncio
 import traceback
@@ -328,7 +329,11 @@ class Progression(commands.Cog):
     @commands.hybrid_command(name="leaderboard", description="Show server rankings leaderboard")
     @commands.guild_only()
     async def leaderboard_image(self, ctx):
-        # Fetch rows (same as before)
+        try:
+            await ctx.defer()
+        except Exception:
+            pass
+
         self.c.execute(
             """
             SELECT user_id, level, exp
@@ -344,18 +349,29 @@ class Progression(commands.Cog):
         if not rows:
             return await ctx.send("No users found in the leaderboard.")
 
-        # Build rows_data and compute user rank and total server exp
         rows_data = []
         for idx, (user_id, level, exp) in enumerate(rows, start=1):
             try:
                 member = ctx.guild.get_member(user_id)
                 if member:
                     name = member.display_name
-                    avatar_bytes = await member.display_avatar.with_size(128).read()
+                    try:
+                        avatar_bytes = await asyncio.wait_for(
+                            member.display_avatar.with_size(128).read(),
+                            timeout=3.0
+                        )
+                    except Exception:
+                        avatar_bytes = b""
                 else:
                     user = await self.bot.fetch_user(user_id)
                     name = user.name
-                    avatar_bytes = await user.display_avatar.with_size(128).read()
+                    try:
+                        avatar_bytes = await asyncio.wait_for(
+                            user.display_avatar.with_size(128).read(),
+                            timeout=3.0
+                        )
+                    except Exception:
+                        avatar_bytes = b""
             except Exception:
                 name = f"User {user_id}"
                 avatar_bytes = b""
@@ -371,23 +387,75 @@ class Progression(commands.Cog):
                 "next_exp": next_exp
             })
 
-        # compute invoking user's rank & exp
+        # Debug log
+        print("Generating leaderboard for", len(rows_data), "rows")
+        for idx, rd in enumerate(rows_data[:6]):
+            print(f" row[{idx}]: name={rd.get('name')} level={rd.get('level')} exp={rd.get('exp')} next={rd.get('next_exp')}")
+
+        exp_icon_path = os.path.join(EMOJI_PATH, "EXP.png")
+
+        try:
+            print("[create_leaderboard_image] start")
+            img_bytes = await asyncio.wait_for(
+                asyncio.to_thread(
+                    create_leaderboard_image,
+                    rows_data,
+                    fonts=FONTS,
+                    exp_icon_path=exp_icon_path
+                ),
+                timeout=20.0   
+            )
+            print("[create_leaderboard_image] done")
+        except asyncio.TimeoutError:
+            print("create_leaderboard_image timed out — retrying without gradient")
+            try:
+                img_bytes = await asyncio.wait_for(
+                    asyncio.to_thread(
+                        create_leaderboard_image,
+                        rows_data,
+                        fonts=FONTS,
+                        exp_icon_path=exp_icon_path,
+                        gradient=False,
+                        gradient_noise=False
+                    ),
+                    timeout=20.0
+                )
+            except Exception as e:
+                print("Fallback render failed:", e)
+                print(traceback.format_exc())
+                await ctx.send("Leaderboard render timed out and fallback failed. Check logs for details.")
+                return
+        except Exception as e:
+            print("create_leaderboard_image error:", e)
+            print(traceback.format_exc())
+            await ctx.send("Failed to generate leaderboard image (check bot logs).")
+            return
+
+        if not img_bytes:
+            await ctx.send("Renderer returned no image bytes.")
+            return
+
+        # Save debug copy locally incase smth goes wrong, js delete it if it's no longer needed
+        # try:
+        #     tmpdir = tempfile.gettempdir()
+        #     dbg_path = os.path.join(tmpdir, "debug_leaderboard.png")
+        #     os.makedirs(os.path.dirname(dbg_path), exist_ok=True)
+        #     with open(dbg_path, "wb") as f:
+        #         f.write(img_bytes)
+        #     print(f"Wrote debug image to {dbg_path}")
+        # except Exception as e:
+        #     print("Failed to save debug image:", e)
+
         user_rank = self.get_rank(ctx.author.id, ctx.guild.id)
         user_exp, user_level = self.get_user(ctx.author.id, ctx.guild.id)
         user_total_exp_display = f"{user_exp:,}"
 
         top_title = get_title(rows_data[0]["level"]) if rows_data else "Leaderboard"
         embed_color = TITLE_COLORS.get(top_title, discord.Color.purple())
-        exp_icon_path = os.path.join(EMOJI_PATH, "EXP.png")
-
-        img_bytes = await asyncio.to_thread(create_leaderboard_image, rows_data, fonts=FONTS, exp_icon_path=exp_icon_path)
-
-        if not img_bytes:
-            return await ctx.send("Failed to generate leaderboard image.")
 
         file = discord.File(io.BytesIO(img_bytes), filename="leaderboard.png")
-
         exp_emoji_str = "<:EXP:1415642038589984839>"  
+
         embed = discord.Embed(
             title=f"{ctx.guild.name}'s Top Rank List <:CHAMPION:1414508304448749568>",
             color=embed_color,
@@ -400,7 +468,18 @@ class Progression(commands.Cog):
             embed.set_thumbnail(url=ctx.guild.icon.url)
 
         embed.set_image(url="attachment://leaderboard.png")
-        await ctx.send(embed=embed, file=file)
+
+        # Try sending embed + file
+        try:
+            await ctx.send(embed=embed, file=file)
+            print("Sent leaderboard image via ctx.send.")
+        except Exception as e:
+            print("Failed to send via ctx.send:", e)
+            try:
+                await ctx.interaction.followup.send(embed=embed, file=file)
+                print("Sent leaderboard image via followup.")
+            except Exception as e2:
+                print("Failed to send leaderboard via followup:", e2)
 
     @commands.hybrid_command(name="profiletheme", description="Choose your profile card background theme")
     @commands.guild_only()
@@ -582,7 +661,7 @@ class Progression(commands.Cog):
 
         for user_id in YOUR_ID:
             # Add EXP
-            level, exp, leveled_up = self.add_exp(user_id, GUILD_ID, 0)
+            level, exp, leveled_up = self.add_exp(user_id, GUILD_ID, 9000000)
             print(f"User {user_id} → Level {level}, EXP {exp}, Leveled up? {leveled_up}")
 
             # Add coins
