@@ -459,16 +459,8 @@ def create_leaderboard_image(
     gradient_noise=True,
     gradient_seed=None,
     debug_save_path: str = None,
-    rank_offset: int = -3   # negative -> move rank text UP, positive -> move DOWN
+    rank_offset: int = -8   # negative -> move rank text UP, positive -> move DOWN
 ) -> bytes:
-    """
-    Dynamic leaderboard with:
-     - fixed per-row height (row_height)
-     - exp centered using exp_center_x
-     - name area computed so level/badge/exp never overlap
-     - rank_offset to nudge rank vertically
-     - optional debug_save_path to save output file for inspection
-    """
     try:
         fonts = fonts or FONTS
         rows = list(rows or [])
@@ -477,11 +469,9 @@ def create_leaderboard_image(
         # DEBUG: print number of rows received so you can verify it's 10
         print(f"[create_leaderboard_image] rows received: {n}")
 
-        # height: each row has same fixed height
         gap_between_rows = max(8, int(row_height * 0.2))
         height = padding*2 + header_height + n * (row_height + gap_between_rows)
 
-        # background
         if gradient:
             bg_img = _random_gradient(
                 (width, height),
@@ -497,7 +487,7 @@ def create_leaderboard_image(
         draw = ImageDraw.Draw(im)
 
         # font scaling from row_height
-        font_rank = _safe_load_font(fonts.get("bold"), max(12, int(row_height * 0.75)))
+        font_rank = _safe_load_font(fonts.get("bold"), max(12, int(row_height * 0.65)))
         font_name = _safe_load_font(fonts.get("bold"), max(12, int(row_height * 0.65)))
         font_medium = _safe_load_font(fonts.get("medium"), max(10, int(row_height * 0.45)))
         font_bold = _safe_load_font(fonts.get("bold"), max(11, int(row_height * 0.55)))
@@ -657,12 +647,12 @@ def create_leaderboard_image(
 
             # second bullet
             bullet2_x = name_start_x + name_area_width + bullet_spacing
-            bullet2_y = int(center_y - bullet_r + bullet_vertical_nudge)
+            bullet2_y = int(center_y - bullet_r + bullet_vertical_nudge) - 2
             draw.ellipse((bullet2_x, bullet2_y, bullet2_x + bullet_r*2, bullet2_y + bullet_r*2), fill=(255,255,255))
 
             # level
-            lvl_x = bullet2_x + bullet_r*2 + 12
-            lvl_y = int(center_y - (font_medium.getbbox("Ay")[3] - font_medium.getbbox("Ay")[1]) / 2)
+            lvl_x = bullet2_x + bullet_r*2 + 12 
+            lvl_y = int(center_y - (font_medium.getbbox("Ay")[3] - font_medium.getbbox("Ay")[1]) / 2) - 2
             level_text = f"LVL {level_val}"
             draw.text((lvl_x, lvl_y), level_text, font=font_medium, fill=(255,255,255))
 
@@ -695,7 +685,7 @@ def create_leaderboard_image(
                 text_x = exp_start
             tbbox = font_bold.getbbox("Ay")
             t_h = tbbox[3] - tbbox[1]
-            text_y = int(center_y - t_h / 2)
+            text_y = int(center_y - t_h / 2) - 4
             draw.text((text_x, text_y), exp_text, font=font_bold, fill=(255,255,255))
 
         # save/return
