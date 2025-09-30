@@ -283,7 +283,7 @@ def render_profile_image(
             )
         y += 40
 
-        # === EXP Bar ===
+        # EXP Bar 
         bar_x, bar_y = x, y
         bar_width, bar_height = width - bar_x - left_margin, 24
         progress = (exp / next_exp) if next_exp is not None else 1
@@ -452,6 +452,24 @@ def _load_avatar_cached(avatar_bytes, size):
             return None
     return img
 
+def load_icon_cached(path, size):
+    key = (path, int(size))
+    img = _ICON_CACHE.get(key)
+    if img is None and path and os.path.exists(path):
+        try:
+            img = Image.open(path).convert("RGBA").resize((int(size), int(size)), Image.Resampling.LANCZOS)
+        except Exception:
+            img = None
+        _ICON_CACHE[key] = img
+    return img
+
+def get_panel_gradient(colors, size, direction):
+    key = (tuple(tuple(c) for c in colors), size, direction)
+    img = _PANEL_GRAD_CACHE.get(key)
+    if img is None:
+        img = _make_linear_gradient(size, colors, direction=direction)
+        _PANEL_GRAD_CACHE[key] = img
+    return img
 
 def draw_text_gradient(im, position, text, font, gradient_colors, direction="vertical"):
     if not text: return
@@ -486,6 +504,18 @@ def draw_text_gradient(im, position, text, font, gradient_colors, direction="ver
                 gd[x,i] = col
     im.paste(grad,(int(position[0]-pad_x),int(position[1]-pad_y)),mask)
 
+def truncate_to_width(text, font, max_w, draw):
+    if draw.textlength(text, font=font) <= max_w:
+        return text
+    lo, hi = 0, len(text)
+    while lo < hi:
+        mid = (lo + hi) // 2
+        if draw.textlength(text[:mid] + "..", font=font) <= max_w:
+            lo = mid + 1
+        else:
+            hi = mid
+    return text[:max(0, lo-1)] + ".."
+
 def create_leaderboard_image(
     rows,
     width=820,
@@ -509,7 +539,7 @@ def create_leaderboard_image(
         rows = list(rows or [])
         n = len(rows)
 
-        # DEBUG: print number of rows received so you can verify it's 10
+        # DEBUG: print number of rows received so to verify it's 10
         print(f"[create_leaderboard_image] rows received: {n}")
 
         gap_between_rows = max(8, int(row_height * 0.2))
@@ -534,11 +564,15 @@ def create_leaderboard_image(
         font_medium = _safe_load_font(fonts.get("medium"), max(10, int(row_height * 0.45)))
         font_bold = _safe_load_font(fonts.get("bold"), max(11, int(row_height * 0.55)))
 
+        font_rank_height = (font_rank.getbbox("Ay")[3] - font_rank.getbbox("Ay")[1])
+        font_medium_height = (font_medium.getbbox("Ay")[3] - font_medium.getbbox("Ay")[1])
+        font_bold_height = (font_bold.getbbox("Ay")[3] - font_bold.getbbox("Ay")[1])
+
         exp_icon = None
         if exp_icon_path and os.path.exists(exp_icon_path):
             try:
                 icon_sz = max(12, int(row_height * 0.65))
-                exp_icon = Image.open(exp_icon_path).convert("RGBA").resize((icon_sz, icon_sz), Image.Resampling.LANCZOS)
+                exp_icon = load_icon_cached(exp_icon_path, icon_sz)
             except Exception:
                 exp_icon = None
 
@@ -567,7 +601,6 @@ def create_leaderboard_image(
 
         level_placeholder = "LVL 100"
         fixed_level_w = draw.textlength(level_placeholder, font=font_medium)
-
 
         max_total_exp_w = 0
         for r in rows:
@@ -619,7 +652,6 @@ def create_leaderboard_image(
             panel_h = row_height
             panel_xy = (left_x, y, left_x + panel_w, y + panel_h)
 
-            # panel coloring/gradient
             colors = None
             if rank_idx == 1:
                 colors = [(255,223,0),(255,140,0)]
@@ -629,7 +661,7 @@ def create_leaderboard_image(
                 colors = [(205,127,50),(139,69,19)]
 
             if colors:
-                grad_panel = _make_linear_gradient((panel_w, panel_h), colors, direction=gradient_direction or "horizontal")
+                grad_panel = get_panel_gradient(colors, (panel_w, panel_h), direction=gradient_direction or "horizontal")
                 mask = Image.new("L", (panel_w, panel_h), 0)
                 ImageDraw.Draw(mask).rounded_rectangle((0,0,panel_w,panel_h), radius=panel_radius, fill=255)
                 im.paste(grad_panel, (left_x, y), mask)
@@ -656,14 +688,13 @@ def create_leaderboard_image(
             except Exception:
                 draw.ellipse((av_x, av_y, av_x + avatar_size, av_y + avatar_size), fill=(100,100,100))
 
-            # rank
             rank_color = {1:(255,255,255),2:(255,255,255),3:(255,255,255)}.get(rank_idx,(200,200,200))
             rank_str = f"#{rank_idx}"
             rank_w = draw.textlength(rank_str, font=font_rank)
             rank_box_x = av_x + avatar_size + between_avatar_and_rank
             rx = int(rank_box_x + (max_rank_w - rank_w) / 2)
-            rbbox = font_rank.getbbox(rank_str)
-            r_h = rbbox[3] - rbbox[1]
+            # use precomputed font_rank_height
+            r_h = font_rank_height
             ry = int(center_y - r_h/2) + rank_offset
             draw.text((rx, ry), rank_str, font=font_rank, fill=rank_color)
 
@@ -674,9 +705,7 @@ def create_leaderboard_image(
 
             nm = str(name_raw).strip()
             if draw.textlength(nm, font=font_name) > name_area_width:
-                while nm and draw.textlength(nm + "..", font=font_name) > name_area_width:
-                    nm = nm[:-1]
-                nm = nm + ".."
+                nm = truncate_to_width(nm, font_name, name_area_width, draw)
             name_start_x = bullet1_x + bullet_r*2 + 12
             draw.text((name_start_x, ry), nm, font=font_name, fill=(255,255,255))
 
@@ -687,23 +716,23 @@ def create_leaderboard_image(
 
             # level
             lvl_x = bullet2_x + bullet_r*2 + 12 
-            lvl_y = int(center_y - (font_medium.getbbox("Ay")[3] - font_medium.getbbox("Ay")[1]) / 2) - 2
+            lvl_y = int(center_y - (font_medium_height) / 2) - 2
             level_text = f"LVL {level_val}"
             draw.text((lvl_x, lvl_y), level_text, font=font_medium, fill=(255,255,255))
 
-            # badge
+            # badge (use cached icon loader)
             title_name = (r.get("title") or "").strip()
             badge_path = TITLE_EMOJI_FILES.get(title_name) if isinstance(TITLE_EMOJI_FILES, dict) else None
             if badge_path and os.path.exists(badge_path):
                 try:
                     bx = lvl_x + fixed_level_w + 8
                     by = int(center_y - badge_size/2)
-                    badge_img = Image.open(badge_path).convert("RGBA").resize((badge_size, badge_size), Image.Resampling.LANCZOS)
-                    im.paste(badge_img, (int(bx), int(by)), badge_img)
+                    badge_img = load_icon_cached(badge_path, badge_size)
+                    if badge_img:
+                        im.paste(badge_img, (int(bx), int(by)), badge_img)
                 except Exception:
                     pass
 
-            # exp centered
             exp_text = "MAX" if next_val is None else f"{exp_val:,}/{next_val:,}"
             exp_text_w = draw.textlength(exp_text, font=font_bold)
             icon_gap = (exp_icon.width + 6) if exp_icon else 0
@@ -718,11 +747,11 @@ def create_leaderboard_image(
                     text_x = exp_start
             else:
                 text_x = exp_start
-            tbbox = font_bold.getbbox("Ay")
-            t_h = tbbox[3] - tbbox[1]
+            t_h = font_bold_height
             text_y = int(center_y - t_h / 2) - 4
             draw.text((text_x, text_y), exp_text, font=font_bold, fill=(255,255,255))
 
+        # save/return
         out = io.BytesIO()
         im.save(out, format="PNG")
         out.seek(0)
