@@ -8,6 +8,11 @@ import io
 import random
 import sqlite3
 import colorsys
+import asyncio
+_AVATAR_CACHE = {}
+_PANEL_GRAD_CACHE = {}
+_ICON_CACHE = {}
+_FONT_CACHE = {}
 
 TITLE_COLORS = {
     "Novice": discord.Color.light_gray(),
@@ -325,22 +330,17 @@ def render_profile_image(
         traceback.print_exc()
         return None
 
-def load_font(path, size):
-    try:
-        return ImageFont.truetype(path, size)
-    except Exception as e:
-        print(f"Font load failed for {path}: {e}")
-        return ImageFont.load_default()
-    
 def _safe_load_font(path, size):
+    key = (path, int(size))
+    f = _FONT_CACHE.get(key)
+    if f:
+        return f
     try:
-        return ImageFont.truetype(path, size)
-    except Exception:
-        return ImageFont.load_default()
-
-
-_AVATAR_CACHE = {}
-
+        f = ImageFont.truetype(path, int(size))
+    except Exception as e:
+        f = ImageFont.load_default()
+    _FONT_CACHE[key] = f
+    return f
 
 def _lerp(a, b, t):
     """Linear interpolation."""
@@ -432,15 +432,26 @@ def _make_linear_gradient(size, colors, direction="horizontal"):
             draw.line([(0,y),(w,y)], fill=(r,g,b,255))
     return grad
 
+def _avatar_cache_key_from_bytes(avatar_bytes, size, quick_hash_len=64):
+    if not avatar_bytes:
+        return None
+    return (len(avatar_bytes), avatar_bytes[:quick_hash_len], int(size))
+
 def _load_avatar_cached(avatar_bytes, size):
-    key = (hashlib.md5(avatar_bytes).hexdigest(), int(size))
+    key = _avatar_cache_key_from_bytes(avatar_bytes, size)
+    if not key:
+        return None
     img = _AVATAR_CACHE.get(key)
     if img is None:
-        avatar = Image.open(io.BytesIO(avatar_bytes)).convert("RGBA")
-        avatar = avatar.resize((int(size), int(size)), Image.Resampling.LANCZOS)
-        _AVATAR_CACHE[key] = avatar
-        img = avatar
+        try:
+            avatar = Image.open(io.BytesIO(avatar_bytes)).convert("RGBA")
+            avatar = avatar.resize((int(size), int(size)), Image.Resampling.LANCZOS)
+            _AVATAR_CACHE[key] = avatar
+            img = avatar
+        except Exception:
+            return None
     return img
+
 
 def draw_text_gradient(im, position, text, font, gradient_colors, direction="vertical"):
     if not text: return
@@ -518,13 +529,11 @@ def create_leaderboard_image(
 
         draw = ImageDraw.Draw(im)
 
-        # font scaling from row_height
         font_rank = _safe_load_font(fonts.get("bold"), max(12, int(row_height * 0.65)))
         font_name = _safe_load_font(fonts.get("bold"), max(12, int(row_height * 0.65)))
         font_medium = _safe_load_font(fonts.get("medium"), max(10, int(row_height * 0.45)))
         font_bold = _safe_load_font(fonts.get("bold"), max(11, int(row_height * 0.55)))
 
-        # safe load exp icon
         exp_icon = None
         if exp_icon_path and os.path.exists(exp_icon_path):
             try:
@@ -538,7 +547,6 @@ def create_leaderboard_image(
         panel_radius = max(6, int(row_height * 0.25))
         start_y = padding + header_height
 
-        # layout constants
         avatar_gap_left = max(8, int(row_height * 0.25))
         avatar_size = max(16, int(row_height - max(6, row_height * 0.2)))
         avatar_x_offset = avatar_gap_left
@@ -550,7 +558,6 @@ def create_leaderboard_image(
         name_min_w = max(80, int(width * 0.18))
         extra_edge_margin = max(30, int(width * 0.07))
 
-        # pre-measure
         try:
             max_rank_val = max((int(r.get("rank", 0)) for r in rows), default=1)
         except Exception:
@@ -561,7 +568,7 @@ def create_leaderboard_image(
         level_placeholder = "LVL 100"
         fixed_level_w = draw.textlength(level_placeholder, font=font_medium)
 
-        # measure max exp width
+
         max_total_exp_w = 0
         for r in rows:
             try:
@@ -574,10 +581,8 @@ def create_leaderboard_image(
             if total_w > max_total_exp_w:
                 max_total_exp_w = total_w
 
-        # restore exp center (your original)
         exp_center_x = right_x - extra_edge_margin - max_total_exp_w // 2
 
-        # compute reserved widths & name area
         badge_size = max(14, int(row_height * 0.75))
         right_reserved = (bullet_r*2 + 12) + fixed_level_w + 8 + badge_size + 8 + max_total_exp_w + extra_edge_margin
         left_reserved = left_x + avatar_x_offset + avatar_size + between_avatar_and_rank + max_rank_w + after_rank_gap + (bullet_r*2 + 12)
@@ -589,7 +594,6 @@ def create_leaderboard_image(
             if name_area_width < 40:
                 name_area_width = 40
 
-        # draw rows
         for i, r in enumerate(rows):
             try:
                 rank_idx = int(r.get("rank", i+1))
@@ -652,7 +656,7 @@ def create_leaderboard_image(
             except Exception:
                 draw.ellipse((av_x, av_y, av_x + avatar_size, av_y + avatar_size), fill=(100,100,100))
 
-            # rank: center inside fixed box, use rank_offset to nudge vertically
+            # rank
             rank_color = {1:(255,255,255),2:(255,255,255),3:(255,255,255)}.get(rank_idx,(200,200,200))
             rank_str = f"#{rank_idx}"
             rank_w = draw.textlength(rank_str, font=font_rank)
@@ -668,7 +672,6 @@ def create_leaderboard_image(
             bullet1_y = int(center_y - bullet_r + bullet_vertical_nudge)
             draw.ellipse((bullet1_x, bullet1_y, bullet1_x + bullet_r*2, bullet1_y + bullet_r*2), fill=(255,255,255))
 
-            # name area truncation
             nm = str(name_raw).strip()
             if draw.textlength(nm, font=font_name) > name_area_width:
                 while nm and draw.textlength(nm + "..", font=font_name) > name_area_width:
@@ -700,7 +703,7 @@ def create_leaderboard_image(
                 except Exception:
                     pass
 
-            # EXP anchored around exp_center_x
+            # exp centered
             exp_text = "MAX" if next_val is None else f"{exp_val:,}/{next_val:,}"
             exp_text_w = draw.textlength(exp_text, font=font_bold)
             icon_gap = (exp_icon.width + 6) if exp_icon else 0
@@ -720,7 +723,6 @@ def create_leaderboard_image(
             text_y = int(center_y - t_h / 2) - 4
             draw.text((text_x, text_y), exp_text, font=font_bold, fill=(255,255,255))
 
-        # save/return
         out = io.BytesIO()
         im.save(out, format="PNG")
         out.seek(0)
@@ -739,3 +741,5 @@ def create_leaderboard_image(
         fallback.save(b, format="PNG")
         b.seek(0)
         return b.getvalue()
+
+print("📦 Loaded utils.pUtils cog.")
