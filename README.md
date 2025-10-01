@@ -51,7 +51,7 @@ See the [LICENSE](LICENSE) file for details.
 
 ---
 
-## Acknowledgements
+## 🙌 Acknowledgements
 Thanks to [Noto Fonts](https://github.com/notofonts/noto-cjk/releases) for providing the CJK font support.
 
 ## ⚠️ Disclaimer  
