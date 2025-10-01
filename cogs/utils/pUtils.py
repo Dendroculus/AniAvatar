@@ -1,6 +1,5 @@
 from PIL import Image, ImageDraw, ImageFont
 from cogs.utils.constants import *
-import hashlib
 import traceback
 import discord
 import os
@@ -8,7 +7,7 @@ import io
 import random
 import sqlite3
 import colorsys
-import asyncio
+
 _AVATAR_CACHE = {}
 _PANEL_GRAD_CACHE = {}
 _ICON_CACHE = {}
@@ -32,6 +31,56 @@ TITLE_COLORS = {
     "Eternal": discord.Color.red(),
     "Enlightened": discord.Color.blue(),
 }
+
+
+def is_cjk_char(ch: str) -> bool: 
+    if not ch:
+        return False
+    try:
+        cp = ord(ch)
+    except TypeError:
+        return False
+    # CJK Unified Ideographs
+    if 0x4E00 <= cp <= 0x9FFF: 
+        return True
+    # CJK Unified Ideographs Extension A
+    if 0x3400 <= cp <= 0x4DBF: 
+        return True
+    # CJK Unified Ideographs Extension B..E 
+    if 0x20000 <= cp <= 0x2CEAF: 
+        return True
+    # CJK Compatibility Ideographs
+    if 0xF900 <= cp <= 0xFAFF: 
+        return True
+    # CJK Compatibility Ideographs Supplement
+    if 0x2F800 <= cp <= 0x2FA1F: 
+        return True
+    # Hangul Syllables
+    if 0xAC00 <= cp <= 0xD7AF: 
+        return True
+    # Hiragana / Katakana
+    if 0x3040 <= cp <= 0x30FF: 
+        return True
+    return False
+
+
+def split_into_runs(text: str):
+    if not text:
+        return []
+    runs = []
+    current_run = text[0]
+    current_is_cjk = is_cjk_char(text[0])
+    for ch in text[1:]:
+        is_cjk = is_cjk_char(ch)
+        if is_cjk == current_is_cjk:
+            current_run += ch
+        else:
+            runs.append((current_run, current_is_cjk))
+            current_run = ch
+            current_is_cjk = is_cjk
+    runs.append((current_run, current_is_cjk))
+    return runs
+
 
 def get_title(level: int):
     if level < 5: return "Novice"
@@ -111,9 +160,10 @@ def render_profile_image(
     try:
         def _load_font(path, size):
             try:
-                return ImageFont.truetype(path, size)
+                return ImageFont.truetype(path, int(size))
             except Exception:
                 return ImageFont.load_default()
+
 
         def get_adaptive_font_color(bg_path):
             try:
@@ -137,7 +187,6 @@ def render_profile_image(
                 return (255,255,255)
 
         def generate_default_bg(width, height):
-            # Create vertical purple gradient
             bg = Image.new("RGBA", (width, height), (0, 0, 0, 0))
             grad = ImageDraw.Draw(bg)
             for y in range(height):
@@ -157,10 +206,21 @@ def render_profile_image(
             bg = Image.alpha_composite(bg, shape2)
 
             return bg
-        
-        font_username = _load_font(fonts["bold"], 32.5)
-        font_medium = _load_font(fonts["medium"], 25.5)
-        font_small = _load_font(fonts["regular"], 21.5)
+
+        font_username = _load_font(fonts.get("bold"), 32.5)
+        font_medium = _load_font(fonts.get("medium"), 25.5)
+        font_small = _load_font(fonts.get("regular"), 21.5)
+
+        cjk_font_username = None
+        cjk_font_medium = None
+        cjk_font_small = None
+        if fonts.get("cjk"):
+            try:
+                cjk_font_username = _load_font(fonts.get("cjk"), 32.5)
+                cjk_font_medium = _load_font(fonts.get("cjk"), 25.5)
+                cjk_font_small = _load_font(fonts.get("cjk"), 21.5)
+            except Exception:
+                cjk_font_username = cjk_font_medium = cjk_font_small = None
 
         width, height = 600, 260
         corner_radius = 40
@@ -170,7 +230,6 @@ def render_profile_image(
         mask_draw = ImageDraw.Draw(mask)
         mask_draw.rounded_rectangle([0,0,width,height], radius=corner_radius, fill=255)
 
-        # Background selection
         if theme_name == "default" or not bg_file:
             bg = generate_default_bg(width, height)
         else:
@@ -208,36 +267,75 @@ def render_profile_image(
         glow_draw = ImageDraw.Draw(glow)
         glow_draw.ellipse([0, 0, glow_size[0], glow_size[1]], fill=(255, 255, 255, 80))
 
-        avatar_offset = -20  
+        avatar_offset = -20
         img.paste(glow, (left_margin + avatar_offset, top_margin + 5), glow)
         img.paste(avatar_circle, (left_margin + 6 + avatar_offset, top_margin + 11), avatar_circle)
 
         x, y = left_margin + 130, top_margin
 
-        def draw_text(pos, text, font, fill, small=False, stroke_width=2, stroke_fill=(0,0,0,255)):
-            if small:
-                draw.text((pos[0]+1, pos[1]+1), text, font=font, fill=(0,0,0,100))
-                draw.text(pos, text, font=font, fill=fill)
-            else:
-                draw.text((pos[0]+2, pos[1]+2), text, font=font, fill=(0,0,0,180))
-                draw.text(
-                    pos,
-                    text,
-                    font=font,
-                    fill=fill,
-                    stroke_width=stroke_width,
-                    stroke_fill=stroke_fill
-                )
-        username_text = display_name
-        
-        if len(username_text) > 12 :
-            username_text = username_text[:12] + "..."
+        def draw_cjk(pos, text, primary_font, cjk_font, fill, small=False, stroke_width=2, stroke_fill=(0,0,0,255)):
+            x0, y0 = pos
+            runs = split_into_runs(text)
+            for run_text, is_cjk in runs:
+                font_to_use = cjk_font if (is_cjk and cjk_font) else primary_font
+                y_offset = -3 if is_cjk else 0
+
+                if small:
+                    draw.text((x0+1, y0 + y_offset), run_text, font=font_to_use, fill=(0,0,0,100))
+
+                    if is_cjk and cjk_font:
+                        draw.text(
+                            (x0, y0 + y_offset),
+                            run_text,
+                            font=font_to_use,
+                            fill=fill,
+                            stroke_width=int(round(1.1)),
+                            stroke_fill=(255,255,255,255)
+                        )
+                    else:
+                        draw.text((x0, y0 + y_offset), run_text, font=font_to_use, fill=fill)
+                else:
+                    draw.text((x0+2, y0+2 + y_offset), run_text, font=font_to_use, fill=(0,0,0,180))
+                    draw.text(
+                        (x0, y0 + y_offset),
+                        run_text,
+                        font=font_to_use,
+                        fill=fill,
+                        stroke_width=stroke_width,
+                        stroke_fill=stroke_fill
+                    )
+
+                try:
+                    w = draw.textlength(run_text, font=font_to_use)
+                except Exception:
+                    w, _ = font_to_use.getsize(run_text)
+                x0 += int(w)
+
+
+        display_name_only = display_name
+        if len(display_name_only) > 12:
+            display_name_only = display_name_only[:12] + "..."
+
+        def meas_mwidth(text, primary_font, cjk_font):
+            w = 0
+            for run_text, is_cjk in split_into_runs(text):
+                font_to_use = cjk_font if (is_cjk and cjk_font) else primary_font
+                try:
+                    w += draw.textlength(run_text, font=font_to_use)
+                except Exception:
+                    w += font_to_use.getsize(run_text)[0]
+            return int(w)
+
+        draw_cjk((x, y), display_name_only, font_username, cjk_font_username, font_color, small=True)
+
         if user_rank is not None:
-            username_text += f"  #{user_rank}"
+            rank_text = f"  #{user_rank}"
+            name_w = meas_mwidth(display_name_only, font_username, cjk_font_username)
+            rank_x = x + name_w
+            draw.text((rank_x+1, y), rank_text, font=font_username, fill=(0,0,0,100))
+            draw.text((rank_x, y), rank_text, font=font_username, fill=font_color)
 
-        draw_text((x, y), username_text, font_username, font_color, small=True)
         y += 40
-
 
         labels = ["Title ", "Level ", "EXP "]
         values = [
@@ -249,11 +347,11 @@ def render_profile_image(
         label_width = max(draw.textlength(lbl, font=font_medium) for lbl in labels)
 
         for label, value in zip(labels, values):
-            draw_text((x, y), label, font_medium, font_color)
+            draw_cjk((x, y), label, font_medium, cjk_font_medium, font_color)
             colon_x = x + label_width + 8
-            draw_text((colon_x, y), ":", font_medium, font_color)
+            draw_cjk((colon_x, y), ":", font_medium, cjk_font_medium, font_color)
             value_x = colon_x + 12
-            draw_text((value_x, y), value, font_medium, font_color)
+            draw_cjk((value_x, y), value, font_medium, cjk_font_medium, font_color)
 
             if label.strip() == "Title":
                 emoji_path = title_emoji_files.get(title_name)
@@ -273,13 +371,14 @@ def render_profile_image(
             next_line = f"Gain {max(0, next_exp - exp):,} more EXP to level up!"
         else:
             next_line = "You are at max level!"
-        draw_text(
+        draw_cjk(
                 (x, y),
                 next_line,
                 font_small,
-                (255,255,255),           
-                stroke_width=3.15,          
-                stroke_fill=(0,0,0,255)  
+                cjk_font_small,
+                (255,255,255),
+                stroke_width=2.6,
+                stroke_fill=(0,0,0,255)
             )
         y += 40
 
@@ -300,9 +399,9 @@ def render_profile_image(
             grad_draw = ImageDraw.Draw(gradient)
 
             for i in range(progress_width):
-                r = int(0 + (80 - 0) * (i / progress_width))
-                g = int(180 + (255 - 180) * (i / progress_width))
-                b = int(120 + (60 - 120) * (i / progress_width))
+                r = int(0 + (80 - 0) * (i / max(1,progress_width)))
+                g = int(180 + (255 - 180) * (i / max(1,progress_width)))
+                b = int(120 + (60 - 120) * (i / max(1,progress_width)))
                 grad_draw.line([(i, 0), (i, bar_height)], fill=(r, g, b, 255))
 
             mask = Image.new("L", (progress_width, bar_height), 0)
@@ -320,7 +419,7 @@ def render_profile_image(
                         fill=(255, 255, 255, 100),
                         width=1
                     )
-                    
+
         final_img = img.resize((360,155), Image.Resampling.LANCZOS)
         out = io.BytesIO()
         final_img.save(out, format="PNG")
@@ -343,7 +442,6 @@ def _safe_load_font(path, size):
     return f
 
 def _lerp(a, b, t):
-    """Linear interpolation."""
     return int(round(a + (b - a) * t))
 
 def _interpolate_color(c1, c2, t):
@@ -532,14 +630,14 @@ def create_leaderboard_image(
     gradient_noise=True,
     gradient_seed=None,
     debug_save_path: str = None,
-    rank_offset: int = -8   # negative -> move rank text UP, positive -> move DOWN
+    rank_offset: int = -8   
 ) -> bytes:
     try:
         fonts = fonts or FONTS
         rows = list(rows or [])
         n = len(rows)
 
-        # DEBUG: print number of rows received so to verify it's 10
+        #  debug message to verify it is 10
         print(f"[create_leaderboard_image] rows received: {n}")
 
         gap_between_rows = max(8, int(row_height * 0.2))
@@ -567,6 +665,15 @@ def create_leaderboard_image(
         font_rank_height = (font_rank.getbbox("Ay")[3] - font_rank.getbbox("Ay")[1])
         font_medium_height = (font_medium.getbbox("Ay")[3] - font_medium.getbbox("Ay")[1])
         font_bold_height = (font_bold.getbbox("Ay")[3] - font_bold.getbbox("Ay")[1])
+
+        cjk_font_name = cjk_font_medium = cjk_font_bold = None
+        if fonts.get("cjk"):
+            try:
+                cjk_font_name = _safe_load_font(fonts.get("cjk"), max(12, int(row_height * 0.65)))
+                cjk_font_medium = _safe_load_font(fonts.get("cjk"), max(10, int(row_height * 0.45)))
+                cjk_font_bold = _safe_load_font(fonts.get("cjk"), max(11, int(row_height * 0.55)))
+            except Exception:
+                cjk_font_name = cjk_font_medium = cjk_font_bold = None
 
         exp_icon = None
         if exp_icon_path and os.path.exists(exp_icon_path):
@@ -627,6 +734,28 @@ def create_leaderboard_image(
             if name_area_width < 40:
                 name_area_width = 40
 
+        def draw_lb_cjk(draw_obj, pos, text, primary_font, cjk_font, fill, stroke_width=1, stroke_fill=(255,255,255,255)):
+            x0, y0 = int(pos[0]), int(pos[1])
+            runs = split_into_runs(text)
+            for run_text, is_cjk in runs:
+                font_to_use = cjk_font if is_cjk and cjk_font else primary_font
+                if is_cjk and cjk_font:
+                    draw_obj.text(
+                        (x0, y0),
+                        run_text,
+                        font=font_to_use,
+                        fill=fill,
+                        stroke_width=stroke_width,
+                        stroke_fill=stroke_fill
+                    )
+                else:
+                    draw_obj.text((x0, y0), run_text, font=font_to_use, fill=fill)
+                try:
+                    w = draw_obj.textlength(run_text, font=font_to_use)
+                except Exception:
+                    w, _ = font_to_use.getsize(run_text)
+                x0 += int(w)
+
         for i, r in enumerate(rows):
             try:
                 rank_idx = int(r.get("rank", i+1))
@@ -669,7 +798,6 @@ def create_leaderboard_image(
                 panel_fill = panel_color if i % 2 == 0 else tuple(max(0, c-6) for c in panel_color)
                 draw.rounded_rectangle(panel_xy, radius=panel_radius, fill=panel_fill)
 
-            # avatar
             av_x = left_x + avatar_x_offset
             center_y = y + panel_h // 2
             av_y = int(center_y - avatar_size / 2)
@@ -693,12 +821,10 @@ def create_leaderboard_image(
             rank_w = draw.textlength(rank_str, font=font_rank)
             rank_box_x = av_x + avatar_size + between_avatar_and_rank
             rx = int(rank_box_x + (max_rank_w - rank_w) / 2)
-            # use precomputed font_rank_height
             r_h = font_rank_height
             ry = int(center_y - r_h/2) + rank_offset
             draw.text((rx, ry), rank_str, font=font_rank, fill=rank_color)
 
-            # first bullet
             bullet1_x = rank_box_x + max_rank_w + after_rank_gap
             bullet1_y = int(center_y - bullet_r + bullet_vertical_nudge)
             draw.ellipse((bullet1_x, bullet1_y, bullet1_x + bullet_r*2, bullet1_y + bullet_r*2), fill=(255,255,255))
@@ -706,21 +832,19 @@ def create_leaderboard_image(
             nm = str(name_raw).strip()
             if draw.textlength(nm, font=font_name) > name_area_width:
                 nm = truncate_to_width(nm, font_name, name_area_width, draw)
-            name_start_x = bullet1_x + bullet_r*2 + 12
-            draw.text((name_start_x, ry), nm, font=font_name, fill=(255,255,255))
 
-            # second bullet
+            name_start_x = bullet1_x + bullet_r*2 + 12
+            draw_lb_cjk(draw, (name_start_x, ry), nm, font_name, cjk_font_name, (255,255,255))
+
             bullet2_x = name_start_x + name_area_width + bullet_spacing
             bullet2_y = int(center_y - bullet_r + bullet_vertical_nudge) - 2
             draw.ellipse((bullet2_x, bullet2_y, bullet2_x + bullet_r*2, bullet2_y + bullet_r*2), fill=(255,255,255))
 
-            # level
             lvl_x = bullet2_x + bullet_r*2 + 12 
             lvl_y = int(center_y - (font_medium_height) / 2) - 2
             level_text = f"LVL {level_val}"
-            draw.text((lvl_x, lvl_y), level_text, font=font_medium, fill=(255,255,255))
+            draw_lb_cjk(draw, (lvl_x, lvl_y), level_text, font_medium, cjk_font_medium, (255,255,255))
 
-            # badge (use cached icon loader)
             title_name = (r.get("title") or "").strip()
             badge_path = TITLE_EMOJI_FILES.get(title_name) if isinstance(TITLE_EMOJI_FILES, dict) else None
             if badge_path and os.path.exists(badge_path):
@@ -749,9 +873,8 @@ def create_leaderboard_image(
                 text_x = exp_start
             t_h = font_bold_height
             text_y = int(center_y - t_h / 2) - 4
-            draw.text((text_x, text_y), exp_text, font=font_bold, fill=(255,255,255))
+            draw_lb_cjk(draw, (text_x, text_y), exp_text, font_bold, cjk_font_bold, (255,255,255))
 
-        # save/return
         out = io.BytesIO()
         im.save(out, format="PNG")
         out.seek(0)
