@@ -12,6 +12,7 @@ FONTS = {
     "medium": os.path.join(FONT_DIR, "gg sans Medium.ttf"),
     "regular": os.path.join(FONT_DIR, "gg sans Regular.ttf"),
     "semibold": os.path.join(FONT_DIR, "gg sans Semibold.ttf"),
+    "cjk": os.path.join(FONT_DIR, "NotoSerifCJK.ttc"),
 }
 
 TITLE_EMOJI_FILES = {
@@ -34,3 +35,4 @@ TITLE_EMOJI_FILES = {
 }
 
 
+print("📦 Loaded utils.constants cog.")
