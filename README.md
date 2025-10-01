@@ -35,7 +35,7 @@ It automates anime-related tasks — search anime info, fetch profile pictures, 
 
 ---
 
-## 🛠 Tech Stack  
+## 🛠 Built With
 - Python 3.11+  
 - [discord.py 2.x](https://pypi.org/project/discord.py/)  
 - [aiohttp](https://docs.aiohttp.org/)  
@@ -50,6 +50,9 @@ This project is licensed under the **MIT License** — you are free to use, modi
 See the [LICENSE](LICENSE) file for details.  
 
 ---
+
+## Acknowledgements
+Thanks to [Noto Fonts](https://github.com/notofonts/noto-cjk/releases) for providing the CJK font support.
 
 ## ⚠️ Disclaimer  
 AniAvatar is an independent project and is **not affiliated with, supported by, or endorsed by Discord Inc., AniList, or Google.**  
