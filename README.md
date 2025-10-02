@@ -1,3 +1,4 @@
+EN | [中文](docs/readmeCN.md)  
 # AniAvatar Discord Bot  
 
 <img src="assets/MinoriBG.png" width="1000" height ="900">  
