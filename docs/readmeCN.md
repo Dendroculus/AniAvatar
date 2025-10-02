@@ -1,3 +1,4 @@
+[EN](../README.md) | 中文
 # AniAvatar Discord 机器人  
 
 <img src="../assets/MinoriBG.png" width="1000" height ="900">  
