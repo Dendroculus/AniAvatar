@@ -1,6 +1,6 @@
 # AniAvatar Discord 机器人  
 
-<img src="assets/MinoriBG.png" width="1000" height ="900">  
+<img src="../assets/MinoriBG.png" width="1000" height ="900">  
 
 AniAvatar 是项目名称，机器人在 Discord 上的名字为 **Minori**。  
 AniAvatar 是一个用 Python 和 [discord.py](https://discordpy.readthedocs.io/) 构建的 **Discord 机器人**。  
