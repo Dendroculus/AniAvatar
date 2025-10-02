@@ -42,6 +42,72 @@ class PollView(discord.ui.View):
         end_button = discord.ui.Button(label="End Poll", style=discord.ButtonStyle.red)
         end_button.callback = self.end_poll
         self.add_item(end_button)
+
+    async def _auto_end(self, timeout: int):
+        try:
+            await asyncio.sleep(timeout)
+            if not self.ended:
+                try:
+                    await self.on_timeout()
+                except Exception as e:
+                    print(f"[PollView._auto_end] on_timeout failed: {e}")
+        except asyncio.CancelledError:
+            return
+
+    async def end_poll(self, interaction: discord.Interaction):
+        if interaction.user.id != self.author.id:
+            return await interaction.response.send_message("⚠️ Only the poll creator can end this poll.", ephemeral=True)
+
+        if self.updater_task and not self.updater_task.done():
+            self.updater_task.cancel()
+
+        await interaction.response.defer(ephemeral=True)
+        await self.on_timeout()
+
+    async def on_timeout(self):
+        if self.ended:
+            return
+        self.ended = True
+
+        try:
+            current = asyncio.current_task()
+        except Exception:
+            current = None
+
+        if (
+            self.updater_task
+            and self.updater_task is not current
+            and not self.updater_task.done()
+        ):
+            try:
+                self.updater_task.cancel()
+            except Exception:
+                pass
+            
+        self.clear_items()
+        if self.message:
+            results = {opt: len(users) for opt, users in self.votes.items()}
+            winner_text = ""
+            if results:
+                max_votes = max(results.values())
+                winners = [opt for opt, count in results.items() if count == max_votes]
+                if max_votes > 0:
+                    if len(winners) == 1:
+                        winner_text = f"\n\n<:MinoriPray:1418919979272896634> Poll ended. The highest vote goes to **{winners[0]}** with {max_votes} vote{'s' if max_votes!=1 else ''}."
+                    else:
+                        winner_text = f"\n\n<:MinoriPray:1418919979272896634> Poll ended. It's a tie between {', '.join(winners)} — each with {max_votes} votes."
+                else:
+                    winner_text = "\n\n<:MinoriWink:1414899695209418762> Poll ended. No votes were cast."
+            final_embed = self.make_poll_embed(closed=True)
+            try:
+                await self.message.edit(embed=final_embed, view=self)
+            except Exception as e:
+                print(f"[on_timeout] failed editing final embed: {e}")
+            if winner_text:
+                try:
+                    await self.message.channel.send(winner_text)
+                except Exception as e:
+                    print(f"[on_timeout] failed sending winner_text: {e}")
         
     async def add_option(self, interaction: discord.Interaction):
         if interaction.user.id != self.author.id:
@@ -62,7 +128,6 @@ class PollView(discord.ui.View):
 
         choice_label = self.options[idx]
 
-        # remove previous votes by user
         for opt in self.votes:
             self.votes[opt].discard(interaction.user.id)
         self.votes[choice_label].add(interaction.user.id)
@@ -93,61 +158,107 @@ class PollView(discord.ui.View):
     async def update_poll(self, interaction: discord.Interaction, ephemeral_msg: str):
         embed = self.make_poll_embed()
         if self.message:
-            await self.message.edit(embed=embed, view=self)
+            try:
+                await self.message.edit(embed=embed, view=self)
+            except discord.errors.HTTPException as e:
+                err_str = str(e).lower()
+                if "embed size" in err_str or "exceeds" in err_str:
+                    for bl in (8, 6, 4, 2):
+                        try:
+                            smaller = self.make_poll_embed(bar_len=bl)
+                            await self.message.edit(embed=smaller, view=self)
+                            embed = smaller
+                            break
+                        except Exception:
+                            continue
+                    else:
+                        try:
+                            fetched = await self.message.channel.fetch_message(self.message.id)
+                            self.message = fetched
+                            await self.message.edit(embed=embed, view=self)
+                        except Exception:
+                            try:
+                                new_msg = await self.message.channel.send(embed=embed, view=self)
+                                self.message = new_msg
+                            except Exception as ex:
+                                print(f"[update_poll] failed to update/send poll message: {ex}")
+                else:
+                    try:
+                        fetched = await self.message.channel.fetch_message(self.message.id)
+                        self.message = fetched
+                        await self.message.edit(embed=embed, view=self)
+                    except Exception:
+                        try:
+                            new_msg = await self.message.channel.send(embed=embed, view=self)
+                            self.message = new_msg
+                        except Exception as ex:
+                            print(f"[update_poll] failed to recover from HTTPException: {ex}")
+            except Exception as e:
+                try:
+                    new_msg = await self.message.channel.send(embed=embed, view=self)
+                    self.message = new_msg
+                except Exception as ex:
+                    print(f"[update_poll] unexpected failure editing/sending message: {ex}")
+        else:
+            try:
+                sent = await interaction.channel.send(embed=embed, view=self)
+                self.message = sent
+            except Exception:
+                pass
         try:
             await interaction.response.send_message(ephemeral_msg, ephemeral=True)
         except discord.errors.InteractionResponded:
-            await interaction.followup.send(ephemeral_msg, ephemeral=True)
-
-    def make_poll_embed(self, closed: bool = False):
+            try:
+                await interaction.followup.send(ephemeral_msg, ephemeral=True)
+            except Exception:
+                pass
+        except Exception:
+            pass
+    
+    def make_poll_embed(self, closed: bool = False, bar_len: int = 10):
         total_votes = sum(len(v) for v in self.votes.values())
-        lines = []
-        colors = ["🟦", "🟥", "🟩", "🟨", "🟪", "🟧", "🟫", "🟦", "🟥", "🟩", "🟨", "🟪", "🟧", "🟫", "🟦"]
+        colors = ["🟦", "🟥", "🟩", "🟨", "🟪", "🟧", "🟫"]
 
-        for i, (opt, users) in enumerate(self.votes.items()):
+        embed = discord.Embed(
+            title=f"<:CHART:1418908749749420085>  {self.question}",
+            color=discord.Color.blurple()
+        )
+
+        for i, (opt, users) in enumerate(self.votes.items(), 1):
             count = len(users)
             percent = (count / total_votes * 100) if total_votes > 0 else 0
-            filled = int(percent // 10)
-            empty = 10 - filled
+            filled = int(percent / 100 * bar_len) if bar_len > 0 else 0
+            empty = max(0, bar_len - filled)
             color = colors[i % len(colors)]
             bar = color * filled + "<:Gray_Large_Square:1418999479557685380>" * empty
-            lines.append(f"{opt}\n{bar} `{percent:.0f}% ({count})`")
 
-        description = f"{total_votes} votes\n\n" + "\n\n".join(lines)
+            name = opt if len(opt) <= 60 else opt[:57] + "..."
+            embed.add_field(
+                name=name,
+                value=f"{bar} `{percent:.0f}% ({count})`",
+                inline=False
+            )
 
         if closed:
-            description += "\n\n<:Locked:1419005340812316893> Poll closed\n <:SecretBox:1418986878949916722> Votes are anonymous"
-        else:
             if self.end_time:
-                unix_ts = int(self.end_time.timestamp())
-                description += f"\n\n<:TIME:1415961777912545341> Poll closes <t:{unix_ts}:R>\n <:SecretBox:1418986878949916722> Votes are anonymous"
+                status = (
+                    f"<:Locked:1419005340812316893> Poll closed <t:{int(self.end_time.timestamp())}:R>\n"
+                    f"<:SecretBox:1418986878949916722> Votes are anonymous\n"
+                    f"With total of {total_votes} votes"
+                )
+            else:
+                status = f"<:Locked:1419005340812316893> Poll closed\n<:SecretBox:1418986878949916722> Votes are anonymous\n{total_votes} votes"
+        elif self.end_time:
+            status = (
+                f"<:TIME:1415961777912545341> Poll closes <t:{int(self.end_time.timestamp())}:R>\n"
+                f"<:SecretBox:1418986878949916722> Votes are anonymous\n"
+                f"Total Votes: `{total_votes}` votes"
+            )
+        else:
+            status = f"<:SecretBox:1418986878949916722> Votes are anonymous\n{total_votes} votes"
 
-        title = f"<:CHART:1418908749749420085>  {self.question}"
-        embed = discord.Embed(title=title, description=description, color=discord.Color.blurple())
+        embed.add_field(name="\u200b", value=status, inline=False)
         return embed
-
-    async def on_timeout(self):
-        if self.ended:
-            return
-        self.ended = True
-        self.clear_items()
-        if self.message:
-            results = {opt: len(users) for opt, users in self.votes.items()}
-            winner_text = ""
-            if results:
-                max_votes = max(results.values())
-                winners = [opt for opt, count in results.items() if count == max_votes]
-                if max_votes > 0:
-                    if len(winners) == 1:
-                        winner_text = f"\n\n<:MinoriPray:1418919979272896634> Poll ended. The highest vote goes to **{winners[0]}** with {max_votes} vote{'s' if max_votes!=1 else ''}."
-                    else:
-                        winner_text = f"\n\n<:MinoriPray:1418919979272896634> Poll ended. It's a tie between {', '.join(winners)} — each with {max_votes} votes."
-                else:
-                    winner_text = "\n\n<:MinoriWink:1414899695209418762> Poll ended. No votes were cast."
-            final_embed = self.make_poll_embed(closed=True)
-            await self.message.edit(embed=final_embed, view=self)
-            if winner_text:
-                await self.message.channel.send(winner_text)
 
 class AddOptionModal(ui.Modal, title="Add Poll Options"):
     opt1 = ui.TextInput(label="Option 1 (optional)", required=False, max_length=100,
@@ -188,10 +299,10 @@ class AddOptionModal(ui.Modal, title="Add Poll Options"):
                     "<:MinoriConfused:1415707082988060874> You can't add duplicate options.",
                     ephemeral=True
                 )
-
-        if len(self.poll_view.options) + len(new_opts) > 15:
+        MAX_OPTIONS = 14 
+        if len(self.poll_view.options) + len(new_opts) > MAX_OPTIONS:
             return await interaction.response.send_message(
-                "⚠️ You can only add up to 15 options.", ephemeral=True
+                f"⚠️ You can only add up to {MAX_OPTIONS} options.", ephemeral=True
             )
 
         for opt in new_opts:
@@ -203,10 +314,11 @@ class AddOptionModal(ui.Modal, title="Add Poll Options"):
             if select:
                 select.options = [discord.SelectOption(label=opt, value=str(idx)) 
                                 for idx, opt in enumerate(self.poll_view.options)]
+                select.placeholder = "Select one answer (scroll for more)" if len(self.poll_view.options) > 10 else "Select one answer"
 
         embed = self.poll_view.make_poll_embed()
         await self.poll_view.message.edit(embed=embed, view=self.poll_view)
-        await interaction.response.send_message(f"<:VERIFIED:1418921885692989532> Added {len(new_opts)} option(s).", ephemeral=True)
+        await interaction.response.send_message(f"<:VERIFIED:1418921885692989532> Added {len(new_opts)} option(s). Total options: {len(self.poll_view.options)}", ephemeral=True)
 
 class PollInputModal(ui.Modal, title="Create Poll"):
     question = ui.TextInput(label="Question", placeholder="What's the poll about?", required=True, max_length=200)
@@ -222,7 +334,7 @@ class PollInputModal(ui.Modal, title="Create Poll"):
 
     async def select_callback(self, interaction: discord.Interaction):
         try:
-            val = interaction.data["values"][0]   # index as string
+            val = interaction.data["values"][0]   
             idx = int(val)
         except Exception:
             return await interaction.response.send_message("⚠️ Invalid selection.", ephemeral=True)
@@ -232,7 +344,6 @@ class PollInputModal(ui.Modal, title="Create Poll"):
 
         choice_label = self.options[idx]
 
-        # remove previous votes by user
         for opt in self.votes:
             self.votes[opt].discard(interaction.user.id)
         self.votes[choice_label].add(interaction.user.id)
@@ -247,14 +358,12 @@ class PollInputModal(ui.Modal, title="Create Poll"):
         ]
         opts = [o for o in raw_opts if o]
 
-        # require at least 2 options
         if len(opts) < 2:
             return await interaction.response.send_message(
                 "⚠️ Please provide at least two options (Option 1 and Option 2 are required).",
                 ephemeral=True
             )
 
-        # Duplicate check (normalize: trim + lower)
         normalized = [o.strip().lower() for o in opts]
         if len(set(normalized)) != len(normalized):
             return await interaction.response.send_message(
@@ -266,6 +375,9 @@ class PollInputModal(ui.Modal, title="Create Poll"):
             embed = view.make_poll_embed()
             msg = await self.ctx.send(embed=embed, view=view)
             view.message = msg
+            print(f"[poll created] message id={msg.id} "
+            f"type={type(msg)} "
+            f"webhook_id={getattr(msg, 'webhook_id', None)}")
             try:
                 await interaction.response.send_message("<:VERIFIED:1418921885692989532> Poll successfully created!", ephemeral=True)
             except discord.errors.InteractionResponded:
@@ -363,7 +475,6 @@ class Fun(commands.Cog):
 
         timeout_seconds = duration * 60
 
-        # open modal for poll options
         poll_modal = PollInputModal(ctx, timeout_seconds=timeout_seconds)
         await ctx.interaction.response.send_modal(poll_modal)
 
@@ -386,7 +497,7 @@ class Fun(commands.Cog):
 
         class GambleSelect(discord.ui.View):
             def __init__(self, bot, user_id, guild_id, active_views, timeout=120):
-                super().__init__(timeout=None)  # we'll use our own timeout_task
+                super().__init__(timeout=None) 
                 self.bot = bot
                 self.user_id = user_id
                 self.guild_id = guild_id
@@ -395,7 +506,6 @@ class Fun(commands.Cog):
                 self.timeout_seconds = timeout
                 self.message = None
 
-                # Dropdown options
                 self.options_list = [
                     ("100", 100, discord.PartialEmoji(name="Coins", id=1415353285270966403)),
                     ("250", 250, discord.PartialEmoji(name="Coins", id=1415353285270966403)),
@@ -608,3 +718,4 @@ class Fun(commands.Cog):
 async def setup(bot):
     await bot.add_cog(Fun(bot))
     print("📦 Loaded fun cog.")
+
