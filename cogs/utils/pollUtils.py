@@ -224,7 +224,7 @@ class PollView(discord.ui.View):
             except Exception as e:
                 print(f"[Poll DB Save Error on vote] {e}")
 
-        await self.update_poll(interaction, f"✅ You voted for **{choice_label}**")
+        await self.update_poll(interaction, f"<:VERIFIED:1418921885692989532> You voted for **{choice_label}**")
 
     async def add_option(self, interaction: discord.Interaction):
         if self.ended:
