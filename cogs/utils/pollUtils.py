@@ -19,6 +19,7 @@ async def init_db():
                 message_id INTEGER PRIMARY KEY,
                 guild_id INTEGER,
                 channel_id INTEGER,
+                author_id INTEGER,
                 question TEXT,
                 options TEXT,
                 votes TEXT,
@@ -32,16 +33,32 @@ async def init_db():
         """)
         await conn.commit()
 
-async def save_active_poll(message_id, guild_id, channel_id, question, options, votes, end_time):
+        async with conn.execute("PRAGMA table_info(polls)") as cur:
+            cols = await cur.fetchall()
+            col_names = [c[1] for c in cols]  
+            if "author_id" not in col_names:
+                try:
+                    await conn.execute("ALTER TABLE polls ADD COLUMN author_id INTEGER")
+                    await conn.commit()
+                except Exception:
+                    pass
+
+        await conn.execute("UPDATE polls SET options='[]' WHERE options IS NULL")
+        await conn.execute("UPDATE polls SET votes='{}' WHERE votes IS NULL")
+        await conn.commit()
+
+
+async def save_active_poll(message_id, guild_id, channel_id, author_id, question, options, votes, end_time):
     async with aiosqlite.connect(DB_FILE) as conn:
         await conn.execute("""
             INSERT OR REPLACE INTO polls 
-            (message_id, guild_id, channel_id, question, options, votes, end_time, ended)
-            VALUES (?, ?, ?, ?, ?, ?, ?, 0)
+            (message_id, guild_id, channel_id, author_id, question, options, votes, end_time, ended)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)
         """, (
             message_id,
             guild_id,
             channel_id,
+            author_id,
             question,
             json.dumps(options),
             json.dumps({k: list(v) for k, v in votes.items()}),
@@ -65,9 +82,31 @@ async def record_poll_result(message_id, winners, counts, total_votes):
 
 async def load_active_polls():
     async with aiosqlite.connect(DB_FILE) as conn:
-        async with conn.execute("SELECT * FROM polls WHERE ended=0") as cursor:
+        query = """
+            SELECT
+                message_id,
+                guild_id,
+                channel_id,
+                author_id,
+                question,
+                options,
+                votes,
+                end_time,
+                ended
+            FROM polls
+            WHERE ended = 0
+        """
+        async with conn.execute(query) as cursor:
             rows = await cursor.fetchall()
-            return rows
+            cols = ["message_id","guild_id","channel_id","author_id","question","options","votes","end_time","ended"]
+            return [dict(zip(cols, row)) for row in rows]
+
+
+async def purge_finished_polls():
+    async with aiosqlite.connect(DB_FILE) as conn:
+        await conn.execute("DELETE FROM polls WHERE ended=1")
+        await conn.commit()
+
 
 class PollView(discord.ui.View):
     def __init__(self, question: str, options: List[str], author: discord.Member, timeout: Optional[int] = None):
@@ -149,7 +188,7 @@ class PollView(discord.ui.View):
             if max_votes > 0:
                 if len(winners) == 1:
                     winner_text = (
-                        f"\n\n<:MinoriPray:1418919979272896634> Polling for **`{self.question}`** ended. "
+                        f"\n\n<:MinoriPray:1418919979272896634> Polling for `{self.question}` ended. "
                         f"The highest vote goes to **{winners[0]}** with {max_votes} vote{'s' if max_votes!=1 else ''}.")
                 else:
                     winner_text = (
@@ -216,6 +255,7 @@ class PollView(discord.ui.View):
                     message_id=self.message.id,
                     guild_id=self.message.guild.id,
                     channel_id=self.message.channel.id,
+                    author_id=self.author.id,  
                     question=self.question,
                     options=self.options,
                     votes=self.votes,
@@ -271,6 +311,7 @@ class PollView(discord.ui.View):
                         message_id=self.message.id,
                         guild_id=self.message.guild.id,
                         channel_id=self.message.channel.id,
+                        author_id=self.author.id,         
                         question=self.question,
                         options=self.options,
                         votes=self.votes,
@@ -381,7 +422,7 @@ class PollView(discord.ui.View):
                 status = (
                     f"<:Locked:1419005340812316893> Poll closed <t:{int(self.end_time.timestamp())}:R>\n"
                     f"<:SecretBox:1418986878949916722> Votes are anonymous\n"
-                    f"With total of {total_votes} votes"
+                    f"With total of {total_votes} votes" # placeholder titip
                 )
             else:
                 status = f"<:Locked:1419005340812316893> Poll closed\n<:SecretBox:1418986878949916722> Votes are anonymous\n{total_votes} votes"
@@ -416,6 +457,10 @@ class AddOptionModal(ui.Modal, title="Add Poll Options"):
         self.description = "Note: Discord only allows a maximum of 25 options per select menu."
 
     async def on_submit(self, interaction: discord.Interaction):
+        
+        if not self.poll_view.message:
+            return await interaction.response.send_message("⚠️ Poll message no longer exists.", ephemeral=True)
+        
         new_opts_raw = [
             self.opt1.value.strip(),
             self.opt2.value.strip(),
@@ -456,8 +501,26 @@ class AddOptionModal(ui.Modal, title="Add Poll Options"):
 
         embed = self.poll_view.make_poll_embed()
         await self.poll_view.message.edit(embed=embed, view=self.poll_view)
-        await interaction.response.send_message(f"<:VERIFIED:1418921885692989532> Added {len(new_opts)} option(s). Total options: {len(self.poll_view.options)}", ephemeral=True)
 
+        try:
+            await save_active_poll(
+                message_id=self.poll_view.message.id,
+                guild_id=self.poll_view.message.guild.id,
+                channel_id=self.poll_view.message.channel.id,
+                author_id=self.poll_view.author.id,          # <-- required now
+                question=self.poll_view.question,
+                options=self.poll_view.options,
+                votes=self.poll_view.votes,
+                end_time=self.poll_view.end_time
+            )
+        except Exception as e:
+            print(f"[Poll DB Save Error on add_option] {e}")
+
+        await interaction.response.send_message(
+            f"<:VERIFIED:1418921885692989532> Added {len(new_opts)} option(s). Total options: {len(self.poll_view.options)}",
+            ephemeral=True
+        )
+        
 class PollInputModal(ui.Modal, title="Create Poll"):
     question = ui.TextInput(label="Question", placeholder="What's the poll about?", required=True, max_length=200)
     opt1 = ui.TextInput(label="Option 1 (required)", placeholder="First option (required)", required=True, max_length=100)
@@ -501,11 +564,13 @@ class PollInputModal(ui.Modal, title="Create Poll"):
                 message_id=msg.id,
                 guild_id=interaction.guild.id,
                 channel_id=interaction.channel.id,
+                author_id=interaction.user.id,             
                 question=self.question.value,
                 options=opts,
                 votes=view.votes,
                 end_time=end_time
             )
+
             try:
                 await interaction.response.send_message("<:VERIFIED:1418921885692989532> Poll successfully created!", ephemeral=True)
             except discord.errors.InteractionResponded:
