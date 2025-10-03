@@ -22,6 +22,7 @@ class PollView(discord.ui.View):
         self.ended = False
         self.end_time = (datetime.now(timezone.utc) + timedelta(seconds=timeout)) if timeout else None
 
+        # UI items
         add_button = discord.ui.Button(label="Add Option", style=discord.ButtonStyle.green)
         add_button.callback = self.add_option
         self.add_item(add_button)
@@ -43,9 +44,20 @@ class PollView(discord.ui.View):
         end_button.callback = self.end_poll
         self.add_item(end_button)
 
-    async def _auto_end(self, timeout: int):
+        if self.end_time:
+            loop = asyncio.get_running_loop()
+            self.updater_task = loop.create_task(self._auto_end())
+
+    async def _auto_end(self):
         try:
-            await asyncio.sleep(timeout)
+            while not self.ended and self.end_time:
+                now = datetime.now(timezone.utc)
+                remaining = (self.end_time - now).total_seconds()
+                if remaining <= 0:
+                    break
+                await asyncio.sleep(remaining)
+                break
+
             if not self.ended:
                 try:
                     await self.on_timeout()
@@ -53,13 +65,18 @@ class PollView(discord.ui.View):
                     print(f"[PollView._auto_end] on_timeout failed: {e}")
         except asyncio.CancelledError:
             return
+        except Exception as e:
+            print(f"[PollView._auto_end] unexpected error: {e}")
 
     async def end_poll(self, interaction: discord.Interaction):
         if interaction.user.id != self.author.id:
             return await interaction.response.send_message("⚠️ Only the poll creator can end this poll.", ephemeral=True)
 
         if self.updater_task and not self.updater_task.done():
-            self.updater_task.cancel()
+            try:
+                self.updater_task.cancel()
+            except Exception:
+                pass
 
         await interaction.response.defer(ephemeral=True)
         await self.on_timeout()
@@ -108,8 +125,20 @@ class PollView(discord.ui.View):
                     await self.message.channel.send(winner_text)
                 except Exception as e:
                     print(f"[on_timeout] failed sending winner_text: {e}")
-        
+
     async def add_option(self, interaction: discord.Interaction):
+        if self.ended:
+            return await interaction.response.send_message("⚠️ Poll already closed.", ephemeral=True)
+
+        if self.end_time and datetime.now(timezone.utc) >= self.end_time:
+            if self.updater_task and not self.updater_task.done():
+                try:
+                    self.updater_task.cancel()
+                except Exception:
+                    pass
+            await self.on_timeout()
+            return await interaction.response.send_message("⚠️ Poll has already ended.", ephemeral=True)
+
         if interaction.user.id != self.author.id:
             return await interaction.response.send_message("⚠️ Only the poll creator can add options.", ephemeral=True)
         
@@ -117,6 +146,18 @@ class PollView(discord.ui.View):
         await interaction.response.send_modal(modal)
 
     async def select_callback(self, interaction: discord.Interaction):
+        if self.ended:
+            return await interaction.response.send_message("⚠️ Poll already closed.", ephemeral=True)
+
+        if self.end_time and datetime.now(timezone.utc) >= self.end_time:
+            if self.updater_task and not self.updater_task.done():
+                try:
+                    self.updater_task.cancel()
+                except Exception:
+                    pass
+            await self.on_timeout()
+            return await interaction.response.send_message("⚠️ Poll has already ended.", ephemeral=True)
+
         try:
             val = interaction.data["values"][0]   
             idx = int(val)
@@ -132,9 +173,20 @@ class PollView(discord.ui.View):
             self.votes[opt].discard(interaction.user.id)
         self.votes[choice_label].add(interaction.user.id)
         await self.update_poll(interaction, f"<:VERIFIED:1418921885692989532> You voted for **{choice_label}**")
-
     
     async def remove_vote(self, interaction: discord.Interaction):
+        if self.ended:
+            return await interaction.response.send_message("⚠️ Poll already closed.", ephemeral=True)
+
+        if self.end_time and datetime.now(timezone.utc) >= self.end_time:
+            if self.updater_task and not self.updater_task.done():
+                try:
+                    self.updater_task.cancel()
+                except Exception:
+                    pass
+            await self.on_timeout()
+            return await interaction.response.send_message("⚠️ Poll has already ended.", ephemeral=True)
+
         removed = False
         for opt in self.votes:
             if interaction.user.id in self.votes[opt]:
@@ -375,9 +427,6 @@ class PollInputModal(ui.Modal, title="Create Poll"):
             embed = view.make_poll_embed()
             msg = await self.ctx.send(embed=embed, view=view)
             view.message = msg
-            print(f"[poll created] message id={msg.id} "
-            f"type={type(msg)} "
-            f"webhook_id={getattr(msg, 'webhook_id', None)}")
             try:
                 await interaction.response.send_message("<:VERIFIED:1418921885692989532> Poll successfully created!", ephemeral=True)
             except discord.errors.InteractionResponded:
@@ -718,4 +767,3 @@ class Fun(commands.Cog):
 async def setup(bot):
     await bot.add_cog(Fun(bot))
     print("📦 Loaded fun cog.")
-
