@@ -7,7 +7,7 @@ import asyncio
 import traceback
 import io
 from discord import MessageReference
-from cogs.utils.pUtils import *
+from cogs.utils.progUtils import *
 from cogs.utils.constants import BG_PATH, EMOJI_PATH
     
 class MainThemeSelect(discord.ui.Select):
@@ -122,7 +122,7 @@ class SubThemeView(discord.ui.View):
         self.add_item(SubThemeSelect(user_id, theme, cog))
     
 class Progression(commands.Cog):
-    MAX_LEVEL = 150
+    MAX_LEVEL = 999
     MAX_BOX_WIDTH = 50
     MAX_NAME_WIDTH = 20
     MAX_EXP_WIDTH = 12
@@ -324,7 +324,7 @@ class Progression(commands.Cog):
 
             
             if level >= self.MAX_LEVEL:
-                next_exp = None  # skip progress bar logic
+                next_exp = None  
             else:
                 next_exp = 50 * level + 20 * level**2
 
@@ -632,13 +632,13 @@ class Progression(commands.Cog):
             new_emoji = get_title_emoji(level)
             new_title = get_title(level)
 
-            if new_title != old_title:  
+            if new_title != old_title:  # Ascension happened
                 embed_title = f"{message.author.display_name} <:LEVELUP:1413479714428948551> {level}    {old_emoji} <:RIGHTWARDARROW:1414227272302334062> {new_emoji}"
                 embed_description = (
                     f"```Congratulations {message.author.display_name}! You have reached level {level} and ascended to {new_title}. ```\n"
                     f"Title: `{new_title}` {new_emoji}"
                 )
-            else:  
+            else:  # Normal level-up
                 embed_title = f"{message.author.display_name} <:LEVELUP:1413479714428948551> {level}"
                 embed_description = (
                     f"```Congratulations {message.author.display_name}! You have reached level {level}.```\n"
@@ -677,28 +677,31 @@ class Progression(commands.Cog):
         )
         return self.c.fetchone()[0]
     
-    @commands.Cog.listener()
-    async def on_ready(self):
-        print(f"{self.bot.user} is ready!")
+    # @commands.Cog.listener()
+    # async def on_ready(self):
+    #     print(f"{self.bot.user} is ready!")
 
-        YOUR_ID = [955268891125375036, 550201320074903563, 736068611017539585]  # Add all relevant user IDs here
-        GUILD_ID = 974498807817588756  # Your guild ID
+    #     YOUR_ID = [
+    #         955268891125375036,
+    #     ] 
 
-        progression = self.bot.get_cog("Progression")
-        if not progression:
-            print("Progression cog not loaded!")
-            return
+    #     GUILD_ID = 974498807817588756 
 
-        for user_id in YOUR_ID:
-            level, exp, leveled_up = self.add_exp(user_id, GUILD_ID, 0)
-            print(f"User {user_id} → Level {level}, EXP {exp}, Leveled up? {leveled_up}")
+    #     progression = self.bot.get_cog("Progression")
+    #     if not progression:
+    #         print("Progression cog not loaded!")
+    #         return
 
-            await progression.add_coins(user_id, GUILD_ID, 0)
-            coins = await progression.get_coins(user_id, GUILD_ID)
-            print(f"User {user_id} → Coins: {coins}")
+    #     for user_id in YOUR_ID:
+    #         level, exp, leveled_up = self.add_exp(user_id, GUILD_ID, 99999999999999999)
+    #         print(f"User {user_id} → Level {level}, EXP {exp}, Leveled up? {leveled_up}")
 
-        first_user = YOUR_ID[0]
-        print(f"🎉 First user {first_user} now has Level {level}, EXP {exp}, Coins {coins}. Leveled up? {leveled_up}")
+    #         await progression.add_coins(user_id, GUILD_ID, 0)
+    #         coins = await progression.get_coins(user_id, GUILD_ID)
+    #         print(f"User {user_id} → Coins: {coins}")
+
+    #     first_user = YOUR_ID[0]
+    #     print(f"🎉 First user {first_user} now has Level {level}, EXP {exp}, Coins {coins}. Leveled up? {leveled_up}")
 
     
 async def setup(bot):
