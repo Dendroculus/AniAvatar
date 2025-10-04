@@ -4,7 +4,7 @@ from typing import Optional, List, Dict
 import discord
 from discord.ext import commands, tasks
 from cogs.utils.constants import *
-from cogs.utils.pUtils import *
+from cogs.utils.progUtils import *
 
 TITLE_ORDER = [
     "Novice", "Warrior", "Elite", "Champion", "Hero", "Legend", "Mythic",
@@ -266,4 +266,5 @@ class Roles(commands.Cog):
 async def setup(bot):
     await bot.add_cog(Roles(bot))
     print("📦 Loaded roles cog.")
+
 
