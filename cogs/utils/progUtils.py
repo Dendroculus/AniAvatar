@@ -7,6 +7,39 @@ import io
 import random
 import sqlite3
 import colorsys
+import re
+import unicodedata
+
+_INVISIBLE_RE = re.compile(r'[\u200D\uFE0F\u200E\u200F\u2060-\u2064\uFEFF]', flags=re.UNICODE)
+_CTRL_RE = re.compile(r'[\x00-\x1F\x7F]', flags=re.UNICODE)
+
+_space_collapse_re = re.compile(r'\s+', flags=re.UNICODE)
+
+def format_number(num: int) -> str:
+    if num < 1_000:
+        return str(num)
+    elif num < 1_000_000:
+        return f"{num / 1_000:.2f}K".rstrip("0").rstrip(".")
+    elif num < 1_000_000_000:
+        return f"{num / 1_000_000:.2f}M".rstrip("0").rstrip(".")
+    else:
+        return f"{num / 1_000_000_000:.2f}B".rstrip("0").rstrip(".")
+    
+def strip_emojis(s: str) -> str:
+    if not s:
+        return s
+    s = _INVISIBLE_RE.sub("", s)
+    out_chars = []
+    for ch in s:
+        cat = unicodedata.category(ch)
+        if cat.startswith("So") or cat.startswith("Sk"):
+            continue
+        out_chars.append(ch)
+    s = "".join(out_chars)
+
+    s = _CTRL_RE.sub("", s)
+    s = _space_collapse_re.sub(" ", s).strip()
+    return s
 
 _AVATAR_CACHE = {}
 _PANEL_GRAD_CACHE = {}
@@ -312,7 +345,8 @@ def render_profile_image(
                 x0 += int(w)
 
 
-        display_name_only = display_name
+        clean_name = strip_emojis(display_name)
+        display_name_only = clean_name if clean_name else display_name
         if len(display_name_only) > 12:
             display_name_only = display_name_only[:12] + "..."
 
@@ -697,7 +731,7 @@ def create_leaderboard_image(
         bullet_r = max(2, int(row_height * 0.12))
         bullet_vertical_nudge = max(1, int(row_height * 0.12))
         name_min_w = max(80, int(width * 0.18))
-        extra_edge_margin = max(30, int(width * 0.07))
+        extra_edge_margin = max(20, int(width * 0.05))
 
         try:
             max_rank_val = max((int(r.get("rank", 0)) for r in rows), default=1)
@@ -829,9 +863,12 @@ def create_leaderboard_image(
             bullet1_y = int(center_y - bullet_r + bullet_vertical_nudge)
             draw.ellipse((bullet1_x, bullet1_y, bullet1_x + bullet_r*2, bullet1_y + bullet_r*2), fill=(255,255,255))
 
-            nm = str(name_raw).strip()
+            orig_name = str(name_raw or "Unknown")
+            clean_name = strip_emojis(orig_name)
+            nm = clean_name if clean_name else orig_name.strip()
+
             if draw.textlength(nm, font=font_name) > name_area_width:
-                nm = truncate_to_width(nm, font_name, name_area_width, draw)
+                nm = truncate_to_width(nm, font=font_name, max_width=name_area_width, draw=draw)
 
             name_start_x = bullet1_x + bullet_r*2 + 12
             draw_lb_cjk(draw, (name_start_x, ry), nm, font_name, cjk_font_name, (255,255,255))
@@ -857,7 +894,7 @@ def create_leaderboard_image(
                 except Exception:
                     pass
 
-            exp_text = "MAX" if next_val is None else f"{exp_val:,}/{next_val:,}"
+            exp_text = "MAX" if next_val is None else f"{format_number(exp_val)}/{format_number(next_val)}"
             exp_text_w = draw.textlength(exp_text, font=font_bold)
             icon_gap = (exp_icon.width + 6) if exp_icon else 0
             exp_block_w = exp_text_w + icon_gap
@@ -894,4 +931,4 @@ def create_leaderboard_image(
         b.seek(0)
         return b.getvalue()
 
-print("📦 Loaded utils.pUtils cog.")
+print("📦 Loaded utils.progUtils cog.")
