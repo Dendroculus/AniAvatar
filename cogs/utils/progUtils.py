@@ -10,6 +10,16 @@ import colorsys
 import re
 import unicodedata
 
+"""
+PERSONAL NOTE : 
+────────────────────────────
+column_shift = -8      # move LVL column & bullet left/right   # IF YOU ARE USING THIS BOT YOU CAN IGNORE THIS
+badge_shift = +12      # move title badge right/left
+lvl_y = -4             # move LVL text value column up/down neg is up otherwise
+────────────────────────────
+
+"""
+
 _INVISIBLE_RE = re.compile(r'[\u200D\uFE0F\u200E\u200F\u2060-\u2064\uFEFF]', flags=re.UNICODE)
 _CTRL_RE = re.compile(r'[\x00-\x1F\x7F]', flags=re.UNICODE)
 
@@ -671,7 +681,6 @@ def create_leaderboard_image(
         rows = list(rows or [])
         n = len(rows)
 
-        #  debug message to verify it is 10
         print(f"[create_leaderboard_image] rows received: {n}")
 
         gap_between_rows = max(8, int(row_height * 0.2))
@@ -767,6 +776,19 @@ def create_leaderboard_image(
             name_area_width = int(right_x - right_reserved - left_reserved)
             if name_area_width < 40:
                 name_area_width = 40
+
+        column_shift = - 11  
+        level_col_start = right_x - extra_edge_margin \
+                          - max_total_exp_w - 8 \
+                          - badge_size - 8 \
+                          - fixed_level_w \
+                          - (bullet_r*2 + 12)
+        level_col_start += column_shift
+
+
+        min_allowed = left_reserved + name_min_w + 16
+        if level_col_start < min_allowed:
+            level_col_start = min_allowed
 
         def draw_lb_cjk(draw_obj, pos, text, primary_font, cjk_font, fill, stroke_width=1, stroke_fill=(255,255,255,255)):
             x0, y0 = int(pos[0]), int(pos[1])
@@ -866,27 +888,33 @@ def create_leaderboard_image(
             orig_name = str(name_raw or "Unknown")
             clean_name = strip_emojis(orig_name)
             nm = clean_name if clean_name else orig_name.strip()
+            
+            max_chars = 15
+            if len(nm) > max_chars:
+                nm = nm[:max_chars-3]+ "..."
 
-            if draw.textlength(nm, font=font_name) > name_area_width:
+            if draw.textlength(nm, font=font_name) > name_area_width: 
                 nm = truncate_to_width(nm, font=font_name, max_width=name_area_width, draw=draw)
 
             name_start_x = bullet1_x + bullet_r*2 + 12
             draw_lb_cjk(draw, (name_start_x, ry), nm, font_name, cjk_font_name, (255,255,255))
 
-            bullet2_x = name_start_x + name_area_width + bullet_spacing
+            bullet2_x = int(level_col_start - bullet_spacing - bullet_r*2)
             bullet2_y = int(center_y - bullet_r + bullet_vertical_nudge) - 2
             draw.ellipse((bullet2_x, bullet2_y, bullet2_x + bullet_r*2, bullet2_y + bullet_r*2), fill=(255,255,255))
 
-            lvl_x = bullet2_x + bullet_r*2 + 12 
-            lvl_y = int(center_y - (font_medium_height) / 2) - 2
+            lvl_x = int(level_col_start) + 2
+            lvl_y = int(center_y - (font_medium_height) / 2) - 4
             level_text = f"LVL {level_val}"
-            draw_lb_cjk(draw, (lvl_x, lvl_y), level_text, font_medium, cjk_font_medium, (255,255,255))
+            lvl_font = _safe_load_font(fonts.get("medium"), max(10, int(row_height * 0.50)))
+            draw_lb_cjk(draw, (lvl_x, lvl_y), level_text, lvl_font, cjk_font_medium, (255,255,255))
 
             title_name = (r.get("title") or "").strip()
             badge_path = TITLE_EMOJI_FILES.get(title_name) if isinstance(TITLE_EMOJI_FILES, dict) else None
+            badge_shift = 35
             if badge_path and os.path.exists(badge_path):
                 try:
-                    bx = lvl_x + fixed_level_w + 8
+                    bx = lvl_x + fixed_level_w + badge_shift
                     by = int(center_y - badge_size/2)
                     badge_img = load_icon_cached(badge_path, badge_size)
                     if badge_img:
@@ -930,5 +958,6 @@ def create_leaderboard_image(
         fallback.save(b, format="PNG")
         b.seek(0)
         return b.getvalue()
+
 
 print("📦 Loaded utils.progUtils cog.")
