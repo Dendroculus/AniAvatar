@@ -410,7 +410,7 @@ class PollView(discord.ui.View):
             color = colors[i % len(colors)]
             bar = color * filled + "<:Gray_Large_Square:1418999479557685380>" * empty
 
-            name = opt if len(opt) <= 60 else opt[:57] + "..."
+            name = opt
             embed.add_field(
                 name=name,
                 value=f"{bar} `{percent:.0f}% ({count})`",
@@ -422,7 +422,7 @@ class PollView(discord.ui.View):
                 status = (
                     f"<:Locked:1419005340812316893> Poll closed <t:{int(self.end_time.timestamp())}:R>\n"
                     f"<:SecretBox:1418986878949916722> Votes are anonymous\n"
-                    f"With total of {total_votes} votes" # placeholder titip
+                    f"With total of `{total_votes} votes`" 
                 )
             else:
                 status = f"<:Locked:1419005340812316893> Poll closed\n<:SecretBox:1418986878949916722> Votes are anonymous\n{total_votes} votes"
