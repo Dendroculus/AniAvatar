@@ -503,8 +503,7 @@ class Trading(commands.Cog):
         user_id = ctx.author.id
         guild_id = ctx.guild.id
 
-        # Prevent opening a second shop
-        if user_id in self.open_shops:
+        if self.open_shops.get(guild_id, {}).get(user_id):
             await ctx.send("⚠️ You already have a shop open! Close it first.", ephemeral=True)
             return
 
@@ -536,10 +535,9 @@ class Trading(commands.Cog):
         view = ShopView(self.progression_cog, user_id, guild_id, options, parent_cog=self, timeout=180)
         msg = await ctx.send(embed=embed, view=view)
 
-        # wire the message to the view/select and track the open shop
         view.message = msg
         view.select.message = msg  
-        self.open_shops[user_id] = view
+        self.open_shops.setdefault(guild_id, {})[user_id] = view
 
         
     @commands.hybrid_command(name="inventory", description="Check your inventory and items")
@@ -551,7 +549,7 @@ class Trading(commands.Cog):
 
         user_id = ctx.author.id
         guild_id = ctx.guild.id
-        if user_id in self.open_inventories:
+        if self.open_inventories.get(guild_id, {}).get(user_id):
             await ctx.send("⚠️ You already have an inventory open! Close it first.", ephemeral=True)
             return
     
@@ -583,7 +581,7 @@ class Trading(commands.Cog):
         view = InventoryView(self, user_id, guild_id, items)
         msg = await ctx.send(embed=embed, view=view)
         view.message = msg 
-        self.open_inventories[user_id] = msg
+        self.open_inventories.setdefault(guild_id, {})[user_id] = msg
         
     @commands.hybrid_command(name="donate", description="Give an item to another user")
     @commands.guild_only()
@@ -728,5 +726,4 @@ class Trading(commands.Cog):
 async def setup(bot):
     await bot.add_cog(Trading(bot))
     print("📦 Loaded shop cog.")
-
 
