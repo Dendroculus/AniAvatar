@@ -35,7 +35,7 @@ The bot is structured around several core systems, each with unique features.
   </details>
 - **Shop, Inventory & Trading**: Earn coins by leveling up and playing games. Spend them in the shop on items like EXP potions and mystery boxes. Manage your items in your inventory and donate them to other users.
   <details>
-    <summary>Screenshots</summary>
+    <summary>Preview</summary>
     <img src="docs/screenshots/shop&inventory_command.png" width="600">
     <img src="docs/screenshots/donate_command.png" width="600">
   </details>
@@ -43,7 +43,7 @@ The bot is structured around several core systems, each with unique features.
 ### Anime Information
 - **Anime & Character Search**: Get detailed information about any anime or find the perfect profile picture for any character using the AniList and Google Search APIs.
   <details>
-    <summary>Screenshots</summary>
+    <summary>Preview</summary>
     <p><b>Anime Search Process:</b></p>
     <img src="docs/screenshots/anime_query.png" width="600">
     <img src="docs/screenshots/anime_choose.png" width="600">
@@ -55,7 +55,7 @@ The bot is structured around several core systems, each with unique features.
 ### Games & Fun
 - **Anime Quiz & Guessing Games**: Test your knowledge with a multiple-choice anime quiz or guess the character from a random image. Earn EXP and coins for correct answers!
   <details>
-    <summary>Screenshots</summary>
+    <summary>Preview</summary>
     <img src="docs/screenshots/animequiz_command.png" width="600">
     <img src="docs/screenshots/guess_character.png" width="600">
   </details>
@@ -66,7 +66,7 @@ The bot is structured around several core systems, each with unique features.
   </details>
 - **Waifu & Quotes**: Get random waifu images or memorable quotes from various anime.
   <details>
-    <summary>Screenshots</summary>
+    <summary>Preview</summary>
     <img src="docs/screenshots/waifu_command.png" width="600">
     <img src="docs/screenshots/animequotes_command.png" width="600">
   </details>
