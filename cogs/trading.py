@@ -23,7 +23,8 @@ def format_coins(coins: int) -> str:
         return f"{coins / 1_000_000_000:.2f}B".rstrip("0").rstrip(".")
     
 class CloseButton(discord.ui.Button):
-    def __init__(self, owner_id: int, close_text: str, label: str = "Close", menu_type: str = None, cog=None):
+    def __init__(self, owner_id: int, close_text: str, label: str = "Close", menu_type: str = None, cog=None, guild_id: int = None):
+        self.guild_id = guild_id
         super().__init__(label=label, style=discord.ButtonStyle.danger)
         self.owner_id = owner_id
         self.close_text = close_text
@@ -35,19 +36,20 @@ class CloseButton(discord.ui.Button):
             await interaction.response.send_message("⚠️ This is not your menu!", ephemeral=True)
             return
 
-        stored = None
-        if self.menu_type == "shop":
-            stored = self.cog.open_shops.pop(self.owner_id, None)
-        elif self.menu_type == "inventory":
-            stored = self.cog.open_inventories.pop(self.owner_id, None)
-
         try:
-            if getattr(stored, "_timeout_task", None):
-                stored._timeout_task.cancel()
-            elif hasattr(stored, "view") and getattr(stored.view, "_timeout_task", None):
-                stored.view._timeout_task.cancel()
+            if self.menu_type == "shop":
+                self.cog.open_shops.get(self.guild_id, {}).pop(self.owner_id, None)
+            elif self.menu_type == "inventory":
+                self.cog.open_inventories.get(self.guild_id, {}).pop(self.owner_id, None)
         except Exception:
             pass
+
+        try:
+            if getattr(self.view, "_timeout_task", None):
+                self.view._timeout_task.cancel()
+        except Exception:
+            pass
+
 
         await interaction.response.edit_message(content=self.close_text, embed=None, view=None)
 
@@ -190,7 +192,7 @@ class InventoryView(discord.ui.View):
 
         select = InventorySelect(cog, user_id, guild_id, items, self)
         self.add_item(select)
-        close_button = CloseButton(owner_id=user_id, close_text="❌ Inventory closed.", label="Close Inventory", menu_type="inventory", cog=self.cog)
+        close_button = CloseButton(owner_id=user_id, close_text="❌ Inventory closed.", label="Close Inventory", menu_type="inventory", cog=self.cog, guild_id=self.guild_id)
         self.add_item(close_button)
 
         self.start_timeout()
@@ -322,10 +324,11 @@ class ShopView(discord.ui.View):
             close_text="❌ Shop closed.",
             label="Close Shop",
             menu_type="shop",
-            cog=self.parent_cog
+            cog=self.parent_cog,
+            guild_id=self.guild_id
         )
-        self.add_item(close_button)
 
+        self.add_item(close_button)
         self.start_timeout()
 
     def start_timeout(self):
