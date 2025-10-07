@@ -88,8 +88,12 @@ class InventorySelect(discord.ui.Select):
         try:
             selected_item = self.values[0]
             await interaction.response.defer()
-
             c = self.cog.progression_cog.c
+            
+            c.execute("SELECT price, emoji FROM shop_items WHERE name = ?", (selected_item,))
+            row = c.fetchone()
+            selected_emoji = row[1] if row and row[1] else "📦"
+
             c.execute(
                 "SELECT quantity FROM user_inventory WHERE user_id = ? AND guild_id = ? AND item_name = ?",
                 (self.user_id, self.guild_id, selected_item)
@@ -98,6 +102,13 @@ class InventorySelect(discord.ui.Select):
             if not row or row[0] <= 0:
                 await interaction.followup.send("❌ You don't own this item anymore.", ephemeral=True)
                 return
+
+            if selected_item in ["Small EXP Potion", "Medium EXP Potion", "Large EXP Potion", "Level Skip Token"]:
+                c.execute("SELECT level FROM users WHERE user_id = ? AND guild_id = ?", (self.user_id, self.guild_id))
+                row = c.fetchone()
+                if row and row[0] >= self.cog.progression_cog.MAX_LEVEL:
+                    await interaction.followup.send("<:MinoriWink:1414899695209418762> You’ve already reached the max level! You can’t use <:EXP:1415642038589984839> items anymore.", ephemeral=True)
+                    return
 
             c.execute(
                 "UPDATE user_inventory SET quantity = quantity - 1 WHERE user_id = ? AND guild_id = ? AND item_name = ?",
@@ -109,15 +120,15 @@ class InventorySelect(discord.ui.Select):
             )
             self.cog.progression_cog.conn.commit()
 
-            feedback_msg = f"You used `{selected_item}`!"
+            feedback_msg = f"You used {selected_emoji} **{selected_item}**!"
 
             if selected_item in ["Small EXP Potion", "Medium EXP Potion", "Large EXP Potion", "Level Skip Token"]:
                 gain, extra_msg = await self.cog.apply_potion_effect(
                     self.user_id, self.guild_id, selected_item, interaction.channel
-                )
-                feedback_msg = f"You used `{selected_item}` and gained {gain} <:EXP:1415642038589984839>!"
+                ) 
+                feedback_msg = f"You used {selected_emoji} **{selected_item}** and gained {gain} <:EXP:1415642038589984839>!"
                 if extra_msg:
-                    feedback_msg += f"\n{extra_msg}"
+                    feedback_msg += f"\n{extra_msg}" 
                     
             if selected_item == "Mystery Box":
                 rewards = await self.cog.apply_mystery_box(self.user_id, self.guild_id)
@@ -162,13 +173,13 @@ class InventorySelect(discord.ui.Select):
 
         finally:
             async def release_lock():
-                await asyncio.sleep(2)  #
+                await asyncio.sleep(2)  
                 self.cog.user_locks[self.user_id] = False
             asyncio.create_task(release_lock())
 
 class InventoryView(discord.ui.View):
     def __init__(self, cog, user_id, guild_id, items, timeout=180):
-        super().__init__(timeout=None)  # disable built-in timeout
+        super().__init__(timeout=None) 
         self.cog = cog
         self.user_id = user_id
         self.guild_id = guild_id
@@ -230,6 +241,7 @@ class ShopSelect(discord.ui.Select):
         c = self.progression_cog.c
         c.execute("SELECT price, emoji FROM shop_items WHERE name = ?", (selected_item,))
         row = c.fetchone()
+        selected_emoji = row[1] if row and row[1] else "📦"
         if not row:
             await interaction.response.send_message("❌ This item no longer exists in the shop.", ephemeral=True)
             return
@@ -249,6 +261,14 @@ class ShopSelect(discord.ui.Select):
         self.progression_cog.conn.commit()
 
         new_balance = await self.progression_cog.get_coins(self.user_id, self.guild_id)
+        c.execute("SELECT price, emoji FROM shop_items WHERE name = ?", (selected_item,))
+        row = c.fetchone()
+        if not row:
+            await interaction.response.send_message("❌ This item no longer exists in the shop.", ephemeral=True)
+            return
+
+        price, selected_emoji = row  
+        
         c.execute("SELECT name, price, emoji FROM shop_items")
         items = c.fetchall()
 
@@ -279,7 +299,8 @@ class ShopSelect(discord.ui.Select):
         else:
             await interaction.followup.edit_message(interaction.message.id, embed=embed, view=self.parent_view)
             
-        await interaction.followup.send(f"You bought **1x {selected_item}** {emoji}!", ephemeral=True)
+        await interaction.followup.send(f"You bought **1x {selected_item}** {selected_emoji}!", ephemeral=True)
+
 
 class ShopView(discord.ui.View):
     def __init__(self, progression_cog, user_id, guild_id, options, parent_cog, timeout=180):
@@ -392,6 +413,10 @@ class Trading(commands.Cog):
         }
 
         exp, level = self.progression_cog.get_user(user_id, guild_id)
+        if level >= self.progression_cog.MAX_LEVEL:
+            return 0, ""
+
+        
         required_exp = 50 * level + 20 * level**2
 
         if item_name == "Level Skip Token":
