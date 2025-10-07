@@ -755,7 +755,7 @@ def create_leaderboard_image(
         max_total_exp_w = 0
         for r in rows:
             try:
-                exp_text = "MAX" if r.get("next_exp") is None else f"{int(r.get('exp',0)):,}/{int(r.get('next_exp',0)):,}"
+                exp_text = "MAXED" if r.get("next_exp") is None else f"{int(r.get('exp',0)):,}/{int(r.get('next_exp',0)):,}"
             except Exception:
                 exp_text = "0/0"
             w = draw.textlength(exp_text, font=font_bold)
@@ -922,7 +922,7 @@ def create_leaderboard_image(
                 except Exception:
                     pass
 
-            exp_text = "MAX" if next_val is None else f"{format_number(exp_val)}/{format_number(next_val)}"
+            exp_text = "MAXED" if next_val is None else f"{format_number(exp_val)}/{format_number(next_val)}"
             exp_text_w = draw.textlength(exp_text, font=font_bold)
             icon_gap = (exp_icon.width + 6) if exp_icon else 0
             exp_block_w = exp_text_w + icon_gap
