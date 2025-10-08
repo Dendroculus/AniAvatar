@@ -1,6 +1,6 @@
 import discord
 from discord.ext import commands
-from discord.ui import View, Select, Button
+from discord.ui import View, Select
 import aiohttp
 import random
 from urllib.parse import quote
@@ -23,6 +23,7 @@ class Search(commands.Cog):
         self.bot = bot
 
     @commands.hybrid_command(name="anime", description="Search for an anime by name")
+    @commands.cooldown(1, 15, commands.BucketType.user)
     async def anime(self, ctx: commands.Context, *, query: str):
 
         query_str = """
@@ -155,6 +156,7 @@ class Search(commands.Cog):
 
     @commands.hybrid_command(name="animepfp", description="Fetch an anime character PFP (use the full character name for best results)")
     @commands.guild_only()
+    @commands.cooldown(1, 15, commands.BucketType.user)
     async def animepfp(self, ctx: commands.Context, *, name: str):
         name = (name or "").strip()
         if not name:
@@ -446,11 +448,7 @@ class Search(commands.Cog):
         embed.set_footer(text=f"Source: {source}")
         return await reply(embed=embed)
 
-
-
-
 async def setup(bot):
     await bot.add_cog(Search(bot))
     print("📦 Loaded search cog.")
-
 

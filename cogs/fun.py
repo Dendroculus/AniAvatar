@@ -58,6 +58,7 @@ class Fun(commands.Cog):
             return quotes
 
     @commands.hybrid_command(name="waifu", description="Get a random waifu image")
+    @commands.cooldown(1, 5, commands.BucketType.user)
     async def waifu(self, ctx):
         url = "https://api.waifu.pics/sfw/waifu"
 
