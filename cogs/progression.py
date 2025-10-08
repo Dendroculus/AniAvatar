@@ -251,11 +251,21 @@ class Progression(commands.Cog):
             return result[0]
 
     async def add_coins(self, user_id: int, guild_id: int, amount: int):
+        if amount == 0:
+            return
+        amount = int(amount)
         async with self.db_lock:
-            self.c.execute("""
+            self.c.execute(
+                "INSERT OR IGNORE INTO user_coins (user_id, guild_id, coins) VALUES (?, ?, 0)",
+                (user_id, guild_id)
+            )
+            self.c.execute(
+                """
                 INSERT INTO user_coins (user_id, guild_id, coins) VALUES (?, ?, ?)
                 ON CONFLICT(user_id, guild_id) DO UPDATE SET coins = coins + ?
-            """, (user_id, guild_id, amount, amount))
+                """,
+                (user_id, guild_id, amount, amount)
+            )
             self.conn.commit()
         
     async def ensure_user_row(self, user_id: int, guild_id: int):
@@ -267,21 +277,22 @@ class Progression(commands.Cog):
             self.conn.commit()
 
     async def remove_coins(self, user_id: int, guild_id: int, amount: int) -> bool:
+        amount = int(amount)
         if amount <= 0:
             return False
+
         async with self.db_lock:
             self.c.execute(
                 "INSERT OR IGNORE INTO user_coins (user_id, guild_id, coins) VALUES (?, ?, 0)",
                 (user_id, guild_id)
             )
-            self.conn.commit()
-
             self.c.execute(
                 "UPDATE user_coins SET coins = coins - ? WHERE user_id = ? AND guild_id = ? AND coins >= ?",
                 (amount, user_id, guild_id, amount)
             )
+            success = self.c.rowcount > 0
             self.conn.commit()
-            return self.c.rowcount > 0
+            return success
 
     async def reserve_coins(self, user_id: int, guild_id: int, amount: int) -> bool:
         return await self.remove_coins(user_id, guild_id, amount)
