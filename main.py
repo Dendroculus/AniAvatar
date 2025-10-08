@@ -2,7 +2,7 @@ import os
 from dotenv import load_dotenv
 import discord
 from discord.ext import commands
-
+import logging
 
 intents = discord.Intents.default()
 intents.members = True
@@ -11,19 +11,26 @@ intents.message_content = True
 class Minori(commands.Bot):
     def __init__(self):
         super().__init__(command_prefix='!', intents=intents, help_command=None)
-
+        self.logger = logging.getLogger("Minori")
+        if not self.logger.handlers:
+            handler = logging.StreamHandler()
+            handler.setFormatter(logging.Formatter("[%(asctime)s] %(levelname)s: %(message)s"))
+            self.logger.addHandler(handler)
+        self.logger.setLevel(logging.INFO)
+    
     async def setup_hook(self):
         print("Running setup_hook...")
         extensions = [
-            "cogs.general",
+            "cogs.general", 
             "cogs.search",
-            "cogs.progression",
+            "cogs.progression", 
             "cogs.roles",
             "cogs.events",
             "cogs.games",   
             "cogs.fun",
             "cogs.errors",
-            "cogs.trading"
+            "cogs.trading",
+            "cogs.admin"
         ]
         for ext in extensions:  
             try:        
@@ -45,4 +52,5 @@ if __name__ == "__main__":
 
     bot = Minori()
     bot.run(TOKEN)
-    
+        
+            
