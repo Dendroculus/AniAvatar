@@ -7,7 +7,6 @@ import json
 import os
 import aiohttp
 from itertools import cycle
-from datetime import datetime, timezone
 
 
 class Games(commands.Cog):
@@ -74,6 +73,19 @@ class Games(commands.Cog):
             future = asyncio.get_event_loop().create_future()
 
             select = discord.ui.Select(placeholder="Choose an answer...", options=options)
+            view.add_item(select)
+
+            # Define lose messages here so they exist always
+            lose_messages = [
+                f"❌ Wrong! The correct answer was **{question['answer']}**.",
+                f"<:MinoriDissapointed:1416016691430821958> Oops… {question['answer']} slipped away!",
+                f"<:MinoriDissapointed:1416016691430821958> Ahh! The answer was {question['answer']}…",
+                f"<:MinoriConfused:1415707082988060874> Huh?! The correct one was {question['answer']}!",
+                f"<:MinoriDissapointed:1416016691430821958> Not quite… {question['answer']} got past you!",
+                f"<:MinoriConfused:1415707082988060874> Eh?! You missed {question['answer']}!",
+                f"<:MinoriDissapointed:1416016691430821958> Whoops! {question['answer']} was the right one!",
+                f"<:MinoriConfused:1415707082988060874> Hmm… the answer was {question['answer']}."
+            ]
 
             async def callback(interaction: discord.Interaction):
                 if interaction.user != ctx.author:
@@ -85,34 +97,42 @@ class Games(commands.Cog):
                 await interaction.response.edit_message(view=view)
 
             select.callback = callback
-            view.add_item(select)
+
             message = await ctx.send(embed=embed, view=view)
 
             try:
                 selected = await asyncio.wait_for(future, timeout=15)
+
                 if selected == question["answer"]:
                     score += 1
                     if profile_cog:
                         _, current_level = profile_cog.get_user(ctx.author.id, ctx.guild.id)
                         exp_reward = random.randint(5 + current_level * 2, 10 + current_level * 3)
                         coin_reward = random.randint(5, 20)
-                        messages = [
+                        win_messages = [
                             f"Correct! You earned +{exp_reward} <:EXP:1415642038589984839> and +{coin_reward} <:Coins:1415353285270966403>!",
                             f"Nice work! Rewards: +{exp_reward} <:EXP:1415642038589984839> | +{coin_reward} <:Coins:1415353285270966403>",
-                            f"Correct answer! +{exp_reward} <:EXP:1415642038589984839>, +{coin_reward} <:Coins:1415353285270966403> gained."
+                            f"Correct answer! +{exp_reward} <:EXP:1415642038589984839>, +{coin_reward} <:Coins:1415353285270966403> gained.",
+                            f"Yatta! +{exp_reward} <:EXP:1415642038589984839> EXP and +{coin_reward} <:Coins:1415353285270966403> Coins! Keep it up!",
+                            f"Kyaa~! Rewards incoming! +{exp_reward} <:EXP:1415642038589984839>, +{coin_reward} <:Coins:1415353285270966403>!",
+                            f"Woohoo! Your efforts shine! +{exp_reward} <:EXP:1415642038589984839> | +{coin_reward} <:Coins:1415353285270966403>",
+                            f"Yosh! You’ve done it! +{exp_reward} <:EXP:1415642038589984839> EXP and +{coin_reward} <:Coins:1415353285270966403> Coins!",
+                            f"Otsukaresama! Your hard work paid off: +{exp_reward} <:EXP:1415642038589984839> and +{coin_reward} <:Coins:1415353285270966403>!"
                         ]
                         profile_cog.add_exp(ctx.author.id, ctx.guild.id, exp_reward)
-                        await ctx.send(random.choice(messages))
+                        await ctx.send(random.choice(win_messages))
                     else:
-                        await ctx.send(f"Correct! The answer is **{question['answer']}**.")
+                        await ctx.send(f"✅ Correct! It was **{question['answer']}**!")
                 else:
-                    await ctx.send(f"❌ Wrong! The correct answer is **{question['answer']}**.")
+                    await ctx.send(random.choice(lose_messages))
+
             except asyncio.TimeoutError:
                 select.disabled = True
                 await message.edit(view=view)
                 await ctx.send(f"<:TIME:1415961777912545341> Time's up! The correct answer was `{question['answer']}`.")
 
         await ctx.send(f"🏁 Quiz finished! You scored **{score}/{num_questions}**.")
+
         
     @commands.hybrid_command(name="guesscharacter", description="Guess a random popular anime character")
     @commands.guild_only()
@@ -268,22 +288,35 @@ class Games(commands.Cog):
                     _, current_level = profile_cog.get_user(interaction.user.id, interaction.guild.id)
                     exp_reward = random.randint(5 + current_level * 2, 10 + current_level * 3)
                     coin_reward = random.randint(15, 30)
-                    messages = [
+                    win_messages = [
                         f"Correct! You earned +{exp_reward} <:EXP:1415642038589984839> and +{coin_reward} <:Coins:1415353285270966403>!",
                         f"Nice work! Rewards: +{exp_reward} <:EXP:1415642038589984839> | +{coin_reward} <:Coins:1415353285270966403>",
-                        f"Correct answer! +{exp_reward} <:EXP:1415642038589984839>, +{coin_reward} <:Coins:1415353285270966403> gained."
+                        f"Correct answer! +{exp_reward} <:EXP:1415642038589984839>, +{coin_reward} <:Coins:1415353285270966403> gained.",
+                        f"Yatta! +{exp_reward} <:EXP:1415642038589984839> EXP and +{coin_reward} <:Coins:1415353285270966403> Coins! Keep it up!",
+                        f"Kyaa~! Rewards incoming! +{exp_reward} <:EXP:1415642038589984839>, +{coin_reward} <:Coins:1415353285270966403>!",
+                        f"Woohoo! Your efforts shine! +{exp_reward} <:EXP:1415642038589984839> | +{coin_reward} <:Coins:1415353285270966403>",
+                        f"Yosh! You’ve done it! +{exp_reward} <:EXP:1415642038589984839> EXP and +{coin_reward} <:Coins:1415353285270966403> Coins!",
+                        f"Otsukaresama! Your hard work paid off: +{exp_reward} <:EXP:1415642038589984839> and +{coin_reward} <:Coins:1415353285270966403>!"
                     ]
                     level, new_exp, leveled_up = profile_cog.add_exp(interaction.user.id, interaction.guild.id, exp_reward)
-                    await interaction.response.send_message(random.choice(messages))
+                    await interaction.response.send_message(random.choice(win_messages))
                 else:
                     await interaction.response.send_message(
                         f"Correct! It was **{correct_name}** from **{anime_title}**!\n"
                         f"(No EXP awarded outside servers)"
                     )
             else:
-                await interaction.response.send_message(
-                    f"❌ Wrong! The correct answer was **{correct_name}** from **{anime_title}**."
-                )
+                lose_messages = [
+                    f"❌ Wrong! The correct answer was **{correct_name}** from **{anime_title}**.",
+                    f"<:MinoriDissapointed:1416016691430821958> Oops… {correct_name} from {anime_title} slipped away!",
+                    f"<:MinoriDissapointed:1416016691430821958> Ahh! The answer was {correct_name} from {anime_title}…",
+                    f"<:MinoriConfused:1415707082988060874> Huh?! The correct one was {correct_name} from {anime_title}!",
+                    f"<:MinoriDissapointed:1416016691430821958> Not quite… {correct_name} from {anime_title} got past you!",
+                    f"<:MinoriConfused:1415707082988060874> Eh?! You missed {correct_name} from {anime_title}!",
+                    f"<:MinoriDissapointed:1416016691430821958> Whoops! {correct_name} from {anime_title} was the right one!",
+                    f"<:MinoriConfused:1415707082988060874> Hmm… the answer was {correct_name} from {anime_title}."
+                ]
+                await interaction.response.send_message(random.choice(lose_messages))
 
             for item in view.children:
                 if isinstance(item, discord.ui.Select):
