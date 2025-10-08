@@ -1,6 +1,7 @@
 from discord.ext import commands
 from discord import app_commands, Interaction
 import time
+import traceback
 
 handled_errors = {}
 
@@ -64,6 +65,52 @@ class ErrorHandler(commands.Cog):
                 "❌ An unexpected slash command error occurred.", ephemeral=True
             )
             self.bot.logger.error("Unhandled slash error", exc_info=error)
+            
+    @commands.Cog.listener()
+    async def on_command_error(self, ctx, error):
+        err = getattr(error, "original", error)
+
+        if isinstance(err, commands.CommandOnCooldown):
+            retry = err.retry_after
+            msg = f"<:TIME:1415961777912545341> Please wait for {retry:.1f}s before using that command again."
+
+            interaction = getattr(ctx, "interaction", None)
+            if interaction is not None:
+                try:
+                    if not interaction.response.is_done():
+                        await interaction.response.send_message(msg, ephemeral=True)
+                    else:
+                        await interaction.followup.send(msg, ephemeral=True)
+                    return
+                except Exception:
+                    pass
+
+            try:
+                await ctx.send(msg)
+            except Exception:
+                pass
+            return
+        try:
+            if hasattr(self.bot, "logger"):
+                self.bot.logger.exception(f"Unhandled error in '{ctx.command}': {error}")
+            else:
+                print(f"Unhandled error in '{ctx.command}': {error}")
+                traceback.print_exception(type(error), error, error.__traceback__)
+        except Exception:
+            pass
+
+        try:
+            msg = "❌ An unexpected error occurred while processing that command."
+            interaction = getattr(ctx, "interaction", None)
+            if interaction is not None:
+                if not interaction.response.is_done():
+                    await interaction.response.send_message(msg, ephemeral=True)
+                else:
+                    await interaction.followup.send(msg, ephemeral=True)
+            else:
+                await ctx.send(msg)
+        except Exception:
+            pass
 
 async def setup(bot):
     await bot.add_cog(ErrorHandler(bot))
