@@ -72,7 +72,7 @@ class SubThemeSelect(discord.ui.Select):
         theme_name = self.theme
         font_color = "white"
 
-        self.cog.set_user_theme(self.user_id, theme_name, bg_file, font_color)
+        await self.cog.set_user_theme(self.user_id, theme_name, bg_file, font_color)
 
         for item in self.view.children:
             if isinstance(item, discord.ui.Select):
@@ -82,12 +82,15 @@ class SubThemeSelect(discord.ui.Select):
             title="Your profile card theme has been updated!",
             description=f"Your selection has been saved!\n You have selected `{theme_name} {selected_label}`."
         )
-        embed.set_image(url=f"attachment://profile.png")  # keep the old image in embed
-        await interaction.response.edit_message(embed=embed, view=self.view)
+        embed.set_image(url=f"attachment://profile.png")  
+        try:
+            await interaction.response.edit_message(embed=embed, view=self.view)
+        except discord.errors.InteractionResponded:
+            await interaction.followup.send(embed=embed)
         await interaction.message.edit(content="")
 
         member = interaction.user
-        exp, level = self.cog.get_user(member.id, interaction.guild.id)
+        exp, level = await self.cog.get_user(member.id, interaction.guild.id)
         title_name = get_title(level)
         next_exp = None if level >= self.cog.MAX_LEVEL else 50 * level + 20 * level**2
 
@@ -133,8 +136,12 @@ class Progression(commands.Cog):
         data_path = os.path.join(os.path.dirname(__file__), "..", "data", "minori.db")
         os.makedirs(os.path.dirname(data_path), exist_ok=True)
         data_path = os.path.abspath(data_path)
-        self.conn = sqlite3.connect(data_path)
+        self.conn = sqlite3.connect(data_path, check_same_thread=False, timeout=30)
         self.c = self.conn.cursor()
+        
+        self.conn.execute("PRAGMA journal_mode=WAL;")
+        self.conn.execute("PRAGMA synchronous=NORMAL;")
+        self.db_lock = asyncio.Lock()
         self.c.execute("""
             CREATE TABLE IF NOT EXISTS users (
                 user_id INTEGER,
@@ -164,6 +171,20 @@ class Progression(commands.Cog):
         )
     """)
         self.conn.commit()
+        
+    async def safe_send(self, ctx, *args, **kwargs):
+        interaction = getattr(ctx, "interaction", None)
+        if interaction is not None:
+            try:
+                if not interaction.response.is_done():
+                    return await interaction.response.send_message(*args, **kwargs)
+                return await interaction.followup.send(*args, **kwargs)
+            except discord.errors.NotFound:
+                return await ctx.channel.send(*args, **kwargs)
+            except discord.errors.InteractionResponded:
+                return await interaction.followup.send(*args, **kwargs)
+        else:
+            return await ctx.send(*args, **kwargs)
     
     async def _fetch_avatar_bytes(self, member_or_user, size=128, timeout=3.0):
         try:
@@ -220,94 +241,137 @@ class Progression(commands.Cog):
         return rows_data
 
     async def get_coins(self, user_id: int, guild_id: int) -> int:
-        self.c.execute("SELECT coins FROM user_coins WHERE user_id = ? AND guild_id = ?", (user_id, guild_id))
-        result = self.c.fetchone()
-        if not result:
-            self.c.execute("INSERT INTO user_coins (user_id, guild_id) VALUES (?, ?)", (user_id, guild_id))
-            self.conn.commit()
-            return 0
-        return result[0]
+        async with self.db_lock:
+            self.c.execute("SELECT coins FROM user_coins WHERE user_id = ? AND guild_id = ?", (user_id, guild_id))
+            result = self.c.fetchone()
+            if not result:
+                self.c.execute("INSERT INTO user_coins (user_id, guild_id) VALUES (?, ?)", (user_id, guild_id))
+                self.conn.commit()
+                return 0
+            return result[0]
 
     async def add_coins(self, user_id: int, guild_id: int, amount: int):
-        self.c.execute("""
-            INSERT INTO user_coins (user_id, guild_id, coins) VALUES (?, ?, ?)
-            ON CONFLICT(user_id, guild_id) DO UPDATE SET coins = coins + ?
-        """, (user_id, guild_id, amount, amount))
-        self.conn.commit()
+        async with self.db_lock:
+            self.c.execute("""
+                INSERT INTO user_coins (user_id, guild_id, coins) VALUES (?, ?, ?)
+                ON CONFLICT(user_id, guild_id) DO UPDATE SET coins = coins + ?
+            """, (user_id, guild_id, amount, amount))
+            self.conn.commit()
         
-    async def remove_coins(self, user_id: int, guild_id: int, amount: int) -> bool:
-        coins = await self.get_coins(user_id, guild_id)
-        if coins < amount:
-            return False
-        self.c.execute("UPDATE user_coins SET coins = coins - ? WHERE user_id = ? AND guild_id = ?", (amount, user_id, guild_id))
-        self.conn.commit()
-        return True
-
-    def get_user_theme(self, user_id: int):
-        self.c.execute("SELECT theme_name, bg_file, font_color FROM profile_theme WHERE user_id = ?", (user_id,))
-        result = self.c.fetchone()
-        if not result:
+    async def ensure_user_row(self, user_id: int, guild_id: int):
+        async with self.db_lock:
             self.c.execute(
-                "INSERT INTO profile_theme (user_id) VALUES (?)", (user_id,)
+                "INSERT OR IGNORE INTO user_coins (user_id, guild_id, coins) VALUES (?, ?, 0)",
+                (user_id, guild_id)
             )
             self.conn.commit()
-            return "galaxy", "GALAXY.PNG", "white"
-        return result
 
-    def set_user_theme(self, user_id: int, theme_name: str, bg_file: str, font_color: str = "white"):
-        self.c.execute(
-            "INSERT OR REPLACE INTO profile_theme (user_id, theme_name, bg_file, font_color) VALUES (?, ?, ?, ?)",
-            (user_id, theme_name, bg_file, font_color)
-        )
-        self.conn.commit()
+    async def remove_coins(self, user_id: int, guild_id: int, amount: int) -> bool:
+        if amount <= 0:
+            return False
+        async with self.db_lock:
+            self.c.execute(
+                "INSERT OR IGNORE INTO user_coins (user_id, guild_id, coins) VALUES (?, ?, 0)",
+                (user_id, guild_id)
+            )
+            self.conn.commit()
+
+            self.c.execute(
+                "UPDATE user_coins SET coins = coins - ? WHERE user_id = ? AND guild_id = ? AND coins >= ?",
+                (amount, user_id, guild_id, amount)
+            )
+            self.conn.commit()
+            return self.c.rowcount > 0
+
+    async def reserve_coins(self, user_id: int, guild_id: int, amount: int) -> bool:
+        return await self.remove_coins(user_id, guild_id, amount)
+
+    async def get_user_theme(self, user_id: int):
+        async with self.db_lock:
+            self.c.execute("SELECT theme_name, bg_file, font_color FROM profile_theme WHERE user_id = ?", (user_id,))
+            result = self.c.fetchone()
+            if not result:
+                self.c.execute(
+                    "INSERT INTO profile_theme (user_id) VALUES (?)", (user_id,)
+                )
+                self.conn.commit()
+                return "galaxy", "GALAXY.PNG", "white"
+            return result
+
+    async def set_user_theme(self, user_id: int, theme_name: str, bg_file: str, font_color: str = "white"):
+        async with self.db_lock:
+            self.c.execute(
+                "INSERT OR REPLACE INTO profile_theme (user_id, theme_name, bg_file, font_color) VALUES (?, ?, ?, ?)",
+                (user_id, theme_name, bg_file, font_color)
+            )
+            self.conn.commit()
     
     def truncate(self, text: str, max_len: int):
         return text if len(text) <= max_len else text[:max_len - 3] + "..."
 
-    def get_user(self, user_id: int, guild_id: int):
-        self.c.execute(
-            "SELECT exp, level FROM users WHERE user_id = ? AND guild_id = ?",
-            (user_id, guild_id)
-        )
-        result = self.c.fetchone()
-        if result is None:
+    async def get_user(self, user_id: int, guild_id: int):
+        async with self.db_lock:
             self.c.execute(
-                "INSERT INTO users (user_id, guild_id) VALUES (?, ?)",
+                "SELECT exp, level FROM users WHERE user_id = ? AND guild_id = ?",
                 (user_id, guild_id)
             )
-            self.conn.commit()
-            return 0, 1
-        return result
+            result = self.c.fetchone()
+            if result is None:
+                self.c.execute(
+                    "INSERT INTO users (user_id, guild_id) VALUES (?, ?)",
+                    (user_id, guild_id)
+                )
+                self.conn.commit()
+                return 0, 1
+            return result
 
-    def add_exp(self, user_id: int, guild_id: int, amount: int):
-        exp, level = self.get_user(user_id, guild_id)
-        new_exp = exp + amount
-        leveled_up = False
-
-        while level < self.MAX_LEVEL:
-            next_exp = 50 * level + 20 * level**2
-            if new_exp >= next_exp:
-                new_exp -= next_exp
-                level += 1
-                leveled_up = True
+    async def add_exp(self, user_id: int, guild_id: int, amount: int):
+        async with self.db_lock:
+            self.c.execute(
+                "SELECT exp, level FROM users WHERE user_id = ? AND guild_id = ?",
+                (user_id, guild_id)
+            )
+            row = self.c.fetchone()
+            if row is None:
+                self.c.execute(
+                    "INSERT INTO users (user_id, guild_id, exp, level) VALUES (?, ?, 0, 1)",
+                    (user_id, guild_id)
+                )
+                self.conn.commit()
+                exp = 0
+                level = 1
             else:
-                break
+                exp, level = row
 
-        if level >= self.MAX_LEVEL:
-            level = self.MAX_LEVEL
-            new_exp = 0
+            new_exp = exp + amount
+            leveled_up = False
 
-        self.c.execute(
-            "UPDATE users SET exp = ?, level = ? WHERE user_id = ? AND guild_id = ?",
-            (new_exp, level, user_id, guild_id)
-        )
-        self.conn.commit()
-        return level, new_exp, leveled_up
+            while level < self.MAX_LEVEL:
+                next_exp = 50 * level + 20 * level**2
+                if new_exp >= next_exp:
+                    new_exp -= next_exp
+                    level += 1
+                    leveled_up = True
+                else:
+                    break
+
+            if level >= self.MAX_LEVEL:
+                level = self.MAX_LEVEL
+                new_exp = 0
+
+            self.c.execute(
+                "UPDATE users SET exp = ?, level = ? WHERE user_id = ? AND guild_id = ?",
+                (new_exp, level, user_id, guild_id)
+            )
+            self.conn.commit()
+            return level, new_exp, leveled_up
+
     
     @commands.Cog.listener()
     async def on_guild_remove(self, guild: discord.Guild):
-        self.c.execute("DELETE FROM users WHERE guild_id = ?", (guild.id,))
-        self.conn.commit()
+        async with self.db_lock:
+            self.c.execute("DELETE FROM users WHERE guild_id = ?", (guild.id,))
+            self.conn.commit()
         print(f"[Progression] Cleaned up DB for guild {guild.id} ({guild.name})")
         
     @commands.hybrid_command(name="profile", description="Check your level, EXP, and title")
@@ -319,7 +383,7 @@ class Progression(commands.Cog):
             return
         
         try:
-            exp, level = self.get_user(member.id, ctx.guild.id)
+            exp, level = await self.get_user(member.id, ctx.guild.id)
             title_name = get_title(level)
 
             
@@ -334,9 +398,8 @@ class Progression(commands.Cog):
             buffer_avatar.seek(0)
             avatar_bytes = buffer_avatar.getvalue()
 
-            theme_name, bg_file, font_color = self.get_user_theme(member.id)
-
-            user_rank = get_user_rank(member.id, ctx.guild.id, self.MAX_LEVEL)
+            theme_name, bg_file, font_color = await self.get_user_theme(member.id)
+            user_rank = await self.get_rank (member.id, ctx.guild.id)
             
             img_bytes = await asyncio.to_thread(
                 render_profile_image,
@@ -366,7 +429,27 @@ class Progression(commands.Cog):
                 badge_text = get_title_emoji(level)
 
             content = f"{member.display_name} {badge_text}".strip()
-            await ctx.send(content=content if badge_text else None, file=file)
+            interaction = getattr(ctx, "interaction", None)
+
+            if interaction is not None:
+                try:
+                    if not interaction.response.is_done():
+                        await interaction.response.send_message(content=content if badge_text else None, file=file)
+                    else:
+                        await interaction.followup.send(content=content if badge_text else None, file=file)
+                except discord.errors.NotFound:
+                    try:
+                        await ctx.channel.send(content=content if badge_text else None, file=file)
+                    except Exception as e:
+                        try:
+                            await ctx.author.send("Couldn't send your profile in the server channel. " 
+                                                "Make sure I have permission to send messages and attach files.")
+                        except Exception:
+                            pass
+                except discord.errors.InteractionResponded:
+                    await interaction.followup.send(content=content if badge_text else None, file=file)
+            else:
+                await ctx.send(content=content if badge_text else None, file=file)
 
         except Exception:
             traceback.print_exc()
@@ -382,18 +465,19 @@ class Progression(commands.Cog):
             pass
 
         try:
-            self.c.execute(
-                """
-                SELECT user_id, level, exp
-                FROM users
-                WHERE guild_id = ?
-                AND ((exp > 0 AND level >= 1) OR level = ?)
-                ORDER BY level DESC, exp DESC
-                LIMIT 10
-                """,
-                (ctx.guild.id, self.MAX_LEVEL)
-            )
-            rows = self.c.fetchall()
+            async with self.db_lock:
+                self.c.execute(
+                    """
+                    SELECT user_id, level, exp
+                    FROM users
+                    WHERE guild_id = ?
+                    AND ((exp > 0 AND level >= 1) OR level = ?)
+                    ORDER BY level DESC, exp DESC
+                    LIMIT 10
+                    """,
+                    (ctx.guild.id, self.MAX_LEVEL)
+                )
+                rows = self.c.fetchall()
         except Exception as e:
             print("[leaderboard] DB query failed:", e)
             return await ctx.send("Failed to fetch leaderboard data (check logs).")
@@ -479,8 +563,8 @@ class Progression(commands.Cog):
         if not img_bytes:
             return await ctx.send("Renderer returned no image bytes.")
 
-        user_rank = self.get_rank(ctx.author.id, ctx.guild.id)
-        user_exp, user_level = self.get_user(ctx.author.id, ctx.guild.id)
+        user_rank = await self.get_rank(ctx.author.id, ctx.guild.id)
+        user_exp, user_level = await self.get_user(ctx.author.id, ctx.guild.id)
         user_total_exp_display = f"{user_exp:,}"
 
         top_title = get_title(rows_data[0]["level"]) if rows_data else "Leaderboard"
@@ -492,8 +576,8 @@ class Progression(commands.Cog):
         embed = discord.Embed(
             title=f"{ctx.guild.name}'s Top Rank List <:CHAMPION:1414508304448749568>",
             color=embed_color,
-            description=(f"{exp_emoji_str} **Your Rank**\n"
-                        f"You are rank **#{user_rank}** on this server\n"
+            description=(f"**Your Rank**\n"
+                        f"You are ranked **#{user_rank}** on this server\n"
                         f"with a total of **{user_total_exp_display}** {exp_emoji_str}")
         )
 
@@ -520,7 +604,7 @@ class Progression(commands.Cog):
     @commands.hybrid_command(name="profiletheme", description="Choose your profile card background theme")
     @commands.guild_only()
     async def profiletheme(self, ctx):
-        exp, level = self.get_user(ctx.author.id, ctx.guild.id)
+        exp, level = await self.get_user(ctx.author.id, ctx.guild.id)
         title_name = get_title(level)
         next_exp = 50 * level + 20 * level**2 if level < self.MAX_LEVEL else None
 
@@ -530,7 +614,7 @@ class Progression(commands.Cog):
         buffer_avatar.seek(0)
         avatar_bytes = buffer_avatar.getvalue()
 
-        theme_name, bg_file, font_color = self.get_user_theme(ctx.author.id)
+        theme_name, bg_file, font_color = await self.get_user_theme(ctx.author.id)
 
         img_bytes = await asyncio.to_thread(
             render_profile_image,
@@ -561,9 +645,9 @@ class Progression(commands.Cog):
     @commands.guild_only()
     async def resetprofiletheme(self, ctx):
         try:
-            self.set_user_theme(ctx.author.id, "default", None, "white")
+            await self.set_user_theme(ctx.author.id, "default", None, "white")
 
-            exp, level = self.get_user(ctx.author.id, ctx.guild.id)
+            exp, level = await self.get_user(ctx.author.id, ctx.guild.id)
             title_name = get_title(level)
             next_exp = 50 * level + 20 * level**2 if level < self.MAX_LEVEL else None
             avatar_asset = ctx.author.display_avatar.with_size(128)
@@ -589,7 +673,7 @@ class Progression(commands.Cog):
             file = discord.File(io.BytesIO(img_bytes), filename="profile.png")
             embed = discord.Embed(
                 title="Profile Theme Reset",
-                description="✅ Your profile card theme has been reset to default."
+                description="Your profile card theme has been reset to default."
             )
             embed.set_image(url="attachment://profile.png")
 
@@ -614,17 +698,17 @@ class Progression(commands.Cog):
             return
         self.cooldowns[(guild_id, user_id)] = now
 
-        old_rank = self.get_rank(user_id, guild_id)
+        old_rank = await self.get_rank(user_id, guild_id)
 
-        exp, level = self.get_user(user_id, guild_id)
+        exp, level = await self.get_user(user_id, guild_id)
         
         old_level = level
         old_title = get_title(old_level)
         
         exp_gain = random.randint(5 + level * 8, 10 + level * 12)
-        level, new_exp, leveled_up = self.add_exp(user_id, guild_id, exp_gain)
+        level, new_exp, leveled_up = await self.add_exp(user_id, guild_id, exp_gain)
 
-        new_rank = self.get_rank(user_id, guild_id)
+        new_rank = await self.get_rank(user_id, guild_id)
         new_title = get_title(level)
 
         if leveled_up:
@@ -670,19 +754,20 @@ class Progression(commands.Cog):
             embed.set_thumbnail(url=message.author.display_avatar.url)
             await message.channel.send(embed=embed)
         
-    def get_rank(self, user_id: int, guild_id: int):
-        self.c.execute(
-            "SELECT COUNT(*)+1 FROM users WHERE guild_id = ? AND (level > (SELECT level FROM users WHERE user_id = ? AND guild_id = ?) OR (level = (SELECT level FROM users WHERE user_id = ? AND guild_id = ?) AND exp > (SELECT exp FROM users WHERE user_id = ? AND guild_id = ?)))",
-            (guild_id, user_id, guild_id, user_id, guild_id, user_id, guild_id)
-        )
-        return self.c.fetchone()[0]
+    async def get_rank(self, user_id: int, guild_id: int):
+        async with self.db_lock:
+            self.c.execute(
+                "SELECT COUNT(*)+1 FROM users WHERE guild_id = ? AND (level > (SELECT level FROM users WHERE user_id = ? AND guild_id = ?) OR (level = (SELECT level FROM users WHERE user_id = ? AND guild_id = ?) AND exp > (SELECT exp FROM users WHERE user_id = ? AND guild_id = ?)))",
+                (guild_id, user_id, guild_id, user_id, guild_id, user_id, guild_id)
+            )
+            return self.c.fetchone()[0]
     
     # @commands.Cog.listener()
     # async def on_ready(self):
     #     print(f"{self.bot.user} is ready!")
 
     #     YOUR_ID = [
-    #         955268891125375036,
+    #         955268891125375036
     #     ] 
 
     #     GUILD_ID = 974498807817588756 
@@ -692,11 +777,12 @@ class Progression(commands.Cog):
     #         print("Progression cog not loaded!")
     #         return
 
+    #     rand_exp = random.randint(0, 0)
     #     for user_id in YOUR_ID:
-    #         level, exp, leveled_up = self.add_exp(user_id, GUILD_ID, 99999999999999999)
+    #         level, exp, leveled_up = await self.add_exp(user_id, GUILD_ID, rand_exp)
     #         print(f"User {user_id} → Level {level}, EXP {exp}, Leveled up? {leveled_up}")
 
-    #         await progression.add_coins(user_id, GUILD_ID, 0)
+    #         await progression.add_coins(user_id, GUILD_ID, 12450)
     #         coins = await progression.get_coins(user_id, GUILD_ID)
     #         print(f"User {user_id} → Coins: {coins}")
 
@@ -707,6 +793,7 @@ class Progression(commands.Cog):
 async def setup(bot):
     await bot.add_cog(Progression(bot))
     print("📦 Loaded progression cog.")
+
 
 
 
