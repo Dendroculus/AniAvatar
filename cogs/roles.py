@@ -19,28 +19,22 @@ class Roles(commands.Cog):
         self._locks: Dict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
         self.SYNC_INTERVAL_MINUTES = 2
         self.MAX_PER_GUILD = 30
-        self.SLEEP_BETWEEN_OPS = 0.06
+        self.SLEEP_BETWEEN_OPS = 0.25
+
         self.sync_roles_loop.change_interval(minutes=self.SYNC_INTERVAL_MINUTES)
         self.sync_roles_loop.start()
 
     async def cog_unload(self):
         self.sync_roles_loop.cancel()
 
-    # --- helpers ---------------------------------------------------------
 
     async def _find_role_by_name(self, guild: discord.Guild, title: str) -> Optional[discord.Role]:
-        """Case-insensitive and whitespace-stripped lookup for existing roles."""
         if not title:
             return None
         title_norm = title.strip().lower()
         return discord.utils.find(lambda r: r.name and r.name.strip().lower() == title_norm, guild.roles)
 
     async def _get_or_create_role(self, guild: discord.Guild, title: str) -> Optional[discord.Role]:
-        """
-        Return the single role for a title.
-        - If multiple exist, keep one (lowest ID) and delete extras.
-        - If none exist, create it.
-        """
         title_norm = title.strip().lower()
         matches = [r for r in guild.roles if r.name and r.name.strip().lower() == title_norm]
 
@@ -52,17 +46,16 @@ class Roles(commands.Cog):
                 try:
                     if not r.managed and guild.me and guild.me.guild_permissions.manage_roles:
                         await r.delete(reason=f"Duplicate title role '{title}' removed by AniAvatar")
-                        print(f"[Roles] Deleted duplicate role {r} in guild {guild.id}")
+                        print(f"[Roles] Deleted duplicate role {r.name} in guild {guild.id}")
                 except discord.Forbidden:
-                    print(f"[Roles] Cannot delete role {r} in guild {guild.id} (missing perms)")
+                    print(f"[Roles] Cannot delete role {r.name} in guild {guild.id} (missing perms)")
                 except Exception as e:
-                    print(f"[Roles] Error deleting role {r} in guild {guild.id}: {e}")
+                    print(f"[Roles] Error deleting role {getattr(r,'name',r)} in guild {guild.id}: {e}")
 
             if keep.managed:
                 return None
             return keep
 
-        # No matches → create new
         bot_member = guild.me
         if not bot_member or not bot_member.guild_permissions.manage_roles:
             print(f"[Roles] Missing Manage Roles, cannot create role '{title}' in guild {guild.id}")
@@ -85,11 +78,6 @@ class Roles(commands.Cog):
         return None
 
     async def _ensure_titles_exist(self, guild: discord.Guild) -> List[discord.Role]:
-        """
-        Ensure that all roles from TITLE_ORDER exist (best-effort).
-        Returns the list of roles that exist / were created, in the same order as TITLE_ORDER.
-        Skips managed roles and roles that couldn't be created.
-        """
         roles: List[discord.Role] = []
         for title in TITLE_ORDER:
             r = await self._get_or_create_role(guild, title)
@@ -106,10 +94,6 @@ class Roles(commands.Cog):
         return roles
 
     async def _sync_role_hierarchy(self, guild: discord.Guild, roles: List[discord.Role]):
-        """
-        Best-effort ordering of the title roles according to TITLE_ORDER.
-        Places the group directly below the bot's top role (bot cannot move roles above itself).
-        """
         if not roles:
             return
 
@@ -124,7 +108,6 @@ class Roles(commands.Cog):
 
         positions = {}
         for idx, role in enumerate(roles):
-            # skip roles above bot's top role (can't move them anyway)
             if role.position >= bot_top_pos:
                 continue
 
@@ -136,7 +119,7 @@ class Roles(commands.Cog):
                 positions[role] = desired_pos
 
         if not positions:
-            return  
+            return
 
         try:
             await guild.edit_role_positions(positions=positions)
@@ -151,12 +134,25 @@ class Roles(commands.Cog):
         if member.bot:
             return
         try:
+            try:
+                member = await member.guild.fetch_member(member.id)
+            except Exception:
+                pass
+
             guild = member.guild
             title = get_title(level)
 
             role = await self._get_or_create_role(guild, title)
             if role is None:
                 return
+
+            bot_member = guild.me or await guild.fetch_member(self.bot.user.id)
+            try:
+                if bot_member.top_role.position <= role.position:
+                    print(f"[Roles] Cannot manage role '{role.name}' in guild {guild.id}: role is at or above bot's top role.")
+                    return
+            except Exception:
+                pass
 
             try:
                 if guild.me and guild.me.guild_permissions.manage_roles:
@@ -203,17 +199,54 @@ class Roles(commands.Cog):
 
                 processed = 0
                 for member in guild.members:
-                    if member.bot:
-                        continue
-                    if processed >= self.MAX_PER_GUILD:
-                        break
                     try:
-                        exp, level = progression.get_user(member.id, guild.id)
-                        await self.update_roles(member, level)
+                        if member.bot:
+                            processed += 1
+                            await asyncio.sleep(self.SLEEP_BETWEEN_OPS)
+                            continue
+                        if processed >= self.MAX_PER_GUILD:
+                            break
+
+                        exp, level = await progression.get_user(member.id, guild.id)
+                        desired_title = get_title(level).strip().lower()
+
+                        desired_role = discord.utils.find(
+                            lambda r: r.name and r.name.strip().lower() == desired_title,
+                            guild.roles
+                        )
+
+                        member_title_names = {r.name.strip().lower() for r in member.roles if r.name}
+                        other_title_names = {t.lower() for t in TITLE_ORDER} - {desired_title}
+                        has_other_titles = any(n in other_title_names for n in member_title_names)
+                        already_ok = (desired_role is not None and desired_role in member.roles and not has_other_titles)
+
+                        if already_ok:
+                            processed += 1
+                            await asyncio.sleep(self.SLEEP_BETWEEN_OPS)
+                            continue
+
+                        try:
+                            fresh_member = await guild.fetch_member(member.id)
+                        except discord.NotFound:
+                            processed += 1
+                            await asyncio.sleep(self.SLEEP_BETWEEN_OPS)
+                            continue
+
+                        try:
+                            await self.update_roles(fresh_member, level)
+                        except discord.Forbidden:
+                            print(f"[Roles] Missing perms to update roles for {member.id} in guild {guild.id}")
+                        except discord.HTTPException as he:
+                            print(f"[Roles] HTTP error updating roles for {member.id} in guild {guild.id}: {he}")
+                        except Exception as e:
+                            print(f"[Roles] Error updating roles for {member.id} in guild {guild.id}: {e}")
+
                         processed += 1
                         await asyncio.sleep(self.SLEEP_BETWEEN_OPS)
                     except Exception as e:
                         print(f"[Roles] Skipping member {member.id} in guild {guild.id}: {e}")
+                        processed += 1
+                        await asyncio.sleep(self.SLEEP_BETWEEN_OPS)
             except Exception as e:
                 print(f"[Roles] Error during guild sync {guild.id}: {e}")
 
@@ -227,44 +260,44 @@ class Roles(commands.Cog):
     @commands.Cog.listener()
     async def on_ready(self):
         print("[Roles] Syncing progression roles on startup...")
-        progression = self.bot.get_cog("Progression")
-        if not progression:
-            print("[Roles] Progression cog not found.")
-            return
-
-        for guild in self.bot.guilds:
-            try:
+        try:
+            for guild in self.bot.guilds:
                 roles = await self._ensure_titles_exist(guild)
                 await self._sync_role_hierarchy(guild, roles)
-
-                for member in guild.members:
-                    if member.bot:
-                        continue
-                    try:
-                        exp, level = progression.get_user(member.id, guild.id)
-                        await self.update_roles(member, level)
-                    except Exception as e:
-                        print(f"[Roles] Skipping member {member.id} in guild {guild.id}: {e}")
-            except Exception as e:
-                print(f"[Roles] Error during on_ready sync for guild {guild.id}: {e}")
+            print("[Roles] Startup role setup complete. Periodic sync will handle members.")
+        except Exception as e:
+            print(f"[Roles] Error during startup sync: {e}")
 
         print("[Roles] Startup role sync complete.")
 
     @commands.Cog.listener()
     async def on_member_update(self, before: discord.Member, after: discord.Member):
-        if before.roles != after.roles:
-            progression = self.bot.get_cog("Progression")
-            if not progression:
-                return
-            try:
-                exp, level = progression.get_user(after.id, after.guild.id)
-                await self.update_roles(after, level)
-            except Exception as e:
-                print(f"[Roles] Failed to update roles for {after.id}: {e}")
+        progression = self.bot.get_cog("Progression")
+        if not progression or after.bot:
+            return
 
+        before_role_ids = {r.id for r in before.roles}
+        after_role_ids = {r.id for r in after.roles}
+
+        if before_role_ids == after_role_ids:
+            return  
+
+        title_names = {t.lower() for t in TITLE_ORDER}
+        added_roles = [r for r in after.roles if r.id not in before_role_ids and r.name and r.name.strip().lower() in title_names]
+        removed_roles = [r for r in before.roles if r.id not in after_role_ids and r.name and r.name.strip().lower() in title_names]
+
+        if not added_roles and not removed_roles:
+            return  
+
+        print(f"[Roles] Member {after.id} role change detected. Added: {[r.name for r in added_roles]}, Removed: {[r.name for r in removed_roles]}")
+
+        try:
+            exp, level = await progression.get_user(after.id, after.guild.id)
+            await self.update_roles(after, level)
+            print(f"[Roles] Synced roles for {after.display_name} after manual role edit.")
+        except Exception as e:
+            print(f"[Roles] Failed to resync roles for {after.id}: {e}")
 
 async def setup(bot):
     await bot.add_cog(Roles(bot))
     print("📦 Loaded roles cog.")
-
-
