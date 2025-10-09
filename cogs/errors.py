@@ -1,6 +1,7 @@
 from discord.ext import commands
 from discord import app_commands, Interaction
 import time
+import aiohttp
 import traceback
 
 handled_errors = {}
@@ -73,7 +74,6 @@ class ErrorHandler(commands.Cog):
         if isinstance(err, commands.CommandOnCooldown):
             retry = err.retry_after
             msg = f"<:TIME:1415961777912545341> Please wait for {retry:.1f}s before using that command again."
-
             interaction = getattr(ctx, "interaction", None)
             if interaction is not None:
                 try:
@@ -90,6 +90,18 @@ class ErrorHandler(commands.Cog):
             except Exception:
                 pass
             return
+
+        if isinstance(err, (aiohttp.ClientOSError, aiohttp.ServerDisconnectedError, aiohttp.ClientPayloadError)):
+            try:
+                await ctx.send("⚠️ Network hiccup — couldn’t complete your request. Try again in a moment.")
+            except Exception:
+                pass
+            if hasattr(self.bot, "logger"):
+                self.bot.logger.warning(f"Network-related error in '{ctx.command}': {err}")
+            else:
+                print(f"Network-related error in '{ctx.command}': {err}")
+            return
+
         try:
             if hasattr(self.bot, "logger"):
                 self.bot.logger.exception(f"Unhandled error in '{ctx.command}': {error}")
@@ -115,3 +127,7 @@ class ErrorHandler(commands.Cog):
 async def setup(bot):
     await bot.add_cog(ErrorHandler(bot))
     print("📦 Loaded error handler cog.")
+
+
+
+   
