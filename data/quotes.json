@@ -1,18 +1,442 @@
 {
-  "Naruto": [
-    {
-      "character": "Naruto Uzumaki",
-      "quote": "Hard work is worthless for those that don’t believe in themselves."
-    },
-    {
-      "character": "Kakashi Hatake",
-      "quote": "In society, those who don’t have many abilities, tend to complain more."
-    }
-  ],
-  "One Piece": [
-    {
-      "character": "Monkey D. Luffy",
-      "quote": "If you don’t take risks, you can’t create a future."
-    }
-  ]
+"Naruto": [
+{
+"character": "Naruto Uzumaki",
+"quote": "I'm not gonna run away, I never go back on my word. That's my ninja way!"
+},
+{
+"character": "Naruto Uzumaki",
+"quote": "Hard work is worthless for those that don’t believe in themselves."
+},
+{
+"character": "Kakashi Hatake",
+"quote": "Those who break the rules are scum, but those who abandon their friends are worse than scum."
+},
+{
+"character": "Jiraiya",
+"quote": "A person who can't acknowledge themselves will never be able to acknowledge others."
+},
+{
+"character": "Itachi Uchiha",
+"quote": "People live their lives bound by what they accept as true and real."
+}
+],
+"One Piece": [
+{
+"character": "Monkey D. Luffy",
+"quote": "If you don’t take risks, you can’t create a future."
+},
+{
+"character": "Monkey D. Luffy",
+"quote": "I'm gonna be King of the Pirates!"
+},
+{
+"character": "Roronoa Zoro",
+"quote": "When the world shoves you around, you just gotta stand up and shove back."
+},
+{
+"character": "Dr. Hiriluk",
+"quote": "When do you think people die? When they are forgotten."
+},
+{
+"character": "Nami",
+"quote": "I want to live — that's my map."
+}
+],
+"Fullmetal Alchemist: Brotherhood": [
+{
+"character": "Edward Elric",
+"quote": "A lesson without pain is meaningless."
+},
+{
+"character": "Alphonse Elric",
+"quote": "Humankind cannot gain anything without first giving something in return."
+},
+{
+"character": "Roy Mustang",
+"quote": "No matter how deep the night, it always turns to day, eventually."
+},
+{
+"character": "Winry Rockbell",
+"quote": "Fix what's broken and keep going."
+},
+{
+"character": "Maes Hughes",
+"quote": "Cherish the people you have, always."
+}
+],
+"Death Note": [
+{
+"character": "L",
+"quote": "Sometimes the questions are complicated and the answers are simple."
+},
+{
+"character": "Light Yagami",
+"quote": "I am justice."
+},
+{
+"character": "Ryuk",
+"quote": "I like apples."
+},
+{
+"character": "Misa Amane",
+"quote": "I'll do anything for the people I care about."
+},
+{
+"character": "Near",
+"quote": "Everything will be solved logically."
+}
+],
+"Attack on Titan": [
+{
+"character": "Eren Yeager",
+"quote": "If you win, you live. If you lose, you die. If you don't fight, you can't win!"
+},
+{
+"character": "Mikasa Ackerman",
+"quote": "I'll put my life on the line to protect those I love."
+},
+{
+"character": "Armin Arlert",
+"quote": "The world is merciless, but it's also kind."
+},
+{
+"character": "Levi Ackerman",
+"quote": "No regrets."
+},
+{
+"character": "Erwin Smith",
+"quote": "The only thing we're allowed to do is believe."
+}
+],
+"My Hero Academia": [
+{
+"character": "Izuku Midoriya",
+"quote": "I have to work harder than anyone else to catch up."
+},
+{
+"character": "All Might",
+"quote": "I am here!"
+},
+{
+"character": "Katsuki Bakugo",
+"quote": "I'll become the number one hero."
+},
+{
+"character": "Shoto Todoroki",
+"quote": "I'll carve my own path."
+},
+{
+"character": "Ochaco Uraraka",
+"quote": "I want to help people with a smile."
+}
+],
+"Hunter x Hunter": [
+{
+"character": "Gon Freecss",
+"quote": "I will find my own way and keep moving forward."
+},
+{
+"character": "Killua Zoldyck",
+"quote": "When I say it doesn't hurt me, that means I can bear it."
+},
+{
+"character": "Kurapika",
+"quote": "Vengeance is a heavy chain; be careful how you wield it."
+},
+{
+"character": "Leorio",
+"quote": "I'll be a doctor who helps people. That's my promise."
+},
+{
+"character": "Hisoka",
+"quote": "A fight is only interesting when both sides want to win."
+}
+],
+"Cowboy Bebop": [
+{
+"character": "Spike Spiegel",
+"quote": "Whatever happens, happens."
+},
+{
+"character": "Jet Black",
+"quote": "We all carry our pasts; it's how we steer that matters."
+},
+{
+"character": "Faye Valentine",
+"quote": "I survive by my wits—and a little luck."
+},
+{
+"character": "Edward",
+"quote": "I see the world my way."
+},
+{
+"character": "Vicious",
+"quote": "Power makes its own rules."
+}
+],
+"Steins;Gate": [
+{
+"character": "Rintarou Okabe",
+"quote": "El Psy Kongroo."
+},
+{
+"character": "Kurisu Makise",
+"quote": "Science isn't about giving up; it's about trying again."
+},
+{
+"character": "Mayuri Shiina",
+"quote": "Tuturu~"
+},
+{
+"character": "Suzuha Amane",
+"quote": "I came back for a reason."
+},
+{
+"character": "Ruka Urushibara",
+"quote": "Being yourself matters more than fitting in."
+}
+],
+"Demon Slayer": [
+{
+"character": "Tanjiro Kamado",
+"quote": "No matter how many people you lose, you must keep walking forward."
+},
+{
+"character": "Nezuko Kamado",
+"quote": "Protecting others is my strength."
+},
+{
+"character": "Zenitsu Agatsuma",
+"quote": "I won't run away anymore."
+},
+{
+"character": "Inosuke Hashibira",
+"quote": "I fight with everything I have."
+},
+{
+"character": "Giyu Tomioka",
+"quote": "Stay true to your path."
+}
+],
+"Neon Genesis Evangelion": [
+{
+"character": "Shinji Ikari",
+"quote": "I mustn't run away."
+},
+{
+"character": "Rei Ayanami",
+"quote": "I exist to do what I am told."
+},
+{
+"character": "Misato Katsuragi",
+"quote": "Get in the damn robot!"
+},
+{
+"character": "Asuka Langley",
+"quote": "I am not the type to give up."
+},
+{
+"character": "Gendo Ikari",
+"quote": "I'll take whatever measures are necessary."
+}
+],
+"Code Geass": [
+{
+"character": "Lelouch vi Britannia",
+"quote": "If the king doesn't lead, who will?"
+},
+{
+"character": "C.C.",
+"quote": "I grant you a power you cannot refuse."
+},
+{
+"character": "Suzaku Kururugi",
+"quote": "I'll change things from the inside."
+},
+{
+"character": "Kallen Stadtfeld",
+"quote": "I fight for what I believe in."
+},
+{
+"character": "Cornelia li Britannia",
+"quote": "Obey me, and I will protect you."
+}
+],
+"Haikyuu!!": [
+{
+"character": "Shouyou Hinata",
+"quote": "I'll jump higher than anyone!"
+},
+{
+"character": "Tobio Kageyama",
+"quote": "Precision wins matches."
+},
+{
+"character": "Daichi Sawamura",
+"quote": "We play together, we win together."
+},
+{
+"character": "Koshi Sugawara",
+"quote": "Support matters as much as skill."
+},
+{
+"character": "Kei Tsukishima",
+"quote": "I'll do my job, no excuses."
+}
+],
+"Bleach": [
+{
+"character": "Ichigo Kurosaki",
+"quote": "If I must fight to protect them, I will."
+},
+{
+"character": "Rukia Kuchiki",
+"quote": "You have strength inside you."
+},
+{
+"character": "Byakuya Kuchiki",
+"quote": "Maintain your dignity and stand firm."
+},
+{
+"character": "Renji Abarai",
+"quote": "I'll surpass you one day."
+},
+{
+"character": "Sosuke Aizen",
+"quote": "Perception shapes reality."
+}
+],
+"Fairy Tail": [
+{
+"character": "Natsu Dragneel",
+"quote": "I'll never abandon my friends."
+},
+{
+"character": "Lucy Heartfilia",
+"quote": "I will write our story."
+},
+{
+"character": "Erza Scarlet",
+"quote": "Strength protects those who cannot protect themselves."
+},
+{
+"character": "Gray Fullbuster",
+"quote": "I fight for my family—my guild."
+},
+{
+"character": "Happy",
+"quote": "Aye, sir!"
+}
+],
+"Tokyo Ghoul": [
+{
+"character": "Ken Kaneki",
+"quote": "I won't run from who I am."
+},
+{
+"character": "Touka Kirishima",
+"quote": "We survive by protecting what matters."
+},
+{
+"character": "Yoshimura",
+"quote": "There's more to being human than the body."
+},
+{
+"character": "Hinami Fueguchi",
+"quote": "Family is worth fighting for."
+},
+{
+"character": "Uta",
+"quote": "Masks hide truths, but also give faces."
+}
+],
+"Mob Psycho 100": [
+{
+"character": "Shigeo 'Mob' Kageyama",
+"quote": "I don't want to hurt people."
+},
+{
+"character": "Arataka Reigen",
+"quote": "Fake it till you make it."
+},
+{
+"character": "Dimple",
+"quote": "Power takes many forms."
+},
+{
+"character": "Teruki Hanazawa",
+"quote": "True strength comes with responsibility."
+},
+{
+"character": "Tsubomi",
+"quote": "Just be yourself."
+}
+],
+"Gintama": [
+{
+"character": "Gintoki Sakata",
+"quote": "Do it my way and take the hits."
+},
+{
+"character": "Shinpachi Shimura",
+"quote": "I'll support you no matter what."
+},
+{
+"character": "Kagura",
+"quote": "I love sweets—and my friends."
+},
+{
+"character": "Takasugi Shinsuke",
+"quote": "Revenge can consume a man."
+},
+{
+"character": "Katsura Kotarou",
+"quote": "Keep fighting for the future."
+}
+],
+"Dragon Ball Z": [
+{
+"character": "Goku",
+"quote": "I will become stronger and protect my friends."
+},
+{
+"character": "Vegeta",
+"quote": "I will surpass Kakarot."
+},
+{
+"character": "Piccolo",
+"quote": "Protecting others is my duty."
+},
+{
+"character": "Gohan",
+"quote": "I will fight for those I love."
+},
+{
+"character": "Frieza",
+"quote": "Power decides everything."
+}
+],
+"JoJo's Bizarre Adventure": [
+{
+"character": "Jotaro Kujo",
+"quote": "Yare yare daze."
+},
+{
+"character": "Joseph Joestar",
+"quote": "Your next line is..."
+},
+{
+"character": "Dio Brando",
+"quote": "WRYYYY!"
+},
+{
+"character": "Josuke Higashikata",
+"quote": "Good grief!"
+},
+{
+"character": "Kakyoin Noriaki",
+"quote": "Stand proud and fight."
+}
+]
 }
