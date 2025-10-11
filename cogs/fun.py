@@ -439,9 +439,29 @@ class Fun(commands.Cog):
                         view.message = last
             except Exception:
                 view.message = None
+                
+    @commands.hybrid_command(name="animequotes", description="Give a random anime quote")
+    async def animequotes(self, ctx: commands.Context):
+        async with self.lock:
+            result = self.get_balanced_quotes(1)
+            if not result:
+                return await ctx.send("❌ No quotes available.")
+            q = result[0]
 
+        quote_text = q.get("quote", "")[:1900]  
+        character = q.get("character", "Unknown")
+        anime = q.get("anime", "Unknown")
+
+        embed = discord.Embed(
+            title=f"{anime}",
+            description=f"*“{quote_text}”*",
+            color=discord.Color.blue() 
+        )
+        embed.set_footer(text=f"~ {character}")
+        await ctx.send(embed=embed)
 
 
 async def setup(bot):
     await bot.add_cog(Fun(bot))
     print("📦 Loaded fun cog.")
+
