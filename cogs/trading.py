@@ -90,36 +90,38 @@ class InventorySelect(discord.ui.Select):
             selected_item = self.values[0]
             await interaction.response.defer()
             conn = self.cog.progression_cog.conn
-            
-            async with conn.execute("SELECT price, emoji FROM shop_items WHERE name = ?", (selected_item,)) as cur:
-                row = await cur.fetchone()
-            selected_emoji = row[1] if row and row[1] else "📦"
+            lock = self.cog.progression_cog.db_lock
 
-            async with conn.execute(
-                "SELECT quantity FROM user_inventory WHERE user_id = ? AND guild_id = ? AND item_name = ?",
-                (self.user_id, self.guild_id, selected_item)
-            ) as cur:
-                row = await cur.fetchone()
-            if not row or row[0] <= 0:
-                await interaction.followup.send("❌ You don't own this item anymore.", ephemeral=True)
-                return
-
-            if selected_item in ["Small EXP Potion", "Medium EXP Potion", "Large EXP Potion", "Level Skip Token"]:
-                async with conn.execute("SELECT level FROM users WHERE user_id = ? AND guild_id = ?", (self.user_id, self.guild_id)) as cur:
+            async with lock:
+                async with conn.execute("SELECT price, emoji FROM shop_items WHERE name = ?", (selected_item,)) as cur:
                     row = await cur.fetchone()
-                if row and row[0] >= self.cog.progression_cog.MAX_LEVEL:
-                    await interaction.followup.send("<:MinoriWink:1414899695209418762> You’ve already reached the max level! You can’t use <:EXP:1415642038589984839> items anymore.", ephemeral=True)
+                selected_emoji = row[1] if row and row[1] else "📦"
+
+                async with conn.execute(
+                    "SELECT quantity FROM user_inventory WHERE user_id = ? AND guild_id = ? AND item_name = ?",
+                    (self.user_id, self.guild_id, selected_item)
+                ) as cur:
+                    row = await cur.fetchone()
+                if not row or row[0] <= 0:
+                    await interaction.followup.send("❌ You don't own this item anymore.", ephemeral=True)
                     return
 
-            await conn.execute(
-                "UPDATE user_inventory SET quantity = quantity - 1 WHERE user_id = ? AND guild_id = ? AND item_name = ?",
-                (self.user_id, self.guild_id, selected_item)
-            )
-            await conn.execute(
-                "DELETE FROM user_inventory WHERE user_id = ? AND guild_id = ? AND item_name = ? AND quantity <= 0",
-                (self.user_id, self.guild_id, selected_item)
-            )
-            await conn.commit()
+                if selected_item in ["Small EXP Potion", "Medium EXP Potion", "Large EXP Potion", "Level Skip Token"]:
+                    async with conn.execute("SELECT level FROM users WHERE user_id = ? AND guild_id = ?", (self.user_id, self.guild_id)) as cur:
+                        row_lvl = await cur.fetchone()
+                    if row_lvl and row_lvl[0] >= self.cog.progression_cog.MAX_LEVEL:
+                        await interaction.followup.send("<:MinoriWink:1414899695209418762> You’ve already reached the max level! You can’t use <:EXP:1415642038589984839> items anymore.", ephemeral=True)
+                        return
+
+                await conn.execute(
+                    "UPDATE user_inventory SET quantity = quantity - 1 WHERE user_id = ? AND guild_id = ? AND item_name = ?",
+                    (self.user_id, self.guild_id, selected_item)
+                )
+                await conn.execute(
+                    "DELETE FROM user_inventory WHERE user_id = ? AND guild_id = ? AND item_name = ? AND quantity <= 0",
+                    (self.user_id, self.guild_id, selected_item)
+                )
+                await conn.commit()
 
             feedback_msg = f"You used {selected_emoji} **{selected_item}**!"
 
@@ -135,25 +137,29 @@ class InventorySelect(discord.ui.Select):
                 rewards = await self.cog.apply_mystery_box(self.user_id, self.guild_id)
                 if rewards:
                     reward_lines = []
-                    async with conn.execute("SELECT name, emoji FROM shop_items") as cur:
-                        emap = {name: emoji for name, emoji in await cur.fetchall()}
+                    lock = self.cog.progression_cog.db_lock
+                    async with lock:
+                        async with conn.execute("SELECT name, emoji FROM shop_items") as cur:
+                            emap = {name: emoji for name, emoji in await cur.fetchall()}
                     for item, qty in rewards:
                         emoji = emap.get(item, "📦")
                         reward_lines.append(f"{qty}x {emoji} {item}")
                     feedback_msg = "<:MysteryBox:1415707555325415485> You opened a Mystery Box and got:\n" + "\n".join(reward_lines)
 
-            async with conn.execute("SELECT item_name, quantity FROM user_inventory WHERE user_id = ? AND guild_id = ?",
-                    (self.user_id, self.guild_id)) as cur:
-                raw_items = await cur.fetchall()
+            lock = self.cog.progression_cog.db_lock
+            async with lock:
+                async with conn.execute("SELECT item_name, quantity FROM user_inventory WHERE user_id = ? AND guild_id = ?",
+                                        (self.user_id, self.guild_id)) as cur:
+                    raw_items = await cur.fetchall()
 
-            items = []
-            for name, qty in raw_items:
-                if qty <= 0:
-                    continue
-                async with conn.execute("SELECT emoji FROM shop_items WHERE name = ?", (name,)) as cur:
-                    erow = await cur.fetchone()
-                emoji = erow[0] if erow else "📦"
-                items.append((name, qty, emoji))
+                items = []
+                for name, qty in raw_items:
+                    if qty <= 0:
+                        continue
+                    async with conn.execute("SELECT emoji FROM shop_items WHERE name = ?", (name,)) as cur:
+                        erow = await cur.fetchone()
+                    emoji = erow[0] if erow else "📦"
+                    items.append((name, qty, emoji))
 
             if not items:
                 await interaction.edit_original_response(embed=None, view=None, content="📭 Your inventory is now empty.")
@@ -253,13 +259,19 @@ class ShopSelect(discord.ui.Select):
             await interaction.response.send_message("❌ You don't have enough coins.", ephemeral=True)
             return
 
-        await self.progression_cog.remove_coins(self.user_id, self.guild_id, price)
-        await conn.execute("""
-            INSERT INTO user_inventory (user_id, guild_id, item_name, quantity)
-            VALUES (?, ?, ?, 1)
-            ON CONFLICT(user_id, guild_id, item_name) DO UPDATE SET quantity = quantity + 1
-        """, (self.user_id, self.guild_id, selected_item))
-        await conn.commit()
+        ok = await self.progression_cog.remove_coins(self.user_id, self.guild_id, price)
+        if not ok:
+            await interaction.response.send_message("❌ You don't have enough coins.", ephemeral=True)
+            return
+
+        lock = self.progression_cog.db_lock
+        async with lock:
+            await conn.execute("""
+                INSERT INTO user_inventory (user_id, guild_id, item_name, quantity)
+                VALUES (?, ?, ?, 1)
+                ON CONFLICT(user_id, guild_id, item_name) DO UPDATE SET quantity = quantity + 1
+            """, (self.user_id, self.guild_id, selected_item))
+            await conn.commit()
 
         new_balance = await self.progression_cog.get_coins(self.user_id, self.guild_id)
         async with conn.execute("SELECT price, emoji FROM shop_items WHERE name = ?", (selected_item,)) as cur:
@@ -432,85 +444,51 @@ class Trading(commands.Cog):
 
         extra_msg = ""
         if leveled_up and channel:
-            guild = self.progression_cog.bot.get_guild(guild_id)
-            if guild:
-                member = guild.get_member(user_id)
-                if member:
-                    old_title = get_title(old_level)
-                    new_title = get_title(new_level)
-                    old_emoji = get_title_emoji(old_level)
-                    new_emoji = get_title_emoji(new_level)
-
-                    if new_title != old_title:
-                        embed_title = f"{member.display_name} <:LEVELUP:1413479714428948551> {new_level}    {old_emoji} <:RIGHTWARDARROW:1414227272302334062> {new_emoji}"
-                        embed_description = (
-                            f"```Congratulations {member.display_name}! You have reached level {new_level} and ascended to {new_title}. ```\n"
-                            f"Title: `{new_title}` {new_emoji}"
-                        )
-                    else:
-                        embed_title = f"{member.display_name} <:LEVELUP:1413479714428948551> {new_level}"
-                        embed_description = (
-                            f"```Congratulations {member.display_name}! You have reached level {new_level}.``` \n"
-                            f"Title: `{new_title}` {new_emoji}"
-                        )
-
-                    embed = discord.Embed(title=embed_title, description=embed_description, color=discord.Color.dark_purple())
-                    embed.set_thumbnail(url=member.display_avatar.url)
-                    lvlup_msg = await channel.send(embed=embed)
-
-                    coins_amount = random.randint(30, 50)
-                    await self.progression_cog.add_coins(user_id, guild_id, coins_amount)
-                    await channel.send(
-                        f"{member.display_name} received <:Coins:1415353285270966403> {coins_amount} coins for leveling up!",
-                        reference=discord.MessageReference(
-                            message_id=lvlup_msg.id,
-                            channel_id=lvlup_msg.channel.id,
-                            guild_id=lvlup_msg.guild.id
-                        )
-                    )
-                    extra_msg = ""  
+            await self.progression_cog.announce_level_up(guild_id, user_id, new_level, old_level, channel)
 
         return gain, extra_msg
     
     async def apply_mystery_box(self, user_id: int, guild_id: int):
         conn = self.progression_cog.conn
+        lock = self.progression_cog.db_lock
         rewards = []
 
-        if random.random() < 0.15:
-            amount = random.randint(1, 3)
+        async with lock:
+            if random.random() < 0.15:
+                amount = random.randint(1, 3)
+                await conn.execute("""
+                    INSERT INTO user_inventory (user_id, guild_id, item_name, quantity)
+                    VALUES (?, ?, ?, ?)
+                    ON CONFLICT(user_id, guild_id, item_name) DO UPDATE SET quantity = quantity + ?
+                """, (user_id, guild_id, "Level Skip Token", amount, amount))
+                rewards.append(("Level Skip Token", amount))
+
+            if random.random() < 0.20:
+                amount = random.randint(1, 3)
+                await conn.execute("""
+                    INSERT INTO user_inventory (user_id, guild_id, item_name, quantity)
+                    VALUES (?, ?, ?, ?)
+                    ON CONFLICT(user_id, guild_id, item_name) DO UPDATE SET quantity = quantity + ?
+                """, (user_id, guild_id, "Large EXP Potion", amount, amount))
+                rewards.append(("Large EXP Potion", amount))
+
+            if random.random() < 0.50:
+                amount = random.randint(1, 3)
+                await conn.execute("""
+                    INSERT INTO user_inventory (user_id, guild_id, item_name, quantity)
+                    VALUES (?, ?, ?, ?)
+                    ON CONFLICT(user_id, guild_id, item_name) DO UPDATE SET quantity = quantity + ?
+                """, (user_id, guild_id, "Medium EXP Potion", amount, amount))
+                rewards.append(("Medium EXP Potion", amount))
+
             await conn.execute("""
                 INSERT INTO user_inventory (user_id, guild_id, item_name, quantity)
-                VALUES (?, ?, ?, ?)
-                ON CONFLICT(user_id, guild_id, item_name) DO UPDATE SET quantity = quantity + ?
-            """, (user_id, guild_id, "Level Skip Token", amount, amount))
-            rewards.append(("Level Skip Token", amount))
+                VALUES (?, ?, ?, 3)
+                ON CONFLICT(user_id, guild_id, item_name) DO UPDATE SET quantity = quantity + 3
+            """, (user_id, guild_id, "Small EXP Potion"))
+            rewards.append(("Small EXP Potion", 3))
 
-        if random.random() < 0.20:
-            amount = random.randint(1, 3)
-            await conn.execute("""
-                INSERT INTO user_inventory (user_id, guild_id, item_name, quantity)
-                VALUES (?, ?, ?, ?)
-                ON CONFLICT(user_id, guild_id, item_name) DO UPDATE SET quantity = quantity + ?
-            """, (user_id, guild_id, "Large EXP Potion", amount, amount))
-            rewards.append(("Large EXP Potion", amount))
-
-        if random.random() < 0.50:
-            amount = random.randint(1, 3)
-            await conn.execute("""
-                INSERT INTO user_inventory (user_id, guild_id, item_name, quantity)
-                VALUES (?, ?, ?, ?)
-                ON CONFLICT(user_id, guild_id, item_name) DO UPDATE SET quantity = quantity + ?
-            """, (user_id, guild_id, "Medium EXP Potion", amount, amount))
-            rewards.append(("Medium EXP Potion", amount))
-
-        await conn.execute("""
-            INSERT INTO user_inventory (user_id, guild_id, item_name, quantity)
-            VALUES (?, ?, ?, 3)
-            ON CONFLICT(user_id, guild_id, item_name) DO UPDATE SET quantity = quantity + 3
-        """, (user_id, guild_id, "Small EXP Potion"))
-        rewards.append(("Small EXP Potion", 3))
-
-        await conn.commit()
+            await conn.commit()
         return rewards
 
 
@@ -713,22 +691,24 @@ class Trading(commands.Cog):
                     await interaction.response.send_modal(DonateAmountModal(selected_item, max_cap))
 
         async def finalize_donate(item_name, amount, interaction):
-            async with conn.execute("SELECT quantity FROM user_inventory WHERE user_id = ? AND guild_id = ? AND item_name = ?", (donor_id, guild_id, item_name)) as cur:
-                row = await cur.fetchone()
-            if not row or row[0] < amount:
-                await interaction.response.send_message("❌ You don't have enough of this item.", ephemeral=True)
-                return
+            lock = self.progression_cog.db_lock
+            async with lock:
+                async with conn.execute("SELECT quantity FROM user_inventory WHERE user_id = ? AND guild_id = ? AND item_name = ?", (donor_id, guild_id, item_name)) as cur:
+                    row = await cur.fetchone()
+                if not row or row[0] < amount:
+                    await interaction.response.send_message("❌ You don't have enough of this item.", ephemeral=True)
+                    return
 
-            await conn.execute("UPDATE user_inventory SET quantity = quantity - ? WHERE user_id = ? AND guild_id = ? AND item_name = ?",
-                    (amount, donor_id, guild_id, item_name))
-            await conn.execute("DELETE FROM user_inventory WHERE user_id = ? AND guild_id = ? AND item_name = ? AND quantity <= 0",
-                    (donor_id, guild_id, item_name))
+                await conn.execute("UPDATE user_inventory SET quantity = quantity - ? WHERE user_id = ? AND guild_id = ? AND item_name = ?",
+                        (amount, donor_id, guild_id, item_name))
+                await conn.execute("DELETE FROM user_inventory WHERE user_id = ? AND guild_id = ? AND item_name = ? AND quantity <= 0",
+                        (donor_id, guild_id, item_name))
 
-            await conn.execute("""INSERT INTO user_inventory (user_id, guild_id, item_name, quantity)
-                        VALUES (?, ?, ?, ?)
-                        ON CONFLICT(user_id, guild_id, item_name) DO UPDATE SET quantity = quantity + ?""",
-                    (receiver_id, guild_id, item_name, amount, amount))
-            await conn.commit()
+                await conn.execute("""INSERT INTO user_inventory (user_id, guild_id, item_name, quantity)
+                            VALUES (?, ?, ?, ?)
+                            ON CONFLICT(user_id, guild_id, item_name) DO UPDATE SET quantity = quantity + ?""",
+                        (receiver_id, guild_id, item_name, amount, amount))
+                await conn.commit()
 
             self.donate_cooldowns[donor_id] = datetime.now(timezone.utc) + timedelta(hours=2)
 

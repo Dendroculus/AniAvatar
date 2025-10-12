@@ -380,7 +380,61 @@ class Progression(commands.Cog):
             await self.conn.commit()
             return level, new_exp, leveled_up
 
-    
+    async def get_rank(self, user_id: int, guild_id: int):
+        async with self.db_lock:
+            async with self.conn.execute(
+                "SELECT COUNT(*)+1 FROM users WHERE guild_id = ? AND (level > (SELECT level FROM users WHERE user_id = ? AND guild_id = ?) OR (level = (SELECT level FROM users WHERE user_id = ? AND guild_id = ?) AND exp > (SELECT exp FROM users WHERE user_id = ? AND guild_id = ?)))",
+                (guild_id, user_id, guild_id, user_id, guild_id, user_id, guild_id)
+            ) as cur:
+                row = await cur.fetchone()
+                return int(row[0]) if row else 1
+
+    async def get_rank_for(self, guild_id: int, level: int, exp: int):
+        async with self.db_lock:
+            async with self.conn.execute(
+                "SELECT COUNT(*)+1 FROM users WHERE guild_id = ? AND (level > ? OR (level = ? AND exp > ?))",
+                (guild_id, level, level, exp)
+            ) as cur:
+                row = await cur.fetchone()
+                return int(row[0]) if row else 1
+
+    async def announce_level_up(self, guild_id: int, user_id: int, new_level: int, old_level: int, channel: discord.abc.Messageable):
+        guild = self.bot.get_guild(guild_id)
+        if not guild:
+            return
+        member = guild.get_member(user_id)
+        if not member:
+            return
+        old_title = get_title(old_level)
+        new_title = get_title(new_level)
+        old_emoji = get_title_emoji(old_level)
+        new_emoji = get_title_emoji(new_level)
+        if new_title != old_title:
+            embed_title = f"{member.display_name} <:LEVELUP:1413479714428948551> {new_level}    {old_emoji} <:RIGHTWARDARROW:1414227272302334062> {new_emoji}"
+            embed_description = (
+                f"```Congratulations {member.display_name}! You have reached level {new_level} and ascended to {new_title}. ```\n"
+                f"Title: `{new_title}` {new_emoji}"
+            )
+        else:
+            embed_title = f"{member.display_name} <:LEVELUP:1413479714428948551> {new_level}"
+            embed_description = (
+                f"```Congratulations {member.display_name}! You have reached level {new_level}.```\n"
+                f"Title: `{new_title}` {new_emoji}"
+            )
+        embed = discord.Embed(
+            title=embed_title,
+            description=embed_description,
+            color=discord.Color.green()
+        )
+        embed.set_thumbnail(url=member.display_avatar.url)
+        lvlup_msg = await channel.send(embed=embed)
+        coins_amount = random.randint(30, 50)
+        await self.add_coins(user_id, guild_id, coins_amount)
+        await channel.send(
+            f"{member.display_name} received <:Coins:1415353285270966403> {coins_amount} coins for leveling up!",
+            reference=MessageReference(message_id=lvlup_msg.id, channel_id=lvlup_msg.channel.id, guild_id=lvlup_msg.guild.id)
+        )
+
     @commands.Cog.listener()
     async def on_guild_remove(self, guild: discord.Guild):
         async with self.db_lock:
@@ -710,70 +764,25 @@ class Progression(commands.Cog):
             return
         self.cooldowns[(guild_id, user_id)] = now
 
-        old_rank = await self.get_rank(user_id, guild_id)
-
         exp, level = await self.get_user(user_id, guild_id)
-        
         old_level = level
         old_title = get_title(old_level)
         
         exp_gain = random.randint(5 + level * 8, 10 + level * 12)
         level, new_exp, leveled_up = await self.add_exp(user_id, guild_id, exp_gain)
 
-        new_rank = await self.get_rank(user_id, guild_id)
-        new_title = get_title(level)
-
         if leveled_up:
-            old_emoji = get_title_emoji(old_level)
-            new_emoji = get_title_emoji(level)
-            new_title = get_title(level)
-
-            if new_title != old_title:
-                embed_title = f"{message.author.display_name} <:LEVELUP:1413479714428948551> {level}    {old_emoji} <:RIGHTWARDARROW:1414227272302334062> {new_emoji}"
-                embed_description = (
-                    f"```Congratulations {message.author.display_name}! You have reached level {level} and ascended to {new_title}. ```\n"
-                    f"Title: `{new_title}` {new_emoji}"
+            await self.announce_level_up(guild_id, user_id, level, old_level, message.channel)
+            old_rank = await self.get_rank_for(guild_id, old_level, exp)
+            new_rank = await self.get_rank_for(guild_id, level, new_exp)
+            if new_rank < old_rank:
+                embed = discord.Embed(
+                    title=f"<:LEVELUP:1413479714428948551> Rank Up! {message.author.display_name}",
+                    description=f"```{message.author.display_name} has ranked up to #{new_rank} in the server leaderboard! 🎉```",
+                    color=discord.Color.gold()
                 )
-            else:
-                embed_title = f"{message.author.display_name} <:LEVELUP:1413479714428948551> {level}"
-                embed_description = (
-                    f"```Congratulations {message.author.display_name}! You have reached level {level}.```\n"
-                    f"Title: `{new_title}` {new_emoji}"
-                )
-
-            embed = discord.Embed(
-                title=embed_title,
-                description=embed_description,
-                color=discord.Color.green()
-            )
-            embed.set_thumbnail(url=message.author.display_avatar.url)
-            lvlup_msg = await message.channel.send(embed=embed)
-            coins_amount = random.randint(30, 50)
-            prog_cog = self.bot.get_cog("Progression")
-            if prog_cog:
-                await prog_cog.add_coins(user_id, guild_id, coins_amount)
-                await message.channel.send(
-                    f"{message.author.display_name} received <:Coins:1415353285270966403> {coins_amount} coins for leveling up!",
-                    reference=MessageReference(message_id=lvlup_msg.id, channel_id=lvlup_msg.channel.id, guild_id=lvlup_msg.guild.id)
-                )
-                    
-        if new_rank < old_rank:
-            embed = discord.Embed(
-                title=f"<:LEVELUP:1413479714428948551> Rank Up! {message.author.display_name}",
-                description=f"```{message.author.display_name} has ranked up to #{new_rank} in the server leaderboard! 🎉```",
-                color=discord.Color.gold()
-            )
-            embed.set_thumbnail(url=message.author.display_avatar.url)
-            await message.channel.send(embed=embed)
-        
-    async def get_rank(self, user_id: int, guild_id: int):
-        async with self.db_lock:
-            async with self.conn.execute(
-                "SELECT COUNT(*)+1 FROM users WHERE guild_id = ? AND (level > (SELECT level FROM users WHERE user_id = ? AND guild_id = ?) OR (level = (SELECT level FROM users WHERE user_id = ? AND guild_id = ?) AND exp > (SELECT exp FROM users WHERE user_id = ? AND guild_id = ?)))",
-                (guild_id, user_id, guild_id, user_id, guild_id, user_id, guild_id)
-            ) as cur:
-                row = await cur.fetchone()
-                return int(row[0]) if row else 1
+                embed.set_thumbnail(url=message.author.display_avatar.url)
+                await message.channel.send(embed=embed)
     
 async def setup(bot):
     await bot.add_cog(Progression(bot))
