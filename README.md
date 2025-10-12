@@ -5,8 +5,8 @@ EN | [中文](docs/readmeCN.md)
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3.11+-blue.svg" alt="Python Version">
   <img src="https://img.shields.io/badge/discord.py-v2.x-7289DA.svg?logo=discord&logoColor=white" alt="discord.py">
-  <img src="https://img.shields.io/badge/许可证-MIT-green.svg" alt="许可证">
-  <img src="https://img.shields.io/badge/状态-开发中-orange.svg" alt="状态">
+  <img src="https://img.shields.io/badge/License-MIT-green.svg" alt="MIT">
+  <img src="https://img.shields.io/badge/status-active_development-orange.svg" alt="Active Development">
 </p>
 
 <p align="center">
