@@ -2,13 +2,18 @@ import discord
 from discord.ext import commands
 from discord.ui import View, Select
 import aiohttp
-import random
-from urllib.parse import quote
 import os
 from dotenv import load_dotenv
+from collections import OrderedDict
 
-sent_image_cache = {}
-anilist_cache = {} 
+from cogs.utils.anime_api import (
+    fetch_character_by_name,
+    char_has_anime_media,
+    is_image_url_ok,
+    google_image_search,
+    first_reachable_image,
+)
+
 load_dotenv()
 
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
@@ -16,26 +21,103 @@ SEARCH_ENGINE_ID = os.getenv("SEARCH_ENGINE_ID")
 
 ANILIST_API = "https://graphql.anilist.co"
 
-sent_media_cache = {}   
-
 class Search(commands.Cog):
+    NOISE_WORDS = {"pfp", "pfps", "hd", "avatar", "icon", "anime", "wallpaper", "image", "picture", "pic", "profile"}
+    CACHE_MAX_KEYS = 200
+
     def __init__(self, bot):
         self.bot = bot
+        self._anilist_cache: OrderedDict[str, dict] = OrderedDict()
+
+    def _cache_get(self, key: str) -> dict:
+        entry = self._anilist_cache.get(key)
+        if entry is None:
+            entry = {"anilist_images": [], "google": []}
+            self._anilist_cache[key] = entry
+        self._anilist_cache.move_to_end(key, last=True)
+        if len(self._anilist_cache) > self.CACHE_MAX_KEYS:
+            self._anilist_cache.popitem(last=False)
+        return entry
+
+    def _cache_add_google(self, key: str, url: str):
+        entry = self._cache_get(key)
+        if url not in entry["google"]:
+            entry["google"].append(url)
+
+    def _cache_add_anilist(self, key: str, url: str):
+        entry = self._cache_get(key)
+        if url not in entry["anilist_images"]:
+            entry["anilist_images"].append(url)
+
+    def _strip_noise(self, query: str) -> str:
+        words = [w for w in (query or "").split() if w.lower() not in self.NOISE_WORDS]
+        return " ".join(words).strip() or (query or "").strip()
+
+    async def _find_official_image(self, original_query: str, timeout: aiohttp.ClientTimeout):
+        cleaned_query = self._strip_noise(original_query)
+
+        char = await fetch_character_by_name(original_query, prefer="AniList")
+        if char and char.get("source") == "AniList" and not char_has_anime_media(char) and cleaned_query != original_query:
+            alt = await fetch_character_by_name(cleaned_query, prefer="AniList")
+            if alt and char_has_anime_media(alt):
+                char = alt
+
+        if char and char.get("source") == "AniList" and not char_has_anime_media(char):
+            return char, None
+
+        official_image = None
+        if char:
+            candidate = (char.get("image") or {}).get("large") or (char.get("image") or {}).get("medium")
+            if candidate:
+                try:
+                    async with aiohttp.ClientSession(timeout=timeout) as session:
+                        ok = await is_image_url_ok(session, candidate, timeout)
+                    if ok:
+                        official_image = candidate
+                except Exception:
+                    official_image = None
+
+        if not char or not official_image:
+            jikan_char = await fetch_character_by_name(original_query, prefer="Jikan")
+            if jikan_char and not official_image:
+                candidate = (jikan_char.get("image") or {}).get("large") or (jikan_char.get("image") or {}).get("medium")
+                if candidate:
+                    async with aiohttp.ClientSession(timeout=timeout) as session:
+                        ok = await is_image_url_ok(session, candidate, timeout)
+                    if ok:
+                        char = jikan_char
+                        official_image = candidate
+
+        return char, official_image
+
+    async def _find_google_image(self, character_name: str, cache_key: str | None, timeout: aiohttp.ClientTimeout):
+        if not GOOGLE_API_KEY or not SEARCH_ENGINE_ID:
+            return None
+
+        links = await google_image_search(f"{character_name} anime pfp", GOOGLE_API_KEY, SEARCH_ENGINE_ID)
+        if not links:
+            return None
+
+        candidates = links
+        if cache_key:
+            entry = self._cache_get(cache_key)
+            unsent = [l for l in links if l not in entry["google"] and l not in entry["anilist_images"]]
+            candidates = unsent or [l for l in links if l not in entry["anilist_images"]]
+
+        chosen = await first_reachable_image(candidates, timeout)
+        if chosen and cache_key:
+            self._cache_add_google(cache_key, chosen)
+        return chosen
 
     @commands.hybrid_command(name="anime", description="Search for an anime by name")
     @commands.cooldown(1, 15, commands.BucketType.user)
     async def anime(self, ctx: commands.Context, *, query: str):
-
         query_str = """
         query ($search: String) {
         Page(perPage: 5) {
             media(search: $search, type: ANIME) {
             id
-            title {
-                romaji
-                english
-                native
-            }
+            title { romaji english native }
             description(asHtml: false)
             episodes
             status
@@ -48,23 +130,15 @@ class Search(commands.Cog):
             favourites
             format
             source
-            studios(isMain: true) {
-                nodes {
-                name
-                }
-            }
+            studios(isMain: true) { nodes { name } }
             genres
-            coverImage {
-                large
-                medium
-            }
+            coverImage { large medium }
             bannerImage
             siteUrl
             }
         }
         }
         """
-
         variables = {"search": query}
 
         async with aiohttp.ClientSession() as session:
@@ -89,7 +163,7 @@ class Search(commands.Cog):
             ))
 
         async def select_callback(interaction: discord.Interaction):
-            await interaction.response.defer() 
+            await interaction.response.defer()
             anime_id = int(interaction.data["values"][0])
             anime_data = next(a for a in results if a["id"] == anime_id)
 
@@ -106,10 +180,8 @@ class Search(commands.Cog):
                 description=description,
                 color=discord.Color.blurple()
             )
-
             if anime_data.get("coverImage", {}).get("medium"):
                 embed.set_thumbnail(url=anime_data["coverImage"]["medium"])
-
             if anime_data.get("bannerImage"):
                 embed.set_image(url=anime_data["bannerImage"])
 
@@ -132,27 +204,20 @@ class Search(commands.Cog):
             embed.add_field(name="Favourites", value=str(anime_data.get("favourites", "N/A")), inline=True)
 
             genres = anime_data.get("genres", [])
-            if genres:
-                genres = " ".join(f"`{g}`" for g in genres)
-            else:
-                genres = "N/A"
-
-            embed.add_field(name="Genres", value=genres, inline=False)
+            genres_str = " ".join(f"`{g}`" for g in genres) if genres else "N/A"
+            embed.add_field(name="Genres", value=genres_str, inline=False)
 
             embed.set_footer(
                 text="Provided by AniList",
                 icon_url="https://anilist.co/img/icons/android-chrome-512x512.png"
             )
-
             await interaction.edit_original_response(embed=embed, view=None)
 
         select = Select(placeholder="Choose an anime...", options=options)
         select.callback = select_callback
         view = View()
         view.add_item(select)
-
         await ctx.send("Select an anime from the search results:", view=view)
-
 
     @commands.hybrid_command(name="animepfp", description="Fetch an anime character PFP (use the full character name for best results)")
     @commands.guild_only()
@@ -162,82 +227,7 @@ class Search(commands.Cog):
         if not name:
             return await ctx.send("❌ Please provide a character name.")
 
-        NOISE_WORDS = {"pfp", "pfps", "hd", "avatar", "icon", "anime", "wallpaper", "image", "picture", "pic", "profile"}
         per_call_timeout = aiohttp.ClientTimeout(total=10)
-
-
-        async def fetch_anilist_character(query_name: str):
-            query_str = """
-            query ($search: String) {
-                Character(search: $search) {
-                    id
-                    name { full }
-                    image { large medium }
-                    media { nodes { id type format } }
-                }
-            }"""
-            variables = {"search": query_name}
-            try:
-                async with aiohttp.ClientSession(timeout=per_call_timeout) as session:
-                    async with session.post(ANILIST_API, json={"query": query_str, "variables": variables}) as resp:
-                        if resp.status != 200:
-                            return None
-                        try:
-                            data = await resp.json()
-                        except Exception:
-                            return None
-            except Exception:
-                return None
-            return data.get("data", {}).get("Character")
-
-        async def fetch_jikan_character(query_name: str):
-            url = f"https://api.jikan.moe/v4/characters?q={quote(query_name)}&limit=1"
-            try:
-                async with aiohttp.ClientSession(timeout=per_call_timeout) as session:
-                    async with session.get(url) as resp:
-                        if resp.status != 200:
-                            return None
-                        try:
-                            data = await resp.json()
-                        except Exception:
-                            return None
-            except Exception:
-                return None
-
-            results = data.get("data") or []
-            if not results:
-                return None
-
-            c = results[0]
-            image = (c.get("images") or {}).get("jpg", {}).get("image_url")
-            return {"id": c.get("mal_id"), "name": {"full": c.get("name")}, "image": {"large": image, "medium": image}}
-
-        async def is_image_url_ok(session: aiohttp.ClientSession, url: str, timeout_obj: aiohttp.ClientTimeout) -> bool:
-            if not url:
-                return False
-            try:
-                async with session.head(url, timeout=timeout_obj) as resp:
-                    ct = resp.headers.get("Content-Type", "")
-                    if resp.status == 200 and ct and ct.startswith("image"):
-                        return True
-            except Exception:
-                pass
-            try:
-                async with session.get(url, timeout=timeout_obj) as resp:
-                    ct = resp.headers.get("Content-Type", "")
-                    return resp.status == 200 and ct and ct.startswith("image")
-            except Exception:
-                return False
-
-        def char_has_anime_media(char_obj):
-            if not char_obj:
-                return False
-            media = char_obj.get("media") or {}
-            nodes = media.get("nodes") or []
-            for n in nodes:
-                if (n.get("type") or "").upper() == "ANIME":
-                    return True
-            return False
 
         interaction = getattr(ctx, "interaction", None)
         deferred = False
@@ -260,189 +250,37 @@ class Search(commands.Cog):
                 else:
                     return await ctx.send(embed=embed)
 
-        original_query = name
-        cleaned_words = [w for w in original_query.split() if w.lower() not in NOISE_WORDS]
-        cleaned_query = " ".join(cleaned_words).strip() or original_query
+        char, official_image = await self._find_official_image(name, per_call_timeout)
 
-        char = await fetch_anilist_character(original_query)
-
-        if char and not char_has_anime_media(char):
-            if cleaned_query != original_query:
-                alt_char = await fetch_anilist_character(cleaned_query)
-                if alt_char and char_has_anime_media(alt_char):
-                    char = alt_char
-
-        if char and not char_has_anime_media(char):
+        if char and char.get("source") == "AniList" and not char_has_anime_media(char):
             return await reply("❌ Could not find an anime character matching your query. Try a full character name (e.g. `Kaoruko Waguri`).")
-
-        official_image = None
-        if char:
-            official_image = (char.get("image") or {}).get("large") or (char.get("image") or {}).get("medium")
-            if official_image:
-                try:
-                    async with aiohttp.ClientSession(timeout=per_call_timeout) as session:
-                        ok = await is_image_url_ok(session, official_image, per_call_timeout)
-                    if not ok:
-                        official_image = None
-                except Exception:
-                    official_image = None
-
-        if not char:
-            jikan_char = await fetch_jikan_character(original_query)
-            if not jikan_char:
-                return await reply("❌ Could not find an anime character matching your query. Try a full character name (e.g. `Kaoruko Waguri`).")
-            char = jikan_char
-            candidate = (char.get("image") or {}).get("large") or (char.get("image") or {}).get("medium")
-            if candidate:
-                try:
-                    async with aiohttp.ClientSession(timeout=per_call_timeout) as session:
-                        ok = await is_image_url_ok(session, candidate, per_call_timeout)
-                    if ok:
-                        official_image = candidate
-                    else:
-                        official_image = None
-                except Exception:
-                    official_image = None
-        else:
-            if not official_image:
-                jikan_char = await fetch_jikan_character(original_query)
-                if jikan_char:
-                    candidate = (jikan_char.get("image") or {}).get("large") or (jikan_char.get("image") or {}).get("medium")
-                    if candidate:
-                        try:
-                            async with aiohttp.ClientSession(timeout=per_call_timeout) as session:
-                                ok = await is_image_url_ok(session, candidate, per_call_timeout)
-                            if ok:
-                                official_image = candidate
-                            else:
-                                official_image = official_image  
-                        except Exception:
-                            pass
 
         cache_key = None
         selected_image = None
         source = None
 
-        if not official_image:
-            character_display_name = char["name"]["full"] if char else original_query
-            if not GOOGLE_API_KEY or not SEARCH_ENGINE_ID:
-                return await reply("❌ Could not find an anime character matching your query. Try a full character name (e.g. `Kaoruko Waguri`).")
+        if official_image:
+            char_id = char.get("id") if char else None
+            character_name = (char.get("name") or {}).get("full") if char else name
+            cache_key = f"al_{char_id}" if char_id is not None else None
 
-            search_query = f"{character_display_name} anime pfp"
-            query = quote(search_query)
-            url = (
-                f"https://www.googleapis.com/customsearch/v1?"
-                f"key={GOOGLE_API_KEY}&cx={SEARCH_ENGINE_ID}&searchType=image&q={query}"
-            )
-            try:
-                async with aiohttp.ClientSession(timeout=per_call_timeout) as session:
-                    async with session.get(url) as resp:
-                        try:
-                            data = await resp.json()
-                        except Exception:
-                            data = {}
-            except Exception:
-                return await reply("❌ Failed to fetch images from Google API. Try again later.")
+            if cache_key:
+                entry = self._cache_get(cache_key)
+                if official_image not in entry["anilist_images"]:
+                    self._cache_add_anilist(cache_key, official_image)
+            selected_image = official_image
+            source = char.get("source") or "AniList"
+        else:
+            character_name = (char.get("name") or {}).get("full") if char else name
+            char_id = char.get("id") if char else None
+            cache_key = f"al_{char_id}" if char_id is not None else None
 
-            items = data.get("items") or []
-            valid_items = [
-                item.get("link") for item in items
-                if isinstance(item.get("link"), str) and item["link"].lower().endswith((".png", ".jpg", ".jpeg", ".webp"))
-            ]
-            if not valid_items:
-                return await reply(f"❌ No valid images found for **{character_display_name}** via Google.")
-
-            async with aiohttp.ClientSession(timeout=per_call_timeout) as session:
-                random.shuffle(valid_items)
-                chosen = None
-                for link in valid_items:
-                    try:
-                        ok = await is_image_url_ok(session, link, per_call_timeout)
-                        if ok:
-                            chosen = link
-                            break
-                    except Exception:
-                        continue
-
-            if not chosen:
-                return await reply(f"❌ No reachable images found for **{character_display_name}** via Google.")
-            selected_image = chosen
+            selected_image = await self._find_google_image(character_name, cache_key, per_call_timeout)
+            if not selected_image:
+                return await reply(f"❌ No reachable images found for **{character_name}** via Google.")
             source = "Google API"
 
-        else:
-            character_name = char["name"]["full"]
-            cache_key = f"al_{char['id']}"
-            if cache_key not in anilist_cache:
-                anilist_cache[cache_key] = {"anilist_images": [], "google": []}
-
-            if official_image and official_image not in anilist_cache[cache_key]["anilist_images"]:
-                selected_image = official_image
-                anilist_cache[cache_key]["anilist_images"].append(official_image)
-                source = "AniList"
-            else:
-                if not GOOGLE_API_KEY or not SEARCH_ENGINE_ID:
-                    return await reply(f"❌ No new images available for **{character_name}** (Google API not configured).")
-
-                search_query = f"{character_name} anime pfp"
-                query = quote(search_query)
-                url = (
-                    f"https://www.googleapis.com/customsearch/v1?"
-                    f"key={GOOGLE_API_KEY}&cx={SEARCH_ENGINE_ID}&searchType=image&q={query}"
-                )
-
-                try:
-                    async with aiohttp.ClientSession(timeout=per_call_timeout) as session:
-                        async with session.get(url) as resp:
-                            try:
-                                data = await resp.json()
-                            except Exception:
-                                data = {}
-                except Exception:
-                    return await reply("❌ Failed to fetch images from Google API. Try again later.")
-
-                items = data.get("items") or []
-                valid_items = [
-                    item.get("link") for item in items
-                    if isinstance(item.get("link"), str) and item["link"].lower().endswith((".png", ".jpg", ".jpeg", ".webp"))
-                ]
-
-                if not valid_items:
-                    return await reply(f"❌ No valid images found for **{character_name}** via Google.")
-
-                unsent = [
-                    img for img in valid_items
-                    if img not in anilist_cache[cache_key]["google"] and img not in anilist_cache[cache_key]["anilist_images"]
-                ]
-
-                if not unsent:
-                    anilist_cache[cache_key]["google"] = []
-                    unsent = [img for img in valid_items if img not in anilist_cache[cache_key]["anilist_images"]]
-
-                if not unsent:
-                    return await reply(f"❌ No new images available for **{character_name}** right now.")
-
-                async with aiohttp.ClientSession(timeout=per_call_timeout) as session:
-                    random.shuffle(unsent)
-                    chosen = None
-                    for link in unsent:
-                        try:
-                            ok = await is_image_url_ok(session, link, per_call_timeout)
-                            if ok:
-                                chosen = link
-                                break
-                        except Exception:
-                            continue
-
-                if not chosen:
-                    return await reply(f"❌ No reachable images found for **{character_name}** via Google.")
-                selected_image = chosen
-                anilist_cache[cache_key]["google"].append(selected_image)
-                source = "Google API"
-
-        if not selected_image:
-            return await reply("❌ Could not find an anime character matching your query. Try a full character name (e.g. `Kaoruko Waguri`).")
-
-        char_display = char["name"]["full"] if char else name
+        char_display = (char.get("name") or {}).get("full") if char else name
         embed = discord.Embed(title=f"Anime PFP for {char_display}", color=discord.Color.purple())
         embed.set_image(url=selected_image)
         embed.set_footer(text=f"Source: {source}")
@@ -451,4 +289,3 @@ class Search(commands.Cog):
 async def setup(bot):
     await bot.add_cog(Search(bot))
     print("📦 Loaded search cog.")
-
