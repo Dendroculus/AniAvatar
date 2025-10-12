@@ -17,7 +17,7 @@ class Roles(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self._locks: Dict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
-        self.SYNC_INTERVAL_MINUTES = 2
+        self.SYNC_INTERVAL_MINUTES = 120  
         self.MAX_PER_GUILD = 30
         self.SLEEP_BETWEEN_OPS = 0.25
 
@@ -27,6 +27,19 @@ class Roles(commands.Cog):
     async def cog_unload(self):
         self.sync_roles_loop.cancel()
 
+
+    async def update_roles_by_ids(self, guild_id: int, user_id: int, level: int):
+        guild = self.bot.get_guild(guild_id)
+        if not guild:
+            try:
+                guild = await self.bot.fetch_guild(guild_id)
+            except Exception:
+                return
+        try:
+            member = guild.get_member(user_id) or await guild.fetch_member(user_id)
+        except Exception:
+            return
+        await self.update_roles(member, level)
 
     async def _find_role_by_name(self, guild: discord.Guild, title: str) -> Optional[discord.Role]:
         if not title:
@@ -102,9 +115,7 @@ class Roles(commands.Cog):
             return
 
         bot_top_pos = bot_member.top_role.position
-        base_pos = bot_top_pos - len(roles)
-        if base_pos < 0:
-            base_pos = 0
+        base_pos = max(0, bot_top_pos - len(roles))
 
         positions = {}
         for idx, role in enumerate(roles):
@@ -128,7 +139,6 @@ class Roles(commands.Cog):
             print(f"[Roles] Forbidden to edit role positions in guild {guild.id}.")
         except discord.HTTPException as e:
             print(f"[Roles] Failed to reorder roles in guild {guild.id}: {e}")
-
 
     async def update_roles(self, member: discord.Member, level: int):
         if member.bot:
@@ -185,7 +195,7 @@ class Roles(commands.Cog):
         except Exception as e:
             print(f"[Roles] Unexpected error updating roles for {member.display_name} ({member.id}): {e}")
 
-    @tasks.loop(minutes=2)
+    @tasks.loop(minutes=120) 
     async def sync_roles_loop(self):
         progression = self.bot.get_cog("Progression")
         if not progression:
@@ -220,26 +230,16 @@ class Roles(commands.Cog):
                         has_other_titles = any(n in other_title_names for n in member_title_names)
                         already_ok = (desired_role is not None and desired_role in member.roles and not has_other_titles)
 
-                        if already_ok:
-                            processed += 1
-                            await asyncio.sleep(self.SLEEP_BETWEEN_OPS)
-                            continue
-
-                        try:
-                            fresh_member = await guild.fetch_member(member.id)
-                        except discord.NotFound:
-                            processed += 1
-                            await asyncio.sleep(self.SLEEP_BETWEEN_OPS)
-                            continue
-
-                        try:
-                            await self.update_roles(fresh_member, level)
-                        except discord.Forbidden:
-                            print(f"[Roles] Missing perms to update roles for {member.id} in guild {guild.id}")
-                        except discord.HTTPException as he:
-                            print(f"[Roles] HTTP error updating roles for {member.id} in guild {guild.id}: {he}")
-                        except Exception as e:
-                            print(f"[Roles] Error updating roles for {member.id} in guild {guild.id}: {e}")
+                        if not already_ok:
+                            try:
+                                fresh_member = await guild.fetch_member(member.id)
+                                await self.update_roles(fresh_member, level)
+                            except discord.Forbidden:
+                                print(f"[Roles] Missing perms to update roles for {member.id} in guild {guild.id}")
+                            except discord.HTTPException as he:
+                                print(f"[Roles] HTTP error updating roles for {member.id} in guild {guild.id}: {he}")
+                            except Exception as e:
+                                print(f"[Roles] Error updating roles for {member.id} in guild {guild.id}: {e}")
 
                         processed += 1
                         await asyncio.sleep(self.SLEEP_BETWEEN_OPS)
@@ -250,25 +250,23 @@ class Roles(commands.Cog):
             except Exception as e:
                 print(f"[Roles] Error during guild sync {guild.id}: {e}")
 
-        print("[Roles] Periodic role sync complete.")
+        print("[Roles] Fail-safe role sync complete.")
 
     @sync_roles_loop.before_loop
     async def before_sync_roles(self):
         await self.bot.wait_until_ready()
-        print("[Roles] Started periodic role sync loop.")
+        print("[Roles] Started periodic role fail-safe sync loop.")
 
     @commands.Cog.listener()
     async def on_ready(self):
-        print("[Roles] Syncing progression roles on startup...")
+        print("[Roles] Ensuring progression roles and order on startup...")
         try:
             for guild in self.bot.guilds:
                 roles = await self._ensure_titles_exist(guild)
                 await self._sync_role_hierarchy(guild, roles)
-            print("[Roles] Startup role setup complete. Periodic sync will handle members.")
+            print("[Roles] Startup role setup complete. Periodic fail-safe will catch rare inconsistencies.")
         except Exception as e:
-            print(f"[Roles] Error during startup sync: {e}")
-
-        print("[Roles] Startup role sync complete.")
+            print(f"[Roles] Error during startup role setup: {e}")
 
     @commands.Cog.listener()
     async def on_member_update(self, before: discord.Member, after: discord.Member):
@@ -280,14 +278,14 @@ class Roles(commands.Cog):
         after_role_ids = {r.id for r in after.roles}
 
         if before_role_ids == after_role_ids:
-            return  
+            return
 
         title_names = {t.lower() for t in TITLE_ORDER}
         added_roles = [r for r in after.roles if r.id not in before_role_ids and r.name and r.name.strip().lower() in title_names]
         removed_roles = [r for r in before.roles if r.id not in after_role_ids and r.name and r.name.strip().lower() in title_names]
 
         if not added_roles and not removed_roles:
-            return  
+            return
 
         print(f"[Roles] Member {after.id} role change detected. Added: {[r.name for r in added_roles]}, Removed: {[r.name for r in removed_roles]}")
 
