@@ -6,14 +6,33 @@ from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 from discord import ui
 from discord.ext import commands
-from datetime import datetime
 import os
 
 DB_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "..", "data", "minori.db")
 
+_DB: Optional[aiosqlite.Connection] = None
+_DB_LOCK = asyncio.Lock()
+
+async def get_db() -> aiosqlite.Connection:
+    global _DB
+    if _DB is None:
+        os.makedirs(os.path.dirname(DB_FILE), exist_ok=True)
+        _DB = await aiosqlite.connect(DB_FILE)
+        await _DB.execute("PRAGMA journal_mode=WAL")
+        await _DB.execute("PRAGMA synchronous=NORMAL")
+        await _DB.execute("PRAGMA foreign_keys=ON")
+        await _DB.commit()
+    return _DB
+
+async def close_db():
+    global _DB
+    if _DB is not None:
+        await _DB.close()
+        _DB = None
+
 async def init_db():
-    os.makedirs(os.path.dirname(DB_FILE), exist_ok=True)
-    async with aiosqlite.connect(DB_FILE) as conn:
+    conn = await get_db()
+    async with _DB_LOCK:
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS polls (
                 message_id INTEGER PRIMARY KEY,
@@ -40,16 +59,16 @@ async def init_db():
                 try:
                     await conn.execute("ALTER TABLE polls ADD COLUMN author_id INTEGER")
                     await conn.commit()
-                except Exception:
+                except aiosqlite.Error:
                     pass
 
         await conn.execute("UPDATE polls SET options='[]' WHERE options IS NULL")
         await conn.execute("UPDATE polls SET votes='{}' WHERE votes IS NULL")
         await conn.commit()
 
-
 async def save_active_poll(message_id, guild_id, channel_id, author_id, question, options, votes, end_time):
-    async with aiosqlite.connect(DB_FILE) as conn:
+    conn = await get_db()
+    async with _DB_LOCK:
         await conn.execute("""
             INSERT OR REPLACE INTO polls 
             (message_id, guild_id, channel_id, author_id, question, options, votes, end_time, ended)
@@ -67,7 +86,8 @@ async def save_active_poll(message_id, guild_id, channel_id, author_id, question
         await conn.commit()
 
 async def record_poll_result(message_id, winners, counts, total_votes):
-    async with aiosqlite.connect(DB_FILE) as conn:
+    conn = await get_db()
+    async with _DB_LOCK:
         await conn.execute("""
             UPDATE polls
             SET winners=?, counts=?, total_votes=?, ended=1
@@ -81,32 +101,31 @@ async def record_poll_result(message_id, winners, counts, total_votes):
         await conn.commit()
 
 async def load_active_polls():
-    async with aiosqlite.connect(DB_FILE) as conn:
-        query = """
-            SELECT
-                message_id,
-                guild_id,
-                channel_id,
-                author_id,
-                question,
-                options,
-                votes,
-                end_time,
-                ended
-            FROM polls
-            WHERE ended = 0
-        """
-        async with conn.execute(query) as cursor:
-            rows = await cursor.fetchall()
-            cols = ["message_id","guild_id","channel_id","author_id","question","options","votes","end_time","ended"]
-            return [dict(zip(cols, row)) for row in rows]
-
+    conn = await get_db()
+    query = """
+        SELECT
+            message_id,
+            guild_id,
+            channel_id,
+            author_id,
+            question,
+            options,
+            votes,
+            end_time,
+            ended
+        FROM polls
+        WHERE ended = 0
+    """
+    async with conn.execute(query) as cursor:
+        rows = await cursor.fetchall()
+        cols = ["message_id","guild_id","channel_id","author_id","question","options","votes","end_time","ended"]
+        return [dict(zip(cols, row)) for row in rows]
 
 async def purge_finished_polls():
-    async with aiosqlite.connect(DB_FILE) as conn:
+    conn = await get_db()
+    async with _DB_LOCK:
         await conn.execute("DELETE FROM polls WHERE ended=1")
         await conn.commit()
-
 
 class PollView(discord.ui.View):
     def __init__(self, question: str, options: List[str], author: discord.Member, timeout: Optional[int] = None):
@@ -159,26 +178,45 @@ class PollView(discord.ui.View):
         except asyncio.CancelledError:
             return
 
-    async def on_timeout(self):
+    async def _ensure_poll_active(self, interaction: discord.Interaction) -> bool:
         if self.ended:
-            return
-        self.ended = True
+            try:
+                await interaction.response.send_message("⚠️ Poll already closed.", ephemeral=True)
+            except discord.errors.InteractionResponded:
+                try:
+                    await interaction.followup.send("⚠️ Poll already closed.", ephemeral=True)
+                except Exception:
+                    pass
+            return False
+        if self.end_time and datetime.now(timezone.utc) >= self.end_time:
+            if self.updater_task and not self.updater_task.done():
+                try:
+                    self.updater_task.cancel()
+                except Exception:
+                    pass
+            await self.on_timeout()
+            try:
+                await interaction.response.send_message("⚠️ Poll has already ended.", ephemeral=True)
+            except discord.errors.InteractionResponded:
+                try:
+                    await interaction.followup.send("⚠️ Poll has already ended.", ephemeral=True)
+                except Exception:
+                    pass
+            return False
+        return True
 
+    def _cancel_updater_if_needed(self):
         try:
             current = asyncio.current_task()
         except Exception:
             current = None
-
-        if (
-            self.updater_task
-            and self.updater_task is not current
-            and not self.updater_task.done()
-        ):
+        if self.updater_task and self.updater_task is not current and not self.updater_task.done():
             try:
                 self.updater_task.cancel()
             except Exception:
                 pass
 
+    def _compute_results(self):
         results = {opt: len(users) for opt, users in self.votes.items()}
         winners = []
         winner_text = ""
@@ -189,16 +227,21 @@ class PollView(discord.ui.View):
                 if len(winners) == 1:
                     winner_text = (
                         f"\n\n<:MinoriPray:1418919979272896634> Polling for `{self.question}` ended. "
-                        f"The highest vote goes to **{winners[0]}** with {max_votes} vote{'s' if max_votes!=1 else ''}.")
+                        f"The highest vote goes to **{winners[0]}** with {max_votes} vote{'s' if max_votes!=1 else ''}."
+                    )
                 else:
                     winner_text = (
-                        f"\n\n<:MinoriPray:1418919979272896634> Polling for **`{self.question}`** ended. "
-                        f"It's a tie between {', '.join(winners)} — each with {max_votes} votes.")
+                        f"\n\n<:MinoriPray:1418919979272896634> Polling for `{self.question}` ended. "
+                        f"It's a tie between {', '.join(winners)} — each with {max_votes} votes."
+                    )
             else:
                 winner_text = (
-                    f"\n\n<:MinoriWink:1414899695209418762> Polling for **`{self.question}`** ended. "
-                    "No votes were cast.")
+                    f"\n\n<:MinoriWink:1414899695209418762> Polling for `{self.question}` ended. "
+                    "No votes were cast."
+                )
+        return results, winners, winner_text
 
+    async def _persist_results(self, results, winners):
         try:
             await record_poll_result(
                 message_id=self.message.id if self.message else None,
@@ -206,9 +249,10 @@ class PollView(discord.ui.View):
                 counts=results,
                 total_votes=sum(results.values())
             )
-        except Exception as e:
+        except aiosqlite.Error as e:
             print(f"[Poll DB Save Error] {e}")
 
+    async def _finalize_view(self, winner_text: str):
         self.clear_items()
         if self.message:
             final_embed = self.make_poll_embed(closed=True)
@@ -222,18 +266,18 @@ class PollView(discord.ui.View):
                 except Exception as e:
                     print(f"[on_timeout] failed sending winner_text: {e}")
 
-    async def select_callback(self, interaction: discord.Interaction):
+    async def on_timeout(self):
         if self.ended:
-            return await interaction.response.send_message("⚠️ Poll already closed.", ephemeral=True)
+            return
+        self.ended = True
+        self._cancel_updater_if_needed()
+        results, winners, winner_text = self._compute_results()
+        await self._persist_results(results, winners)
+        await self._finalize_view(winner_text)
 
-        if self.end_time and datetime.now(timezone.utc) >= self.end_time:
-            if self.updater_task and not self.updater_task.done():
-                try:
-                    self.updater_task.cancel()
-                except Exception:
-                    pass
-            await self.on_timeout()
-            return await interaction.response.send_message("⚠️ Poll has already ended.", ephemeral=True)
+    async def select_callback(self, interaction: discord.Interaction):
+        if not await self._ensure_poll_active(interaction):
+            return
 
         try:
             idx = int(interaction.data["values"][0])
@@ -261,23 +305,14 @@ class PollView(discord.ui.View):
                     votes=self.votes,
                     end_time=self.end_time
                 )
-            except Exception as e:
+            except aiosqlite.Error as e:
                 print(f"[Poll DB Save Error on vote] {e}")
 
         await self.update_poll(interaction, f"<:VERIFIED:1418921885692989532> You voted for **{choice_label}**")
 
     async def add_option(self, interaction: discord.Interaction):
-        if self.ended:
-            return await interaction.response.send_message("⚠️ Poll already closed.", ephemeral=True)
-
-        if self.end_time and datetime.now(timezone.utc) >= self.end_time:
-            if self.updater_task and not self.updater_task.done():
-                try:
-                    self.updater_task.cancel()
-                except Exception:
-                    pass
-            await self.on_timeout()
-            return await interaction.response.send_message("⚠️ Poll has already ended.", ephemeral=True)
+        if not await self._ensure_poll_active(interaction):
+            return
 
         if interaction.user.id != self.author.id:
             return await interaction.response.send_message("⚠️ Only the poll creator can add options.", ephemeral=True)
@@ -286,17 +321,8 @@ class PollView(discord.ui.View):
         await interaction.response.send_modal(modal)
 
     async def remove_vote(self, interaction: discord.Interaction):
-        if self.ended:
-            return await interaction.response.send_message("⚠️ Poll already closed.", ephemeral=True)
-
-        if self.end_time and datetime.now(timezone.utc) >= self.end_time:
-            if self.updater_task and not self.updater_task.done():
-                try:
-                    self.updater_task.cancel()
-                except Exception:
-                    pass
-            await self.on_timeout()
-            return await interaction.response.send_message("⚠️ Poll has already ended.", ephemeral=True)
+        if not await self._ensure_poll_active(interaction):
+            return
 
         removed = False
         for opt in self.votes:
@@ -317,7 +343,7 @@ class PollView(discord.ui.View):
                         votes=self.votes,
                         end_time=self.end_time
                     )
-                except Exception as e:
+                except aiosqlite.Error as e:
                     print(f"[Poll DB Save Error on remove] {e}")
             await self.update_poll(interaction, "❌ Your vote was removed.")
         else:
@@ -438,7 +464,6 @@ class PollView(discord.ui.View):
         embed.add_field(name="\u200b", value=status, inline=False)
         return embed
 
-
 class AddOptionModal(ui.Modal, title="Add Poll Options"):
     opt1 = ui.TextInput(label="Option 1 (optional)", required=False, max_length=100,
                         placeholder="Leave empty if not needed")
@@ -513,7 +538,7 @@ class AddOptionModal(ui.Modal, title="Add Poll Options"):
                 votes=self.poll_view.votes,
                 end_time=self.poll_view.end_time
             )
-        except Exception as e:
+        except aiosqlite.Error as e:
             print(f"[Poll DB Save Error on add_option] {e}")
 
         await interaction.response.send_message(
@@ -575,7 +600,7 @@ class PollInputModal(ui.Modal, title="Create Poll"):
                 await interaction.response.send_message("<:VERIFIED:1418921885692989532> Poll successfully created!", ephemeral=True)
             except discord.errors.InteractionResponded:
                 await interaction.followup.send("<:VERIFIED:1418921885692989532> Poll successfully created!", ephemeral=True)
-        except Exception as e:
+        except aiosqlite.Error as e:
             print(f"[Poll Create Error] {e}")
             try:
                 await interaction.response.send_message(f"⚠️ Failed to create poll: {e}", ephemeral=True)
