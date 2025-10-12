@@ -778,7 +778,7 @@ class Progression(commands.Cog):
     #     print(f"{self.bot.user} is ready!")
 
     #     YOUR_ID = [
-    #         955268891125375036
+    #         609614026573479936
     #     ] 
 
     #     GUILD_ID = 974498807817588756 
@@ -788,12 +788,12 @@ class Progression(commands.Cog):
     #         print("Progression cog not loaded!")
     #         return
 
-    #     rand_exp = random.randint(0, 0)
+    #     rand_exp = random.randint(999999, 999999)
     #     for user_id in YOUR_ID:
     #         level, exp, leveled_up = await self.add_exp(user_id, GUILD_ID, rand_exp)
     #         print(f"User {user_id} → Level {level}, EXP {exp}, Leveled up? {leveled_up}")
 
-    #         await progression.add_coins(user_id, GUILD_ID, 12450)
+    #         await progression.add_coins(user_id, GUILD_ID, 1000)
     #         coins = await progression.get_coins(user_id, GUILD_ID)
     #         print(f"User {user_id} → Coins: {coins}")
 
