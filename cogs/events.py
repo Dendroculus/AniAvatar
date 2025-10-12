@@ -113,7 +113,7 @@ class Events(commands.Cog):
     async def _finalize_expired_poll(
         self,
         *,
-        guild: discord.Guild,
+        guild: Optional[discord.Guild],
         msg: Optional[discord.Message],
         message_id: int,
         question: str,
@@ -138,6 +138,8 @@ class Events(commands.Cog):
             return
 
         try:
+            # guild is guaranteed if msg is present
+            assert guild is not None
             author_member = await self._get_author_member(guild, author_id)
             view = PollView(question=question or "Poll", options=options, author=author_member, timeout=None)
             view.votes = {opt: set(uids) for opt, uids in sanitized_votes.items()}
@@ -216,8 +218,7 @@ class Events(commands.Cog):
             print(f"[Poll Reload] guild {guild_id} not found for poll {message_id}, skipping restore.")
             if remaining_seconds is not None and remaining_seconds <= 0:
                 await self._finalize_expired_poll(
-                    guild=None, 
-                    channel=None,
+                    guild=None,
                     msg=None,
                     message_id=message_id,
                     question=question or "Poll",
@@ -238,7 +239,6 @@ class Events(commands.Cog):
             if remaining_seconds is not None and remaining_seconds <= 0:
                 await self._finalize_expired_poll(
                     guild=guild,
-                    channel=None,
                     msg=None,
                     message_id=message_id,
                     question=question or "Poll",
@@ -259,7 +259,6 @@ class Events(commands.Cog):
         if remaining_seconds is not None and remaining_seconds <= 0:
             await self._finalize_expired_poll(
                 guild=guild,
-                channel=channel,
                 msg=msg,
                 message_id=message_id,
                 question=question or "Poll",
@@ -271,7 +270,6 @@ class Events(commands.Cog):
         else:
             await self._restore_active_poll(
                 guild=guild,
-                channel=channel,
                 msg=msg,
                 message_id=message_id,
                 question=question or "Poll",
