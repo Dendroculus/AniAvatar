@@ -1,94 +1,65 @@
-EN  | [中文](docs/readmeCN.md)
-# AniAvatar Discord Bot
+EN | [中文](docs/readmeCN.md)
 
-<img src="assets/MinoriBG.png" width="1000" height="900">
+<h1 align="center">AniAvatar Discord Bot (Minori)</h1>
 
-AniAvatar is the project name. The bot appears on Discord as **Minori**.<br>
-AniAvatar is a **Discord bot** built with Python and [discord.py](https://discordpy.readthedocs.io/).
-It automates anime-related tasks — search anime info, fetch profile pictures, play trivia, and level up your profile with a full economy system.
+<p align="center">
+  <img src="https://img.shields.io/badge/Python-3.11+-blue.svg" alt="Python Version">
+  <img src="https://img.shields.io/badge/discord.py-v2.x-7289DA.svg?logo=discord&logoColor=white" alt="discord.py">
+  <img src="https://img.shields.io/badge/许可证-MIT-green.svg" alt="许可证">
+  <img src="https://img.shields.io/badge/状态-开发中-orange.svg" alt="状态">
+</p>
 
-**[View Full Bot Documentation](https://your-docs-link-here.com) (Coming Soon!)**
+<p align="center">
+  <img src="assets/MinoriBG.png" width="1000" height="900">
+</p>
+
+**AniAvatar** (appearing on Discord as **Minori**) is a feature-rich bot built with Python and `discord.py`. It automates a wide range of anime-related tasks, including searching for information, fetching profile pictures, hosting trivia games, and managing a server-wide leveling and economy system.
 
 ---
 
 ## ✨ Features
 
-The bot is structured around several core systems, each with unique features.
+### Progression & Economy
+- **EXP & Leveling**: Gain EXP by chatting and playing games.
+- **Level Up Alerts**: Receive public notifications on level-ups and rank changes.
+- **Automatic Role Assignment**: The bot auto-creates and manages title roles (from *Novice* to *Enlightened*) based on user level.
+- **Customizable Profile Cards**: Display your rank, title, and EXP with a personalized card featuring custom themes and backgrounds.
+- **Server Leaderboard**: Compete for the top spot on a beautifully rendered leaderboard image.
+- **Shop, Inventory & Trading**: Earn coins to spend in the item shop. Manage items in your inventory and donate them to other users.
 
-### Progression & Economy System
-- **EXP & Leveling**: Gain experience points simply by chatting in the server.
-- **Level Up Alerts**: Receive a public notification when you level up or achieve a new rank.
-  <details>
-    <summary>Preview</summary>
-    <img src="docs/screenshots/levelup_msg.png" width="600">
-  </details>
-- **Automatic Role Assignment**: As you level up, the bot automatically creates, assigns, and manages title roles (from *Novice* to *Enlightened*), ensuring your status is always reflected.
-- **Customizable Profile Cards**: Show off your rank, title, and EXP with a personalized profile card. You can customize the theme and background.
-  <details>
-    <summary>Preview</summary>
-    <img src="docs/screenshots/profilecards_command.png" width="600">
-  </details>
-- **Server Leaderboard**: Compete with other members and see who's at the top with a beautifully rendered leaderboard image.
-  <details>
-    <summary>Preview</summary>
-    <img src="docs/screenshots/leaderboard_command.png" width="600">
-  </details>
-- **Shop, Inventory & Trading**: Earn coins by leveling up and playing games. Spend them in the shop on items like EXP potions and mystery boxes. Manage your items in your inventory and donate them to other users.
-  <details>
-    <summary>Preview</summary>
-    <img src="docs/screenshots/shop&inventory_command.png" width="600">
-    <img src="docs/screenshots/donate_command.png" width="600">
-  </details>
-
-### Anime Information
-- **Anime & Character Search**: Get detailed information about any anime or find the perfect profile picture for any character using the AniList and Google Search APIs.
-  <details>
-    <summary>Preview</summary>
-    <p><b>Anime Search Process:</b></p>
-    <img src="docs/screenshots/anime_query.png" width="600">
-    <img src="docs/screenshots/anime_choose.png" width="600">
-    <img src="docs/screenshots/anime_result.png" width="600">
-    <p><b>PFP Command:</b></p>
-    <img src="docs/screenshots/animepfp_command.png" width="600">
-  </details>
+<details>
+  <summary><b>View Progression Previews</b></summary>
+  <img src="docs/screenshots/levelup_msg.png" width="600">
+  <img src="docs/screenshots/profilecards_command.png" width="600">
+  <img src="docs/screenshots/leaderboard_command.png" width="600">
+  <img src="docs/screenshots/shop&inventory_command.png" width="600">
+</details>
 
 ### Games & Fun
-- **Anime Quiz & Guessing Games**: Test your knowledge with a multiple-choice anime quiz or guess the character from a random image. Earn EXP and coins for correct answers!
-  <details>
-    <summary>Preview</summary>
-    <img src="docs/screenshots/animequiz_command.png" width="600">
-    <img src="docs/screenshots/guess_character.png" width="600">
-  </details>
-- **Coin Gambling**: Feeling lucky? Gamble your coins with a dynamic win chance.
-  <details>
-    <summary>Preview</summary>
-    <img src="docs/screenshots/gamble_Command.png" width="600">
-  </details>
+- **Anime Quiz & Guessing Games**: Test your knowledge with a multiple-choice quiz or a guess-the-character game to earn EXP and coins.
+- **Coin Gambling**: Gamble your coins with a dynamic win chance.
 - **Waifu & Quotes**: Get random waifu images or memorable quotes from various anime.
-  <details>
-    <summary>Preview</summary>
-    <img src="docs/screenshots/waifu_command.png" width="600">
-    <img src="docs/screenshots/animequotes_command.png" width="600">
-  </details>
 - **Polling**: Create custom polls with up to 5 options for the community to vote on.
-  <details>
-    <summary>Preview</summary>
-    <img src="docs/screenshots/Polling_command.png" width="600">
-  </details>
 
-### Admin & Utilities
-- **Server Announcements**: Admins can easily create and send formatted announcements to any channel, with an option to mention `@everyone`.
-  <details>
-    <summary>Preview</summary>
-    <img src="docs/screenshots/announce_command.png" width="600">
-  </details>
+<details>
+  <summary><b>View Games & Fun Previews</b></summary>
+  <img src="docs/screenshots/animequiz_command.png" width="600">
+  <img src="docs/screenshots/guess_character.png" width="600">
+  <img src="docs/screenshots/gamble_command.png" width="600">
+</details>
+
+### Anime & Utilities
+- **Anime & Character Search**: Get detailed information about any anime or find the perfect profile picture for any character.
+- **Server Announcements**: Admins can easily create and send formatted announcements.
 - **Dynamic Help Command**: Get a clean, organized list of all available commands.
-  <details>
-    <summary>Preview</summary>
-    <img src="docs/screenshots/help_command.png" width="600">
-  </details>
-- **Presence Rotation**: The bot's status rotates every 20 minutes, "watching" a random anime from a list of hundreds.
-- **Error Handling**: Gracefully handles incorrect commands and missing permissions to ensure a smooth user experience.
+- **Presence Rotation**: The bot's status rotates every 20 minutes, "watching" a random anime.
+
+<details>
+  <summary><b>View Utility Previews</b></summary>
+  <img src="docs/screenshots/anime_result.png" width="600">
+  <img src="docs/screenshots/announce_command.png" width="600">
+  <img src="docs/screenshots/help_command.png" width="600">
+</details>
 
 ---
 
@@ -123,13 +94,13 @@ To run your own instance of Minori, follow these steps.
 
 ### 1. Prerequisites
 - Python 3.11+
-- A Discord Bot Token. You can get one from the [Discord Developer Portal](https://discord.com/developers/applications).
 - Git
+- A Discord Bot Token from the [Discord Developer Portal](https://discord.com/developers/applications).
 
 ### 2. Installation
 ```bash
 # Clone the repository
-git clone https://github.com/Dendroculus/AniAvatar.git
+git clone [https://github.com/Dendroculus/AniAvatar.git](https://github.com/Dendroculus/AniAvatar.git)
 
 # Navigate to the project directory
 cd AniAvatar
@@ -138,32 +109,43 @@ cd AniAvatar
 pip install -r requirements.txt
 ```
 
-### 3. API Configuration
-AniAvatar uses the **Google Custom Search API** to fetch anime profile pictures. You’ll need your own **API key** and **Search Engine ID**.
+### 3. Configuration
+This bot requires several API keys and custom emojis to function correctly.
 
-#### A. Get a Google API Key
-1. Go to [Google Cloud Console](https://console.cloud.google.com/).
-2. Create a new project (or use an existing one).
-3. Navigate to **APIs & Services → Credentials**.
-4. Click **Create Credentials → API key**.
-5. Copy the generated key — this will be your `GOOGLE_API_KEY`.
-
-#### B. Create a Custom Search Engine (CSE)
-1. Visit [Google Programmable Search Engine](https://programmablesearchengine.google.com/).
-2. Click **Add**.
-3. Under “Sites to search”, enter image-hosting sites like `myanimelist.net`, `anilist.co`, and `zerochan.net`.
-4. Create the engine and copy the **Search Engine ID (cx)** — this will be your `GOOGLE_CSE_ID`.
-
-### 4. Environment Setup
-In your project directory, create a `.env` file. This file is already in `.gitignore` to prevent you from accidentally sharing your secrets. Add your keys to it:
-
+#### A. Environment Setup
+In your project directory, create a `.env` file and add the following keys. This file is included in `.gitignore` to prevent you from accidentally sharing your secrets.
 ```env
 DISCORD_TOKEN=your_discord_token
 GOOGLE_API_KEY=your_google_api_key
 GOOGLE_CSE_ID=your_google_cse_id
 ```
 
-### 5. Run the Bot
+#### B. Google Custom Search API
+The `/animepfp` command requires a Google API Key and a Custom Search Engine ID.
+<details>
+  <summary>Click here for instructions on how to get your Google API keys</summary>
+  
+  1.  **Get an API Key**
+      - Go to the [Google Cloud Console](https://console.cloud.google.com/).
+      - Create a new project (or use an existing one).
+      - Navigate to **APIs & Services → Credentials**.
+      - Click **Create Credentials → API key** and copy the key.
+
+  2.  **Create a Custom Search Engine (CSE)**
+      - Visit the [Google Programmable Search Engine](https://programmablesearchengine.google.com/) control panel.
+      - Click **Add** to create a new search engine.
+      - Under “Sites to search”, enter image-hosting sites like `myanimelist.net`, `anilist.co`, and `zerochan.net`.
+      - Create the engine and copy the **Search Engine ID (cx)**.
+</details>
+
+#### C. Custom Emojis
+The bot uses custom emojis for its UI.
+1.  Upload all emojis from the `/assets/other essentials emojis/` directory to a Discord server where your bot is present.
+2.  Enable Developer Mode in Discord, right-click each emoji, and copy its ID.
+3.  You must update the emoji IDs in the code (primarily in `games.py` and `progression.py`) to match the IDs of your newly uploaded emojis.
+
+### 4. Run the Bot
+Once configured, you can start the bot with:
 ```bash
 python main.py
 ```
@@ -171,28 +153,17 @@ python main.py
 ---
 
 ## 🛠 Built With
-- Python 3.11+
-- [discord.py 2.x](https://pypi.org/project/discord.py/)
-- [aiohttp](https://docs.aiohttp.org/)
-- [Pillow (PIL)](https://pillow.readthedocs.io/en/stable/) for image manipulation
-- [AniList API (GraphQL)](https://anilist.co/graphiql) – anime data
-- [Google Custom Search API](https://developers.google.com/custom-search) – image search
-- SQLite – local database for profiles, stats, and leveling
+- **Framework & Libraries**: Python 3.11+, [discord.py](https://pypi.org/project/discord.py/), [aiohttp](https://docs.aiohttp.org/), [Pillow (PIL)](https://pillow.readthedocs.io/en/stable/)
+- **APIs**: [AniList API (GraphQL)](https://anilist.co/graphiql), [Google Custom Search API](https://developers.google.com/custom-search)
+- **Database**: SQLite for local storage of profiles, stats, and leveling data.
 
 ---
 
 ## 📜 License
-This project is licensed under the **MIT License** — you are free to use, modify, and distribute it, provided proper credit is given.
-See the [LICENSE](LICENSE) file for details.
+This project is licensed under the **MIT License**. See the [LICENSE](LICENSE) file for details.
 
 ---
 
 ## 🙌 Acknowledgements
-Thanks to [Noto Fonts](https://github.com/notofonts/noto-cjk/releases) for providing the CJK font support.
-
-## ⚠️ Disclaimer
-AniAvatar is an independent project and is **not affiliated with, supported by, or endorsed by Discord Inc., AniList, or Google.**
-All assets (backgrounds, icons, profile cards) are original and created by me.
-
----
-🚧 **Note:** AniAvatar is currently under active development — features and code structure are subject to change.
+- Thanks to [Noto Fonts](https://github.com/notofonts/noto-cjk/releases) for providing CJK font support for the profile cards.
+- This project is an independent creation and is **not affiliated with, supported by, or endorsed by Discord Inc., AniList, or Google.** All original assets are created by me.
