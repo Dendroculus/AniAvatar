@@ -1,6 +1,6 @@
 import discord
 from discord.ext import commands
-import sqlite3
+import aiosqlite
 import os
 import random
 import asyncio
@@ -136,13 +136,15 @@ class Progression(commands.Cog):
         data_path = os.path.join(os.path.dirname(__file__), "..", "data", "minori.db")
         os.makedirs(os.path.dirname(data_path), exist_ok=True)
         data_path = os.path.abspath(data_path)
-        self.conn = sqlite3.connect(data_path, check_same_thread=False, timeout=30)
-        self.c = self.conn.cursor()
-        
-        self.conn.execute("PRAGMA journal_mode=WAL;")
-        self.conn.execute("PRAGMA synchronous=NORMAL;")
+        self.db_path = data_path
+        self.conn: aiosqlite.Connection | None = None
         self.db_lock = asyncio.Lock()
-        self.c.execute("""
+
+    async def cog_load(self):
+        self.conn = await aiosqlite.connect(self.db_path)
+        await self.conn.execute("PRAGMA journal_mode=WAL;")
+        await self.conn.execute("PRAGMA synchronous=NORMAL;")
+        await self.conn.execute("""
             CREATE TABLE IF NOT EXISTS users (
                 user_id INTEGER,
                 guild_id INTEGER,
@@ -151,26 +153,30 @@ class Progression(commands.Cog):
                 PRIMARY KEY (user_id, guild_id)
             )
         """)
-        self.c.execute("""
+        await self.conn.execute("""
         CREATE TABLE IF NOT EXISTS profile_theme (
             user_id INTEGER PRIMARY KEY,
             theme_name TEXT DEFAULT 'default',
             bg_file TEXT DEFAULT 'NULL',
             font_color TEXT DEFAULT 'white'
         )
-    """)
-
-        self.conn.commit()
-        
-        self.c.execute("""
+        """)
+        await self.conn.execute("""
         CREATE TABLE IF NOT EXISTS user_coins (
             user_id INTEGER,
             guild_id INTEGER,
             coins INTEGER DEFAULT 0,
             PRIMARY KEY(user_id, guild_id)
         )
-    """)
-        self.conn.commit()
+        """)
+        await self.conn.commit()
+
+    async def cog_unload(self):
+        try:
+            if self.conn:
+                await self.conn.close()
+        except Exception:
+            pass
         
     async def safe_send(self, ctx, *args, **kwargs):
         interaction = getattr(ctx, "interaction", None)
@@ -242,39 +248,39 @@ class Progression(commands.Cog):
 
     async def get_coins(self, user_id: int, guild_id: int) -> int:
         async with self.db_lock:
-            self.c.execute("SELECT coins FROM user_coins WHERE user_id = ? AND guild_id = ?", (user_id, guild_id))
-            result = self.c.fetchone()
-            if not result:
-                self.c.execute("INSERT INTO user_coins (user_id, guild_id) VALUES (?, ?)", (user_id, guild_id))
-                self.conn.commit()
+            async with self.conn.execute("SELECT coins FROM user_coins WHERE user_id = ? AND guild_id = ?", (user_id, guild_id)) as cur:
+                row = await cur.fetchone()
+            if not row:
+                await self.conn.execute("INSERT INTO user_coins (user_id, guild_id) VALUES (?, ?)", (user_id, guild_id))
+                await self.conn.commit()
                 return 0
-            return result[0]
+            return int(row[0])
 
     async def add_coins(self, user_id: int, guild_id: int, amount: int):
         if amount == 0:
             return
         amount = int(amount)
         async with self.db_lock:
-            self.c.execute(
+            await self.conn.execute(
                 "INSERT OR IGNORE INTO user_coins (user_id, guild_id, coins) VALUES (?, ?, 0)",
                 (user_id, guild_id)
             )
-            self.c.execute(
+            await self.conn.execute(
                 """
                 INSERT INTO user_coins (user_id, guild_id, coins) VALUES (?, ?, ?)
                 ON CONFLICT(user_id, guild_id) DO UPDATE SET coins = coins + ?
                 """,
                 (user_id, guild_id, amount, amount)
             )
-            self.conn.commit()
+            await self.conn.commit()
         
     async def ensure_user_row(self, user_id: int, guild_id: int):
         async with self.db_lock:
-            self.c.execute(
+            await self.conn.execute(
                 "INSERT OR IGNORE INTO user_coins (user_id, guild_id, coins) VALUES (?, ?, 0)",
                 (user_id, guild_id)
             )
-            self.conn.commit()
+            await self.conn.commit()
 
     async def remove_coins(self, user_id: int, guild_id: int, amount: int) -> bool:
         amount = int(amount)
@@ -282,73 +288,70 @@ class Progression(commands.Cog):
             return False
 
         async with self.db_lock:
-            self.c.execute(
+            await self.conn.execute(
                 "INSERT OR IGNORE INTO user_coins (user_id, guild_id, coins) VALUES (?, ?, 0)",
                 (user_id, guild_id)
             )
-            self.c.execute(
+            async with self.conn.execute(
                 "UPDATE user_coins SET coins = coins - ? WHERE user_id = ? AND guild_id = ? AND coins >= ?",
                 (amount, user_id, guild_id, amount)
-            )
-            success = self.c.rowcount > 0
-            self.conn.commit()
-            return success
+            ) as cur:
+                await self.conn.commit()
+                return cur.rowcount > 0
 
     async def reserve_coins(self, user_id: int, guild_id: int, amount: int) -> bool:
         return await self.remove_coins(user_id, guild_id, amount)
 
     async def get_user_theme(self, user_id: int):
         async with self.db_lock:
-            self.c.execute("SELECT theme_name, bg_file, font_color FROM profile_theme WHERE user_id = ?", (user_id,))
-            result = self.c.fetchone()
-            if not result:
-                self.c.execute(
-                    "INSERT INTO profile_theme (user_id) VALUES (?)", (user_id,)
-                )
-                self.conn.commit()
+            async with self.conn.execute("SELECT theme_name, bg_file, font_color FROM profile_theme WHERE user_id = ?", (user_id,)) as cur:
+                row = await cur.fetchone()
+            if not row:
+                await self.conn.execute("INSERT INTO profile_theme (user_id) VALUES (?)", (user_id,))
+                await self.conn.commit()
                 return "galaxy", "GALAXY.PNG", "white"
-            return result
+            return row
 
     async def set_user_theme(self, user_id: int, theme_name: str, bg_file: str, font_color: str = "white"):
         async with self.db_lock:
-            self.c.execute(
+            await self.conn.execute(
                 "INSERT OR REPLACE INTO profile_theme (user_id, theme_name, bg_file, font_color) VALUES (?, ?, ?, ?)",
                 (user_id, theme_name, bg_file, font_color)
             )
-            self.conn.commit()
+            await self.conn.commit()
     
     def truncate(self, text: str, max_len: int):
         return text if len(text) <= max_len else text[:max_len - 3] + "..."
 
     async def get_user(self, user_id: int, guild_id: int):
         async with self.db_lock:
-            self.c.execute(
+            async with self.conn.execute(
                 "SELECT exp, level FROM users WHERE user_id = ? AND guild_id = ?",
                 (user_id, guild_id)
-            )
-            result = self.c.fetchone()
-            if result is None:
-                self.c.execute(
+            ) as cur:
+                row = await cur.fetchone()
+            if row is None:
+                await self.conn.execute(
                     "INSERT INTO users (user_id, guild_id) VALUES (?, ?)",
                     (user_id, guild_id)
                 )
-                self.conn.commit()
+                await self.conn.commit()
                 return 0, 1
-            return result
+            return row
 
     async def add_exp(self, user_id: int, guild_id: int, amount: int):
         async with self.db_lock:
-            self.c.execute(
+            async with self.conn.execute(
                 "SELECT exp, level FROM users WHERE user_id = ? AND guild_id = ?",
                 (user_id, guild_id)
-            )
-            row = self.c.fetchone()
+            ) as cur:
+                row = await cur.fetchone()
             if row is None:
-                self.c.execute(
+                await self.conn.execute(
                     "INSERT INTO users (user_id, guild_id, exp, level) VALUES (?, ?, 0, 1)",
                     (user_id, guild_id)
                 )
-                self.conn.commit()
+                await self.conn.commit()
                 exp = 0
                 level = 1
             else:
@@ -370,19 +373,19 @@ class Progression(commands.Cog):
                 level = self.MAX_LEVEL
                 new_exp = 0
 
-            self.c.execute(
+            await self.conn.execute(
                 "UPDATE users SET exp = ?, level = ? WHERE user_id = ? AND guild_id = ?",
                 (new_exp, level, user_id, guild_id)
             )
-            self.conn.commit()
+            await self.conn.commit()
             return level, new_exp, leveled_up
 
     
     @commands.Cog.listener()
     async def on_guild_remove(self, guild: discord.Guild):
         async with self.db_lock:
-            self.c.execute("DELETE FROM users WHERE guild_id = ?", (guild.id,))
-            self.conn.commit()
+            await self.conn.execute("DELETE FROM users WHERE guild_id = ?", (guild.id,))
+            await self.conn.commit()
         print(f"[Progression] Cleaned up DB for guild {guild.id} ({guild.name})")
         
     @commands.hybrid_command(name="profile", description="Check your level, EXP, and title")
@@ -397,7 +400,6 @@ class Progression(commands.Cog):
             exp, level = await self.get_user(member.id, ctx.guild.id)
             title_name = get_title(level)
 
-            
             if level >= self.MAX_LEVEL:
                 next_exp = None  
             else:
@@ -477,7 +479,7 @@ class Progression(commands.Cog):
 
         try:
             async with self.db_lock:
-                self.c.execute(
+                async with self.conn.execute(
                     """
                     SELECT user_id, level, exp
                     FROM users
@@ -487,8 +489,8 @@ class Progression(commands.Cog):
                     LIMIT 10
                     """,
                     (ctx.guild.id, self.MAX_LEVEL)
-                )
-                rows = self.c.fetchall()
+                ) as cur:
+                    rows = await cur.fetchall()
         except Exception as e:
             print("[leaderboard] DB query failed:", e)
             return await ctx.send("Failed to fetch leaderboard data (check logs).")
@@ -529,7 +531,6 @@ class Progression(commands.Cog):
                 print("[leaderboard] fallback sequential build failed:", se, traceback.format_exc())
                 return await ctx.send("Failed to build leaderboard (check logs).")
 
-        # Debug log
         print("Generating leaderboard for", len(rows_data), "rows")
         for idx, rd in enumerate(rows_data[:6]):
             print(f" row[{idx}]: name={rd.get('name')} level={rd.get('level')} exp={rd.get('exp')} next={rd.get('next_exp')}")
@@ -727,13 +728,13 @@ class Progression(commands.Cog):
             new_emoji = get_title_emoji(level)
             new_title = get_title(level)
 
-            if new_title != old_title:  # Ascension happened
+            if new_title != old_title:
                 embed_title = f"{message.author.display_name} <:LEVELUP:1413479714428948551> {level}    {old_emoji} <:RIGHTWARDARROW:1414227272302334062> {new_emoji}"
                 embed_description = (
                     f"```Congratulations {message.author.display_name}! You have reached level {level} and ascended to {new_title}. ```\n"
                     f"Title: `{new_title}` {new_emoji}"
                 )
-            else:  # Normal level-up
+            else:
                 embed_title = f"{message.author.display_name} <:LEVELUP:1413479714428948551> {level}"
                 embed_description = (
                     f"```Congratulations {message.author.display_name}! You have reached level {level}.```\n"
@@ -767,44 +768,13 @@ class Progression(commands.Cog):
         
     async def get_rank(self, user_id: int, guild_id: int):
         async with self.db_lock:
-            self.c.execute(
+            async with self.conn.execute(
                 "SELECT COUNT(*)+1 FROM users WHERE guild_id = ? AND (level > (SELECT level FROM users WHERE user_id = ? AND guild_id = ?) OR (level = (SELECT level FROM users WHERE user_id = ? AND guild_id = ?) AND exp > (SELECT exp FROM users WHERE user_id = ? AND guild_id = ?)))",
                 (guild_id, user_id, guild_id, user_id, guild_id, user_id, guild_id)
-            )
-            return self.c.fetchone()[0]
-    
-    # @commands.Cog.listener()
-    # async def on_ready(self):
-    #     print(f"{self.bot.user} is ready!")
-
-    #     YOUR_ID = [
-    #         609614026573479936
-    #     ] 
-
-    #     GUILD_ID = 974498807817588756 
-
-    #     progression = self.bot.get_cog("Progression")
-    #     if not progression:
-    #         print("Progression cog not loaded!")
-    #         return
-
-    #     rand_exp = random.randint(999999, 999999)
-    #     for user_id in YOUR_ID:
-    #         level, exp, leveled_up = await self.add_exp(user_id, GUILD_ID, rand_exp)
-    #         print(f"User {user_id} → Level {level}, EXP {exp}, Leveled up? {leveled_up}")
-
-    #         await progression.add_coins(user_id, GUILD_ID, 1000)
-    #         coins = await progression.get_coins(user_id, GUILD_ID)
-    #         print(f"User {user_id} → Coins: {coins}")
-
-    #     first_user = YOUR_ID[0]
-    #     print(f"🎉 First user {first_user} now has Level {level}, EXP {exp}, Coins {coins}. Leveled up? {leveled_up}")
-
+            ) as cur:
+                row = await cur.fetchone()
+                return int(row[0]) if row else 1
     
 async def setup(bot):
     await bot.add_cog(Progression(bot))
     print("📦 Loaded progression cog.")
-
-
-
-
