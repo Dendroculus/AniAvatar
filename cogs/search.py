@@ -288,4 +288,3 @@ class Search(commands.Cog):
 
 async def setup(bot):
     await bot.add_cog(Search(bot))
-    print("📦 Loaded search cog.")

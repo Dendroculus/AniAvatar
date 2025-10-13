@@ -327,4 +327,3 @@ class Events(commands.Cog):
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(Events(bot))
-    print("📦 Loaded Events cog.")

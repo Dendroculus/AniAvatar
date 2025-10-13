@@ -463,4 +463,3 @@ class Fun(commands.Cog):
 
 async def setup(bot):
     await bot.add_cog(Fun(bot))
-    print("📦 Loaded fun cog.")

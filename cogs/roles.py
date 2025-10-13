@@ -298,4 +298,3 @@ class Roles(commands.Cog):
 
 async def setup(bot):
     await bot.add_cog(Roles(bot))
-    print("📦 Loaded roles cog.")
