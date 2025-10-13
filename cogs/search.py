@@ -252,8 +252,7 @@ class Search(commands.Cog):
 
         char, official_image = await self._find_official_image(name, per_call_timeout)
 
-        if char and char.get("source") == "AniList" and not char_has_anime_media(char):
-            return await reply("❌ Could not find an anime character matching your query. Try a full character name (e.g. `Kaoruko Waguri`).")
+        non_anime_from_anilist = bool(char and char.get("source") == "AniList" and not char_has_anime_media(char))
 
         cache_key = None
         selected_image = None
@@ -264,12 +263,26 @@ class Search(commands.Cog):
             character_name = (char.get("name") or {}).get("full") if char else name
             cache_key = f"al_{char_id}" if char_id is not None else None
 
+            used_before = False
             if cache_key:
                 entry = self._cache_get(cache_key)
-                if official_image not in entry["anilist_images"]:
+                used_before = official_image in entry["anilist_images"]
+
+            if used_before or non_anime_from_anilist:
+                google_img = await self._find_google_image(character_name, cache_key, per_call_timeout)
+                if google_img:
+                    selected_image = google_img
+                    source = "Google API"
+                else:
+                    if cache_key and not used_before:
+                        self._cache_add_anilist(cache_key, official_image)
+                    selected_image = official_image
+                    source = char.get("source") or "AniList"
+            else:
+                if cache_key:
                     self._cache_add_anilist(cache_key, official_image)
-            selected_image = official_image
-            source = char.get("source") or "AniList"
+                selected_image = official_image
+                source = char.get("source") or "AniList"
         else:
             character_name = (char.get("name") or {}).get("full") if char else name
             char_id = char.get("id") if char else None
@@ -277,6 +290,8 @@ class Search(commands.Cog):
 
             selected_image = await self._find_google_image(character_name, cache_key, per_call_timeout)
             if not selected_image:
+                if non_anime_from_anilist:
+                    return await reply(f"❌ Could not find anime media for **{character_name}**, and no Google images were reachable.")
                 return await reply(f"❌ No reachable images found for **{character_name}** via Google.")
             source = "Google API"
 
