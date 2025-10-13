@@ -105,4 +105,3 @@ class ErrorHandler(commands.Cog):
 
 async def setup(bot):
     await bot.add_cog(ErrorHandler(bot))
-    print("📦 Loaded error handler cog.")

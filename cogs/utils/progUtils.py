@@ -1081,5 +1081,3 @@ def create_leaderboard_image(
         b.seek(0)
         return b.getvalue()
 
-
-print("📦 Loaded utils.progUtils cog.")

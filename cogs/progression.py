@@ -786,4 +786,3 @@ class Progression(commands.Cog):
     
 async def setup(bot):
     await bot.add_cog(Progression(bot))
-    print("📦 Loaded progression cog.")
