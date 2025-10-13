@@ -59,6 +59,7 @@ class InventorySelect(discord.ui.Select):
         self.guild_id = guild_id
         self.items_data = items
         self.parent_view = parent_view
+        self._release_lock_task = None  
 
         options = [
             discord.SelectOption(
@@ -182,7 +183,7 @@ class InventorySelect(discord.ui.Select):
             async def release_lock():
                 await asyncio.sleep(2)  
                 self.cog.user_locks[self.user_id] = False
-            asyncio.create_task(release_lock())
+            self._release_lock_task = asyncio.create_task(release_lock())
 
 class InventoryView(discord.ui.View):
     def __init__(self, cog, user_id, guild_id, items, timeout=180):
@@ -221,7 +222,7 @@ class InventoryView(discord.ui.View):
             except Exception:
                 pass
         except asyncio.CancelledError:
-            return
+            raise
 
     def reset_timer(self):
         self.start_timeout()
@@ -361,7 +362,7 @@ class ShopView(discord.ui.View):
             except Exception:
                 pass
         except asyncio.CancelledError:
-            return
+            raise
 
 
     def reset_timer(self):
@@ -725,4 +726,4 @@ class Trading(commands.Cog):
 
 async def setup(bot):
     await bot.add_cog(Trading(bot))
-    print("📦 Loaded shop cog.")
+    print("📦 Loaded trading cog.")
