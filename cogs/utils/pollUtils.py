@@ -166,17 +166,17 @@ class PollView(discord.ui.View):
 
     async def _auto_end(self):
         try:
-            while not self.ended and self.end_time:
-                now = datetime.now(timezone.utc)
-                remaining = (self.end_time - now).total_seconds()
-                if remaining <= 0:
-                    break
+            if self.ended or not self.end_time:
+                return
+
+            remaining = (self.end_time - datetime.now(timezone.utc)).total_seconds()
+            if remaining > 0:
                 await asyncio.sleep(remaining)
-                break
+
             if not self.ended:
                 await self.on_timeout()
         except asyncio.CancelledError:
-            return
+            raise
 
     async def _ensure_poll_active(self, interaction: discord.Interaction) -> bool:
         if self.ended:
