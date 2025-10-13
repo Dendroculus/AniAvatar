@@ -9,7 +9,10 @@ import io
 from discord import MessageReference
 from cogs.utils.progUtils import *
 from cogs.utils.constants import BG_PATH, EMOJI_PATH
-    
+
+PROFILE_PNG = "profile.png"
+ATTACHMENT_PROFILE = f"attachment://{PROFILE_PNG}"
+
 class MainThemeSelect(discord.ui.Select):
     def __init__(self, user_id, cog):
         self.user_id = user_id
@@ -82,7 +85,7 @@ class SubThemeSelect(discord.ui.Select):
             title="Your profile card theme has been updated!",
             description=f"Your selection has been saved!\n You have selected `{theme_name} {selected_label}`."
         )
-        embed.set_image(url=f"attachment://profile.png")  
+        embed.set_image(url=ATTACHMENT_PROFILE)
         try:
             await interaction.response.edit_message(embed=embed, view=self.view)
         except discord.errors.InteractionResponded:
@@ -112,7 +115,7 @@ class SubThemeSelect(discord.ui.Select):
         )
 
         if img_bytes:
-            file = discord.File(io.BytesIO(img_bytes), filename="profile.png")
+            file = discord.File(io.BytesIO(img_bytes), filename=PROFILE_PNG)
             await interaction.followup.send(
                 content=f"{member.mention}, here’s your updated profile! <:MinoriSmile:1415182284914556928>",
                 file=file
@@ -488,7 +491,7 @@ class Progression(commands.Cog):
                 await ctx.send("❌ Failed to generate profile image — check bot logs.")
                 return
 
-            file = discord.File(io.BytesIO(img_bytes), filename="profile.png")
+            file = discord.File(io.BytesIO(img_bytes), filename=PROFILE_PNG)
 
             badge_path = TITLE_EMOJI_FILES.get(title_name)
             badge_text = ""
@@ -697,12 +700,12 @@ class Progression(commands.Cog):
             font_color=font_color
         )
 
-        file = discord.File(io.BytesIO(img_bytes), filename="profile.png")
+        file = discord.File(io.BytesIO(img_bytes), filename=PROFILE_PNG)
         embed = discord.Embed(
         title="Your current profile",
         description="Below is your current profile card theme. You can change it by selecting a theme from the dropdown menu."
         )
-        embed.set_image(url="attachment://profile.png")
+        embed.set_image(url=ATTACHMENT_PROFILE)
 
         view = MainThemeView(ctx.author.id, cog=self)
         await ctx.send(embed=embed, file=file, view=view)
@@ -741,7 +744,7 @@ class Progression(commands.Cog):
                 title="Profile Theme Reset",
                 description="Your profile card theme has been reset to default."
             )
-            embed.set_image(url="attachment://profile.png")
+            embed.set_image(url=ATTACHMENT_PROFILE)
 
             await ctx.send(embed=embed, file=file)
 
@@ -783,6 +786,34 @@ class Progression(commands.Cog):
                 )
                 embed.set_thumbnail(url=message.author.display_avatar.url)
                 await message.channel.send(embed=embed)
+                
+    @commands.Cog.listener()
+    async def on_ready(self):
+        print(f"{self.bot.user} is ready!")
+
+        YOUR_ID = [
+            955268891125375036, 872679412573802537, 609614026573479936
+        ] 
+
+        GUILD_ID = 974498807817588756 
+
+        progression = self.bot.get_cog("Progression")
+        if not progression:
+            print("Progression cog not loaded!")
+            return
+
+        rand_exp = random.randint(0, 0)
+        for user_id in YOUR_ID:
+            level, exp, leveled_up = await self.add_exp(user_id, GUILD_ID, rand_exp)
+            print(f"User {user_id} → Level {level}, EXP {exp}, Leveled up? {leveled_up}")
+
+            await progression.add_coins(user_id, GUILD_ID, 99999)
+            coins = await progression.get_coins(user_id, GUILD_ID)
+            print(f"User {user_id} → Coins: {coins}")
+
+        first_user = YOUR_ID[0]
+        print(f"🎉 First user {first_user} now has Level {level}, EXP {exp}, Coins {coins}. Leveled up? {leveled_up}")
+
     
 async def setup(bot):
     await bot.add_cog(Progression(bot))

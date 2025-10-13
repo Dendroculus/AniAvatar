@@ -12,6 +12,7 @@ DB_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "..", "data",
 
 _DB: Optional[aiosqlite.Connection] = None
 _DB_LOCK = asyncio.Lock()
+MODAL_PLACEHOLDER = "Leave empty if not needed"
 
 async def get_db() -> aiosqlite.Connection:
     global _DB
@@ -466,15 +467,15 @@ class PollView(discord.ui.View):
 
 class AddOptionModal(ui.Modal, title="Add Poll Options"):
     opt1 = ui.TextInput(label="Option 1 (optional)", required=False, max_length=100,
-                        placeholder="Leave empty if not needed")
+                        placeholder=MODAL_PLACEHOLDER)
     opt2 = ui.TextInput(label="Option 2 (optional)", required=False, max_length=100,
-                        placeholder="Leave empty if not needed")
+                        placeholder=MODAL_PLACEHOLDER)
     opt3 = ui.TextInput(label="Option 3 (optional)", required=False, max_length=100,
-                        placeholder="Leave empty if not needed")
+                        placeholder=MODAL_PLACEHOLDER)
     opt4 = ui.TextInput(label="Option 4 (optional)", required=False, max_length=100,
-                        placeholder="Leave empty if not needed")
+                        placeholder=MODAL_PLACEHOLDER)
     opt5 = ui.TextInput(label="Option 5 (optional)", required=False, max_length=100,
-                        placeholder="Leave empty if not needed")
+                        placeholder=MODAL_PLACEHOLDER)
 
     def __init__(self, poll_view: "PollView"):
         super().__init__()
@@ -606,3 +607,4 @@ class PollInputModal(ui.Modal, title="Create Poll"):
                 await interaction.response.send_message(f"⚠️ Failed to create poll: {e}", ephemeral=True)
             except discord.errors.InteractionResponded:
                 await interaction.followup.send(f"⚠️ Failed to create poll: {e}", ephemeral=True)
+                

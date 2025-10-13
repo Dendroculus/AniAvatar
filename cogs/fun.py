@@ -10,7 +10,8 @@ import time
 from itertools import cycle
 from typing import Dict, Optional
 from cogs.utils.pollUtils import *
-                
+
+FALSE_GAMBLE_SESSION = "⚠️ This is not your gamble session."
 class Fun(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -247,7 +248,7 @@ class Fun(commands.Cog):
 
             async def select_callback(self, interaction: discord.Interaction):
                 if interaction.user.id != self.user_id:
-                    await send_using_interaction_or_ctx(interaction, "⚠️ This is not your gamble session.", ephemeral=True)
+                    await send_using_interaction_or_ctx(interaction, FALSE_GAMBLE_SESSION, ephemeral=True)
                     return
                 self.reset_timeout()
                 current_coins = await progression_cog.get_coins(self.user_id, self.guild_id)
@@ -282,7 +283,7 @@ class Fun(commands.Cog):
 
                         async def on_submit(self, interaction: discord.Interaction):
                             if interaction.user.id != self.owner_id:
-                                await self.send_fn(interaction, "⚠️ This is not your gamble session.", ephemeral=True)
+                                await self.send_fn(interaction, FALSE_GAMBLE_SESSION, ephemeral=True)
                                 return
                             try:
                                 amount = int(self.amount_input.value)
@@ -317,7 +318,7 @@ class Fun(commands.Cog):
 
             async def exit_callback(self, interaction: discord.Interaction):
                 if interaction.user.id != self.user_id:
-                    await send_using_interaction_or_ctx(interaction, "⚠️ This is not your gamble session.", ephemeral=True)
+                    await send_using_interaction_or_ctx(interaction, FALSE_GAMBLE_SESSION, ephemeral=True)
                     return
                 try:
                     self.active_views.get(self.guild_id, {}).pop(self.user_id, None)
