@@ -162,7 +162,11 @@ class Search(commands.Cog):
                 value=str(anime["id"])
             ))
 
-        async def select_callback(interaction: discord.Interaction):
+        async def select_callback(interaction: discord.Interaction):            
+            if interaction.user != ctx.author:
+                await interaction.response.send_message("This is not your command!", ephemeral=True)
+                return
+
             await interaction.response.defer()
             anime_id = int(interaction.data["values"][0])
             anime_data = next(a for a in results if a["id"] == anime_id)
