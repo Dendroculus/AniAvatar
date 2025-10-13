@@ -8,7 +8,7 @@ import json
 import os
 import time
 from itertools import cycle
-from typing import Dict, Optional, Callable, Coroutine, Any
+from typing import Dict, Optional
 from cogs.utils.pollUtils import *
                 
 class Fun(commands.Cog):
@@ -20,7 +20,7 @@ class Fun(commands.Cog):
         self._gamble_counts: Dict[tuple, int] = {}
         self._gamble_cooldowns: Dict[tuple, float] = {}
         self.GAMBLE_MAX_ATTEMPTS = 20
-        self.GAMBLE_COOLDOWN_SECONDS = 5 * 60  # 
+        self.GAMBLE_COOLDOWN_SECONDS = 5 * 60  
         
         self.data_path = os.path.join(os.path.dirname(__file__), "..", "data", "quotes.json")
         try:
@@ -195,27 +195,27 @@ class Fun(commands.Cog):
                 select.callback = self.select_callback
                 return select
 
-            def _disable_controls(self):
+            async def _disable_controls(self):
                 try:
                     for item in self.children:
                         if hasattr(item, "disabled"):
                             item.disabled = True
                     if getattr(self, "message", None):
                         try:
-                            asyncio.create_task(self.message.edit(view=self))
+                            await self.message.edit(view=self)
                         except Exception:
                             pass
                 except Exception:
                     pass
 
-            def _enable_controls(self):
+            async def _enable_controls(self):
                 try:
                     for item in self.children:
                         if hasattr(item, "disabled"):
                             item.disabled = False
                     if getattr(self, "message", None):
                         try:
-                            asyncio.create_task(self.message.edit(view=self))
+                            await self.message.edit(view=self)
                         except Exception:
                             pass
                 except Exception:
@@ -243,7 +243,7 @@ class Fun(commands.Cog):
                         pass
                     self.stop()
                 except asyncio.CancelledError:
-                    return
+                    raise
 
             async def select_callback(self, interaction: discord.Interaction):
                 if interaction.user.id != self.user_id:
@@ -312,7 +312,7 @@ class Fun(commands.Cog):
                 if value > current_coins:
                     await send_using_interaction_or_ctx(interaction, f"❌ Not enough coins. You have {current_coins} <:Coins:1415353285270966403>.", ephemeral=True)
                     return
-                self._disable_controls()
+                await self._disable_controls()
                 await process_gamble(interaction, value)
 
             async def exit_callback(self, interaction: discord.Interaction):
@@ -396,7 +396,7 @@ class Fun(commands.Cog):
                 view_obj = self.active_views.get(guild_id, {}).get(user_id)
                 if view_obj:
                     try:
-                        view_obj._disable_controls()
+                        await view_obj._disable_controls()
                     except Exception:
                         pass
                     try:
@@ -407,7 +407,7 @@ class Fun(commands.Cog):
             view_obj = self.active_views.get(guild_id, {}).get(user_id)
             if view_obj:
                 try:
-                    view_obj._enable_controls()
+                    await view_obj._enable_controls()
                 except Exception:
                     pass
 
@@ -464,4 +464,3 @@ class Fun(commands.Cog):
 async def setup(bot):
     await bot.add_cog(Fun(bot))
     print("📦 Loaded fun cog.")
-
