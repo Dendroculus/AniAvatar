@@ -11,6 +11,20 @@ COG_PATH = os.path.dirname(os.path.abspath(__file__))
 ROOT_PATH = os.path.dirname(COG_PATH)
 SHOP_ICON_URL = "https://cdn.discordapp.com/emojis/1415555390489366680.png"
 
+MYSTERY_BOX_NAME = "Mystery Box"
+SMALL_EXP_POTION = "Small EXP Potion"
+MEDIUM_EXP_POTION = "Medium EXP Potion"
+LARGE_EXP_POTION = "Large EXP Potion"
+LEVEL_SKIP_TOKEN = "Level Skip Token"
+
+POTION_ITEMS = (SMALL_EXP_POTION, MEDIUM_EXP_POTION, LARGE_EXP_POTION, LEVEL_SKIP_TOKEN)
+
+SQL_USER_INV_SELECT = "SELECT item_name, quantity FROM user_inventory WHERE user_id = ? AND guild_id = ?"
+SQL_UPSERT_USER_INV = """
+INSERT INTO user_inventory (user_id, guild_id, item_name, quantity)
+VALUES (?, ?, ?, ?)
+ON CONFLICT(user_id, guild_id, item_name) DO UPDATE SET quantity = quantity + ?
+"""
 
 def format_coins(coins: int) -> str:
     if coins < 1_000:
@@ -107,7 +121,7 @@ class InventorySelect(discord.ui.Select):
                     await interaction.followup.send("❌ You don't own this item anymore.", ephemeral=True)
                     return
 
-                if selected_item in ["Small EXP Potion", "Medium EXP Potion", "Large EXP Potion", "Level Skip Token"]:
+                if selected_item in POTION_ITEMS:
                     async with conn.execute("SELECT level FROM users WHERE user_id = ? AND guild_id = ?", (self.user_id, self.guild_id)) as cur:
                         row_lvl = await cur.fetchone()
                     if row_lvl and row_lvl[0] >= self.cog.progression_cog.MAX_LEVEL:
@@ -126,7 +140,7 @@ class InventorySelect(discord.ui.Select):
 
             feedback_msg = f"You used {selected_emoji} **{selected_item}**!"
 
-            if selected_item in ["Small EXP Potion", "Medium EXP Potion", "Large EXP Potion", "Level Skip Token"]:
+            if selected_item in POTION_ITEMS:
                 gain, extra_msg = await self.cog.apply_potion_effect(
                     self.user_id, self.guild_id, selected_item, interaction.channel
                 ) 
@@ -134,7 +148,7 @@ class InventorySelect(discord.ui.Select):
                 if extra_msg:
                     feedback_msg += f"\n{extra_msg}" 
                     
-            if selected_item == "Mystery Box":
+            if selected_item == MYSTERY_BOX_NAME:
                 rewards = await self.cog.apply_mystery_box(self.user_id, self.guild_id)
                 if rewards:
                     reward_lines = []
@@ -145,12 +159,11 @@ class InventorySelect(discord.ui.Select):
                     for item, qty in rewards:
                         emoji = emap.get(item, "📦")
                         reward_lines.append(f"{qty}x {emoji} {item}")
-                    feedback_msg = "<:MysteryBox:1415707555325415485> You opened a Mystery Box and got:\n" + "\n".join(reward_lines)
+                    feedback_msg = f"<:MysteryBox:1415707555325415485> You opened a {MYSTERY_BOX_NAME} and got:\n" + "\n".join(reward_lines)
 
             lock = self.cog.progression_cog.db_lock
             async with lock:
-                async with conn.execute("SELECT item_name, quantity FROM user_inventory WHERE user_id = ? AND guild_id = ?",
-                                        (self.user_id, self.guild_id)) as cur:
+                async with conn.execute(SQL_USER_INV_SELECT, (self.user_id, self.guild_id)) as cur:
                     raw_items = await cur.fetchall()
 
                 items = []
@@ -163,7 +176,7 @@ class InventorySelect(discord.ui.Select):
                     items.append((name, qty, emoji))
 
             if not items:
-                await interaction.edit_original_response(embed=None, view=None, content="📭 Your inventory is now empty.")
+                await interaction.edit_original_response(embed=None, view=None, content="🧯 Your inventory is now empty.")
                 await interaction.followup.send(feedback_msg, ephemeral=True)
                 return
 
@@ -406,11 +419,11 @@ class Trading(commands.Cog):
         await conn.commit()
 
         default_items = [
-            ("Small EXP Potion", "consumable", 125, "<:SmallExpBoostPotion:1415347886186561628>"),
-            ("Medium EXP Potion", "consumable", 250, "<:MediumExpBoostPotion:1415347878343217266>"),
-            ("Large EXP Potion", "consumable", 500, "<:LargeExpBoostPotion:1415347869493493781>"),
-            ("Level Skip Token", "consumable", 1500, "<:LevelSkipToken:1415349457511383161>"),
-            ("Mystery Box", "consumable", 3000, "<:MysteryBox:1415707555325415485>"),
+            (SMALL_EXP_POTION, "consumable", 125, "<:SmallExpBoostPotion:1415347886186561628>"),
+            (MEDIUM_EXP_POTION, "consumable", 250, "<:MediumExpBoostPotion:1415347878343217266>"),
+            (LARGE_EXP_POTION, "consumable", 500, "<:LargeExpBoostPotion:1415347869493493781>"),
+            (LEVEL_SKIP_TOKEN, "consumable", 1500, "<:LevelSkipToken:1415349457511383161>"),
+            (MYSTERY_BOX_NAME, "consumable", 3000, "<:MysteryBox:1415707555325415485>"),
         ]
         for name, type_, price, emoji in default_items:
             await conn.execute(
@@ -421,9 +434,9 @@ class Trading(commands.Cog):
 
     async def apply_potion_effect(self, user_id: int, guild_id: int, item_name: str, channel: discord.TextChannel = None):
         potion_effects = {
-            "Small EXP Potion": 0.03,
-            "Medium EXP Potion": 0.12,
-            "Large EXP Potion": 0.225,
+            SMALL_EXP_POTION: 0.03,
+            MEDIUM_EXP_POTION: 0.12,
+            LARGE_EXP_POTION: 0.225,
         }
 
         exp, level = await self.progression_cog.get_user(user_id, guild_id)
@@ -432,7 +445,7 @@ class Trading(commands.Cog):
 
         required_exp = 50 * level + 20 * level**2
 
-        if item_name == "Level Skip Token":
+        if item_name == LEVEL_SKIP_TOKEN:
             remaining = required_exp - exp
             gain = remaining if remaining > 0 else required_exp
         elif item_name in potion_effects:
@@ -457,37 +470,33 @@ class Trading(commands.Cog):
         async with lock:
             if random.random() < 0.15:
                 amount = random.randint(1, 3)
-                await conn.execute("""
-                    INSERT INTO user_inventory (user_id, guild_id, item_name, quantity)
-                    VALUES (?, ?, ?, ?)
-                    ON CONFLICT(user_id, guild_id, item_name) DO UPDATE SET quantity = quantity + ?
-                """, (user_id, guild_id, "Level Skip Token", amount, amount))
-                rewards.append(("Level Skip Token", amount))
+                await conn.execute(
+                    SQL_UPSERT_USER_INV,
+                    (user_id, guild_id, LEVEL_SKIP_TOKEN, amount, amount)
+                )
+                rewards.append((LEVEL_SKIP_TOKEN, amount))
 
             if random.random() < 0.20:
                 amount = random.randint(1, 3)
-                await conn.execute("""
-                    INSERT INTO user_inventory (user_id, guild_id, item_name, quantity)
-                    VALUES (?, ?, ?, ?)
-                    ON CONFLICT(user_id, guild_id, item_name) DO UPDATE SET quantity = quantity + ?
-                """, (user_id, guild_id, "Large EXP Potion", amount, amount))
-                rewards.append(("Large EXP Potion", amount))
+                await conn.execute(
+                    SQL_UPSERT_USER_INV,
+                    (user_id, guild_id, LARGE_EXP_POTION, amount, amount)
+                )
+                rewards.append((LARGE_EXP_POTION, amount))
 
             if random.random() < 0.50:
                 amount = random.randint(1, 3)
-                await conn.execute("""
-                    INSERT INTO user_inventory (user_id, guild_id, item_name, quantity)
-                    VALUES (?, ?, ?, ?)
-                    ON CONFLICT(user_id, guild_id, item_name) DO UPDATE SET quantity = quantity + ?
-                """, (user_id, guild_id, "Medium EXP Potion", amount, amount))
-                rewards.append(("Medium EXP Potion", amount))
+                await conn.execute(
+                    SQL_UPSERT_USER_INV,
+                    (user_id, guild_id, MEDIUM_EXP_POTION, amount, amount)
+                )
+                rewards.append((MEDIUM_EXP_POTION, amount))
 
-            await conn.execute("""
-                INSERT INTO user_inventory (user_id, guild_id, item_name, quantity)
-                VALUES (?, ?, ?, 3)
-                ON CONFLICT(user_id, guild_id, item_name) DO UPDATE SET quantity = quantity + 3
-            """, (user_id, guild_id, "Small EXP Potion"))
-            rewards.append(("Small EXP Potion", 3))
+            await conn.execute(
+                SQL_UPSERT_USER_INV,
+                (user_id, guild_id, SMALL_EXP_POTION, 3, 3)
+            )
+            rewards.append((SMALL_EXP_POTION, 3))
 
             await conn.commit()
         return rewards
@@ -554,7 +563,7 @@ class Trading(commands.Cog):
             return
     
         conn = self.progression_cog.conn
-        async with conn.execute("SELECT item_name, quantity FROM user_inventory WHERE user_id = ? AND guild_id = ?", (user_id, guild_id)) as cur:
+        async with conn.execute(SQL_USER_INV_SELECT, (user_id, guild_id)) as cur:
             raw_items = await cur.fetchall()
 
         items = []
@@ -606,10 +615,10 @@ class Trading(commands.Cog):
             await ctx.send(f"<:TIME:1415961777912545341> You can donate again in {str(remaining).split('.')[0]}")
             return
 
-        async with conn.execute("SELECT item_name, quantity FROM user_inventory WHERE user_id = ? AND guild_id = ?", (donor_id, guild_id)) as cur:
+        async with conn.execute(SQL_USER_INV_SELECT, (donor_id, guild_id)) as cur:
             items = [(name, qty) for name, qty in await cur.fetchall() if qty > 0]
         if not items:
-            await ctx.send("📭 Your inventory is empty, cannot donate.")
+            await ctx.send("🧯 Your inventory is empty, cannot donate.")
             return
 
         async with conn.execute("SELECT name, emoji FROM shop_items") as cur:
@@ -617,11 +626,11 @@ class Trading(commands.Cog):
 
         
         caps = {
-            "Mystery Box": 1,
-            "Level Skip Token": 1,
-            "Large EXP Potion": 2,
-            "Medium EXP Potion": 3,
-            "Small EXP Potion": 5
+            MYSTERY_BOX_NAME: 1,
+            LEVEL_SKIP_TOKEN: 1,
+            LARGE_EXP_POTION: 2,
+            MEDIUM_EXP_POTION: 3,
+            SMALL_EXP_POTION: 5
         }
 
         options = [
