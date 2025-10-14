@@ -219,7 +219,7 @@ def _profile_get_adaptive_font_color(bg_path):
         contrast_black = (max(L_bg, 0)+0.05)/(min(L_bg, 0)+0.05)
 
         return (255,255,255) if contrast_white >= contrast_black else (0,0,0)
-    except:
+    except Exception:
         return (255,255,255)
 
 def profile_generate_default_bg(width, height):
@@ -412,7 +412,8 @@ def _profile_draw_labels_values(draw, img, x, y, title_name, level, exp, next_ex
                     text_height = bbox[3] - bbox[1]
                     by = int(y + text_height / 2 - badge.height / 2 + 8)
                     img.paste(badge, (bx, by), badge)
-                except:
+                    
+                except (OSError, ValueError, RuntimeError):
                     pass
         y += 32
     return y
@@ -509,7 +510,7 @@ def _safe_load_font(path, size):
         return f
     try:
         f = ImageFont.truetype(path, int(size))
-    except Exception as e:
+    except Exception:
         f = ImageFont.load_default()
     _FONT_CACHE[key] = f
     return f

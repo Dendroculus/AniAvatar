@@ -12,8 +12,7 @@ class DeleteView(ui.View):
         if interaction.user.id == self.user.id:
             await interaction.message.delete()
         else :
-            await interaction.response.send_message("You can't delete this message.", ephemeral=True)
-            return
+            await interaction.response.send_message("You can't delete someone else's message.", ephemeral=True)
 
 class General(commands.Cog):
     def __init__(self, bot):

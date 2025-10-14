@@ -50,19 +50,14 @@ class CloseButton(discord.ui.Button):
             await interaction.response.send_message("⚠️ This is not your menu!", ephemeral=True)
             return
 
-        try:
-            if self.menu_type == "shop":
-                self.cog.open_shops.get(self.guild_id, {}).pop(self.owner_id, None)
-            elif self.menu_type == "inventory":
-                self.cog.open_inventories.get(self.guild_id, {}).pop(self.owner_id, None)
-        except Exception:
-            pass
+        if self.menu_type == "shop":
+            self.cog.open_shops.get(self.guild_id, {}).pop(self.owner_id, None)
+        elif self.menu_type == "inventory":
+            self.cog.open_inventories.get(self.guild_id, {}).pop(self.owner_id, None)
 
-        try:
-            if getattr(self.view, "_timeout_task", None):
-                self.view._timeout_task.cancel()
-        except Exception:
-            pass
+        t = getattr(self.view, "_timeout_task", None)
+        if t:
+            t.cancel()
 
         await interaction.response.edit_message(content=self.close_text, embed=None, view=None)
 
@@ -227,13 +222,12 @@ class InventoryView(discord.ui.View):
             if self.message:
                 try:
                     await self.message.edit(content="❌ Inventory closed.", embed=None, view=None)
-                except Exception:
+                except (discord.HTTPException, discord.NotFound, discord.Forbidden):
                     pass
-            try:
-                if self.cog:
-                    self.cog.open_inventories.pop(self.user_id, None)
-            except Exception:
-                pass
+                
+            if self.cog:
+                self.cog.open_inventories.get(self.guild_id, {}).pop(self.user_id, None)
+                
         except asyncio.CancelledError:
             raise
 
@@ -367,16 +361,14 @@ class ShopView(discord.ui.View):
             if self.message:
                 try:
                     await self.message.edit(content="❌ Shop closed.", embed=None, view=None)
-                except Exception:
+                except (discord.HTTPException, discord.NotFound, discord.Forbidden):
                     pass
-            try:
-                if self.parent_cog:
-                    self.parent_cog.open_shops.pop(self.user_id, None)
-            except Exception:
-                pass
+                
+            if self.parent_cog:
+                self.parent_cog.open_shops.get(self.guild_id, {}).pop(self.user_id, None)
+                
         except asyncio.CancelledError:
             raise
-
 
     def reset_timer(self):
         self.start_timeout()
@@ -671,21 +663,23 @@ class Trading(commands.Cog):
             async def on_submit(self, interaction: discord.Interaction):
                 try:
                     amt = int(self.amount_input.value)
-                    if amt <= 0:
-                        await interaction.response.send_message("❌ Amount must be at least 1.", ephemeral=True)
-                        return
-                    if self.max_amount is not None and amt > self.max_amount:
-                        await interaction.response.send_message(
-                            f"❌ You can only donate up to {self.max_amount} of this item.", ephemeral=True
-                        )
-                        view = discord.ui.View()
-                        view.add_item(DonateSelect())
-                        await interaction.edit_original_response(view=view)
-                        return
-
-                    await finalize_donate(self.item_name, amt, interaction)
-                except:
+                except (ValueError, TypeError):
                     await interaction.response.send_message("❌ Invalid number.", ephemeral=True)
+                    return
+
+                if amt <= 0:
+                    await interaction.response.send_message("❌ Amount must be at least 1.", ephemeral=True)
+                    return
+                if self.max_amount is not None and amt > self.max_amount:
+                    await interaction.response.send_message(
+                        f"❌ You can only donate up to {self.max_amount} of this item.", ephemeral=True
+                    )
+                    view = discord.ui.View()
+                    view.add_item(DonateSelect())
+                    await interaction.edit_original_response(view=view)
+                    return
+
+                await finalize_donate(self.item_name, amt, interaction)
 
         class DonateSelect(discord.ui.Select):
             def __init__(self):
