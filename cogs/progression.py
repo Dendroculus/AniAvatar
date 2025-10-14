@@ -512,7 +512,7 @@ class Progression(commands.Cog):
                 except discord.errors.NotFound:
                     try:
                         await ctx.channel.send(content=content if badge_text else None, file=file)
-                    except Exception as e:
+                    except Exception:
                         try:
                             await ctx.author.send("Couldn't send your profile in the server channel. " 
                                                 "Make sure I have permission to send messages and attach files.")
