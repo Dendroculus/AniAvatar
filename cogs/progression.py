@@ -13,6 +13,7 @@ from cogs.utils.constants import BG_PATH, EMOJI_PATH, FONTS, TITLE_EMOJI_FILES
 
 PROFILE_PNG = "profile.png"
 ATTACHMENT_PROFILE = f"attachment://{PROFILE_PNG}"
+SQL_INSERT_OR_IGNORE_USER_COINS_ZERO = "INSERT OR IGNORE INTO user_coins (user_id, guild_id, coins) VALUES (?, ?, 0)"
 
 class MainThemeSelect(discord.ui.Select):
     def __init__(self, user_id, cog):
@@ -266,7 +267,7 @@ class Progression(commands.Cog):
         amount = int(amount)
         async with self.db_lock:
             await self.conn.execute(
-                "INSERT OR IGNORE INTO user_coins (user_id, guild_id, coins) VALUES (?, ?, 0)",
+                SQL_INSERT_OR_IGNORE_USER_COINS_ZERO,
                 (user_id, guild_id)
             )
             await self.conn.execute(
@@ -281,7 +282,7 @@ class Progression(commands.Cog):
     async def ensure_user_row(self, user_id: int, guild_id: int):
         async with self.db_lock:
             await self.conn.execute(
-                "INSERT OR IGNORE INTO user_coins (user_id, guild_id, coins) VALUES (?, ?, 0)",
+                SQL_INSERT_OR_IGNORE_USER_COINS_ZERO,
                 (user_id, guild_id)
             )
             await self.conn.commit()
@@ -293,7 +294,7 @@ class Progression(commands.Cog):
 
         async with self.db_lock:
             await self.conn.execute(
-                "INSERT OR IGNORE INTO user_coins (user_id, guild_id, coins) VALUES (?, ?, 0)",
+                SQL_INSERT_OR_IGNORE_USER_COINS_ZERO,
                 (user_id, guild_id)
             )
             async with self.conn.execute(
