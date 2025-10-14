@@ -1,8 +1,6 @@
 from discord.ext import commands
 import discord
 import os
-from cogs.utils.progUtils import *
-from cogs.utils.constants import *
 import random
 from datetime import datetime, timedelta, timezone
 import asyncio
