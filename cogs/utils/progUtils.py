@@ -935,9 +935,9 @@ def _draw_leaderboard_row(im, draw, r, i, layout, res, rank_offset):
                 ImageDraw.Draw(mask).ellipse((0,0,avatar_size,avatar_size), fill=255)
                 im.paste(avatar, (av_x, av_y), mask)
             else:
-                raise Exception("avatar None")
+                raise Exception("avatar failed to load")
         else:
-            raise Exception("no avatar")
+            raise Exception("no avatar bytes available")
     except Exception:
         draw.ellipse((av_x, av_y, av_x + avatar_size, av_y + avatar_size), fill=(100,100,100))
 
