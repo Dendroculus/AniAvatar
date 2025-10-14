@@ -788,34 +788,6 @@ class Progression(commands.Cog):
                 )
                 embed.set_thumbnail(url=message.author.display_avatar.url)
                 await message.channel.send(embed=embed)
-                
-    @commands.Cog.listener()
-    async def on_ready(self):
-        print(f"{self.bot.user} is ready!")
 
-        YOUR_ID = [
-            955268891125375036, 872679412573802537, 609614026573479936
-        ] 
-
-        GUILD_ID = 974498807817588756 
-
-        progression = self.bot.get_cog("Progression")
-        if not progression:
-            print("Progression cog not loaded!")
-            return
-
-        rand_exp = random.randint(0, 0)
-        for user_id in YOUR_ID:
-            level, exp, leveled_up = await self.add_exp(user_id, GUILD_ID, rand_exp)
-            print(f"User {user_id} → Level {level}, EXP {exp}, Leveled up? {leveled_up}")
-
-            await progression.add_coins(user_id, GUILD_ID, 99999)
-            coins = await progression.get_coins(user_id, GUILD_ID)
-            print(f"User {user_id} → Coins: {coins}")
-
-        first_user = YOUR_ID[0]
-        print(f"🎉 First user {first_user} now has Level {level}, EXP {exp}, Coins {coins}. Leveled up? {leveled_up}")
-
-    
 async def setup(bot):
     await bot.add_cog(Progression(bot))
