@@ -1,5 +1,5 @@
 from PIL import Image, ImageDraw, ImageFont
-from cogs.utils.constants import *
+from cogs.utils.constants import BG_PATH, FONTS, ROOT_PATH, TITLE_EMOJI_FILES
 import traceback
 import discord
 import os
@@ -154,7 +154,7 @@ def get_title(level: int):
     elif level < 50: return "Immortal"
     elif level < 60: return "Celestial"
     elif level < 70: return "Transcendent"
-    elif level < 80: return "Aetherbourn"
+    elif level < 80: return "Aetherborn"
     elif level < 90: return "Cosmic"
     elif level < 100: return "Divine"
     elif level < 125: return "Eternal"

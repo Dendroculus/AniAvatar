@@ -9,7 +9,7 @@ import os
 import time
 from itertools import cycle
 from typing import Dict, Optional
-from cogs.utils.pollUtils import *
+from cogs.utils.pollUtils import PollInputModal
 
 FALSE_GAMBLE_SESSION = "⚠️ This is not your gamble session."
 class Fun(commands.Cog):

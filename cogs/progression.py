@@ -7,8 +7,9 @@ import asyncio
 import traceback
 import io
 from discord import MessageReference
-from cogs.utils.progUtils import *
-from cogs.utils.constants import BG_PATH, EMOJI_PATH
+from cogs.utils.progUtils import render_profile_image, get_title, get_title_emoji, TITLE_COLORS, create_leaderboard_image
+from cogs.utils.constants import BG_PATH, EMOJI_PATH, FONTS, TITLE_EMOJI_FILES
+
 
 PROFILE_PNG = "profile.png"
 ATTACHMENT_PROFILE = f"attachment://{PROFILE_PNG}"
