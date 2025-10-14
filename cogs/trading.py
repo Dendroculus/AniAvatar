@@ -23,7 +23,7 @@ INSERT INTO user_inventory (user_id, guild_id, item_name, quantity)
 VALUES (?, ?, ?, ?)
 ON CONFLICT(user_id, guild_id, item_name) DO UPDATE SET quantity = quantity + ?
 """
-
+SQL_SELECT_PRICE_EMOJI = "SELECT price, emoji FROM shop_items WHERE name = ?"
 def format_coins(coins: int) -> str:
     if coins < 1_000:
         return str(coins)
@@ -101,7 +101,7 @@ class InventorySelect(discord.ui.Select):
             lock = self.cog.progression_cog.db_lock
 
             async with lock:
-                async with conn.execute("SELECT price, emoji FROM shop_items WHERE name = ?", (selected_item,)) as cur:
+                async with conn.execute(SQL_SELECT_PRICE_EMOJI, (selected_item,)) as cur:
                     row = await cur.fetchone()
                 selected_emoji = row[1] if row and row[1] else "📦"
 
@@ -252,7 +252,7 @@ class ShopSelect(discord.ui.Select):
         selected_item = self.values[0]
 
         conn = self.progression_cog.conn
-        async with conn.execute("SELECT price, emoji FROM shop_items WHERE name = ?", (selected_item,)) as cur:
+        async with conn.execute(SQL_SELECT_PRICE_EMOJI, (selected_item,)) as cur:
             row = await cur.fetchone()
         selected_emoji = row[1] if row and row[1] else "📦"
         if not row:
@@ -280,7 +280,7 @@ class ShopSelect(discord.ui.Select):
             await conn.commit()
 
         new_balance = await self.progression_cog.get_coins(self.user_id, self.guild_id)
-        async with conn.execute("SELECT price, emoji FROM shop_items WHERE name = ?", (selected_item,)) as cur:
+        async with conn.execute(SQL_SELECT_PRICE_EMOJI, (selected_item,)) as cur:
             row = await cur.fetchone()
         if not row:
             await interaction.response.send_message("❌ This item no longer exists in the shop.", ephemeral=True)
