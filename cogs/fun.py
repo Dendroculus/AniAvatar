@@ -232,7 +232,6 @@ class Fun(commands.Cog):
                         pass
 
             async def clear_selection(self):
-                # Rebuild options without any default selections, and refresh view
                 self.select.options = [
                     discord.SelectOption(label=label, value=str(value), emoji=emoji)
                     for label, value, emoji in self.options_list
@@ -250,7 +249,6 @@ class Fun(commands.Cog):
 
                 self.reset_timeout()
 
-                # Parse selection quickly (no DB calls yet)
                 try:
                     value_raw = None
                     if isinstance(getattr(interaction, "data", None), dict):
@@ -265,7 +263,6 @@ class Fun(commands.Cog):
                     await self.clear_selection()
                     return
 
-                # Custom (-1): open modal immediately as the first response (no pre-response DB)
                 if value == -1:
                     await self.clear_selection()
 
@@ -315,7 +312,6 @@ class Fun(commands.Cog):
                     )
                     return
 
-                # For all other values: ack fast, then do DB work
                 await self._disable_controls()
                 try:
                     if not interaction.response.is_done():
@@ -326,7 +322,6 @@ class Fun(commands.Cog):
                 except (discord.HTTPException, discord.Forbidden, discord.NotFound):
                     pass
 
-                # Resolve bet amount after ack
                 if value == -2:
                     current_coins = await progression_cog.get_coins(self.user_id, self.guild_id)
                     bet = current_coins
@@ -435,7 +430,6 @@ class Fun(commands.Cog):
                 except (discord.HTTPException, discord.Forbidden, discord.NotFound):
                     pass
 
-        # pass initial coins for modal placeholder only; latest balance is validated on submit
         view = GambleSelect(self.bot, user_id, guild_id, self.active_views, initial_coins=user_coins)
         self.active_views.setdefault(guild_id, {})[user_id] = view
         if base_interaction:
