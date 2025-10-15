@@ -254,7 +254,7 @@ class ShopSelect(discord.ui.Select):
         conn = self.progression_cog.conn
         async with conn.execute(SQL_SELECT_PRICE_EMOJI, (selected_item,)) as cur:
             row = await cur.fetchone()
-        selected_emoji = row[1] if row and row[1] else "📦"
+
         if not row:
             await interaction.response.send_message("❌ This item no longer exists in the shop.", ephemeral=True)
             return
