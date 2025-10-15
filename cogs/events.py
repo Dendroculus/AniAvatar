@@ -138,7 +138,6 @@ class Events(commands.Cog):
             return
 
         try:
-            # guild is guaranteed if msg is present
             assert guild is not None
             author_member = await self._get_author_member(guild, author_id)
             view = PollView(question=question or "Poll", options=options, author=author_member, timeout=None)
@@ -186,13 +185,79 @@ class Events(commands.Cog):
         except Exception as e:
             print(f"[Poll Reload Error] failed to restore active poll {message_id}: {e}")
 
+    @staticmethod
+    def _is_expired(remaining_seconds: Optional[int]) -> bool:
+        return remaining_seconds is not None and remaining_seconds <= 0
+
+    def _get_guild(self, guild_id: Optional[int]) -> Optional[discord.Guild]:
+        try:
+            return self.bot.get_guild(int(guild_id)) if guild_id is not None else None
+        except Exception:
+            return None
+
+    @staticmethod
+    def _get_channel(guild: discord.Guild, channel_id: Optional[int]) -> Optional[discord.abc.GuildChannel]:
+        try:
+            return guild.get_channel(int(channel_id)) if channel_id is not None else None
+        except Exception:
+            return None
+
+    @staticmethod
+    async def _try_fetch_message(channel: Optional[discord.TextChannel], message_id: int) -> Optional[discord.Message]:
+        if not channel:
+            return None
+        try:
+            return await channel.fetch_message(int(message_id))
+        except Exception:
+            print(f"[Poll Reload] message {message_id} not found in channel {channel.id}.")
+            return None
+
+    async def _finalize_or_restore(
+        self,
+        *,
+        guild: Optional[discord.Guild],
+        msg: Optional[discord.Message],
+        message_id: int,
+        question: str,
+        options: list,
+        sanitized_votes: Dict[str, list[int]],
+        remaining_seconds: Optional[int],
+        end_time: Optional[float],
+        author_id: Optional[int],
+    ) -> None:
+        if self._is_expired(remaining_seconds):
+            await self._finalize_expired_poll(
+                guild=guild,
+                msg=msg,
+                message_id=message_id,
+                question=question,
+                options=options,
+                sanitized_votes=sanitized_votes,
+                end_time=end_time,
+                author_id=author_id,
+            )
+        else:
+            if guild is None:
+                print(f"[Poll Reload] cannot restore active poll {message_id} without guild.")
+                return
+            await self._restore_active_poll(
+                guild=guild,
+                msg=msg,
+                message_id=message_id,
+                question=question,
+                options=options,
+                sanitized_votes=sanitized_votes,
+                remaining_seconds=remaining_seconds,
+                author_id=author_id,
+            )
+
     async def _reconstruct_poll(self, row: Dict[str, Any]) -> None:
         try:
             message_id = row.get("message_id")
             guild_id = row.get("guild_id")
             channel_id = row.get("channel_id")
             author_id = row.get("author_id")
-            question = row.get("question")
+            question = (row.get("question") or "Poll")
             options_json = row.get("options")
             votes_json = row.get("votes")
             end_time = row.get("end_time")
@@ -209,19 +274,15 @@ class Events(commands.Cog):
         sanitized_votes = self._sanitize_votes(options, votes_raw)
         remaining_seconds = self._remaining_seconds(end_time)
 
-        try:
-            guild = self.bot.get_guild(int(guild_id)) if guild_id is not None else None
-        except Exception:
-            guild = None
-
+        guild = self._get_guild(guild_id)
         if not guild:
             print(f"[Poll Reload] guild {guild_id} not found for poll {message_id}, skipping restore.")
-            if remaining_seconds is not None and remaining_seconds <= 0:
+            if self._is_expired(remaining_seconds):
                 await self._finalize_expired_poll(
                     guild=None,
                     msg=None,
                     message_id=message_id,
-                    question=question or "Poll",
+                    question=question,
                     options=options,
                     sanitized_votes=sanitized_votes,
                     end_time=end_time,
@@ -229,19 +290,15 @@ class Events(commands.Cog):
                 )
             return
 
-        try:
-            channel = guild.get_channel(int(channel_id)) if channel_id is not None else None
-        except Exception:
-            channel = None
-
+        channel = self._get_channel(guild, channel_id)
         if not channel:
             print(f"[Poll Reload] channel {channel_id} not found in guild {guild.id} for poll {message_id}, skipping.")
-            if remaining_seconds is not None and remaining_seconds <= 0:
+            if self._is_expired(remaining_seconds):
                 await self._finalize_expired_poll(
                     guild=guild,
                     msg=None,
                     message_id=message_id,
-                    question=question or "Poll",
+                    question=question,
                     options=options,
                     sanitized_votes=sanitized_votes,
                     end_time=end_time,
@@ -249,35 +306,18 @@ class Events(commands.Cog):
                 )
             return
 
-        msg: Optional[discord.Message] = None
-        try:
-            msg = await channel.fetch_message(int(message_id))
-        except Exception:
-            print(f"[Poll Reload] message {message_id} not found in channel {channel.id}.")
-            msg = None
-
-        if remaining_seconds is not None and remaining_seconds <= 0:
-            await self._finalize_expired_poll(
-                guild=guild,
-                msg=msg,
-                message_id=message_id,
-                question=question or "Poll",
-                options=options,
-                sanitized_votes=sanitized_votes,
-                end_time=end_time,
-                author_id=author_id,
-            )
-        else:
-            await self._restore_active_poll(
-                guild=guild,
-                msg=msg,
-                message_id=message_id,
-                question=question or "Poll",
-                options=options,
-                sanitized_votes=sanitized_votes,
-                remaining_seconds=remaining_seconds,
-                author_id=author_id,
-            )
+        msg = await self._try_fetch_message(channel, message_id)
+        await self._finalize_or_restore(
+            guild=guild,
+            msg=msg,
+            message_id=message_id,
+            question=question,
+            options=options,
+            sanitized_votes=sanitized_votes,
+            remaining_seconds=remaining_seconds,
+            end_time=end_time,
+            author_id=author_id,
+        )
 
     @commands.Cog.listener()
     async def on_ready(self):
