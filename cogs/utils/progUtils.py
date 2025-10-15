@@ -19,6 +19,14 @@ LVL_Y = -4             # move LVL text value column up/down neg is up otherwise
 ────────────────────────────
 
 """
+class AvatarError(Exception):
+    """Base exception for avatar-related issues."""
+
+class AvatarLoadError(AvatarError):
+    """Raised when avatar bytes are present but cannot be decoded/loaded."""
+
+class AvatarBytesMissing(AvatarError):
+    """Raised when avatar bytes are missing."""
 
 class ProfileCardLayout:
     WIDTH = 600
@@ -935,11 +943,12 @@ def _draw_leaderboard_row(im, draw, r, i, layout, res, rank_offset):
                 ImageDraw.Draw(mask).ellipse((0,0,avatar_size,avatar_size), fill=255)
                 im.paste(avatar, (av_x, av_y), mask)
             else:
-                raise Exception("avatar failed to load")
+                raise AvatarLoadError("avatar failed to load")
         else:
-            raise Exception("no avatar bytes available")
-    except Exception:
+            raise AvatarBytesMissing("no avatar bytes available")
+    except AvatarError as avatar_error:
         draw.ellipse((av_x, av_y, av_x + avatar_size, av_y + avatar_size), fill=(100,100,100))
+        print(f"[draw_leaderboard_row] Avatar load error for row {i+1} ({name_raw}): {avatar_error}")  
 
     rank_color = {1:(255,255,255),2:(255,255,255),3:(255,255,255)}.get(rank_idx,(200,200,200))
     rank_str = f"#{rank_idx}"
