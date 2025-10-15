@@ -194,6 +194,58 @@ class Roles(commands.Cog):
         except Exception as e:
             print(f"[Roles] Unexpected error updating roles for {member.display_name} ({member.id}): {e}")
 
+    async def _ensure_guild_titles_and_hierarchy(self, guild: discord.Guild) -> None:
+        roles = await self._ensure_titles_exist(guild)
+        await self._sync_role_hierarchy(guild, roles)
+
+    @staticmethod
+    def _compute_member_role_state(guild: discord.Guild, member: discord.Member, desired_title: str) -> tuple[bool, Optional[discord.Role]]:
+        desired_norm = desired_title.strip().lower()
+        desired_role = discord.utils.find(
+            lambda r: r.name and r.name.strip().lower() == desired_norm, guild.roles
+        )
+
+        member_title_names = {r.name.strip().lower() for r in member.roles if r.name}
+        other_title_names = {t.lower() for t in TITLE_ORDER} - {desired_norm}
+        has_other_titles = any(n in other_title_names for n in member_title_names)
+
+        already_ok = (desired_role is not None and desired_role in member.roles and not has_other_titles)
+        return already_ok, desired_role
+
+    async def _process_member_if_needed(self, guild: discord.Guild, member: discord.Member, progression, processed: int) -> int:
+        try:
+            if member.bot:
+                return processed + 1
+
+            if processed >= self.MAX_PER_GUILD:
+                return processed  # caller will break
+
+            exp, level = await progression.get_user(member.id, guild.id)
+            desired_title = get_title(level).strip().lower()
+            already_ok, _ = self._compute_member_role_state(guild, member, desired_title)
+            if not already_ok:
+                try:
+                    fresh_member = await guild.fetch_member(member.id)
+                    await self.update_roles(fresh_member, level)
+                except discord.Forbidden:
+                    print(f"[Roles] Missing perms to update roles for {member.id} in guild {guild.id}")
+                except discord.HTTPException as he:
+                    print(f"[Roles] HTTP error updating roles for {member.id} in guild {guild.id}: {he}")
+                except Exception as e:
+                    print(f"[Roles] Error updating roles for {member.id} in guild {guild.id}: {e}")
+            return processed + 1
+        except Exception as e:
+            print(f"[Roles] Skipping member {member.id} in guild {guild.id}: {e}")
+            return processed + 1
+
+    async def _process_guild_members(self, guild: discord.Guild, progression) -> None:
+        processed = 0
+        for member in guild.members:
+            processed = await self._process_member_if_needed(guild, member, progression, processed)
+            if processed >= self.MAX_PER_GUILD:
+                break
+            await asyncio.sleep(self.SLEEP_BETWEEN_OPS)
+
     @tasks.loop(minutes=120) 
     async def sync_roles_loop(self):
         progression = self.bot.get_cog("Progression")
@@ -203,49 +255,8 @@ class Roles(commands.Cog):
 
         for guild in self.bot.guilds:
             try:
-                roles = await self._ensure_titles_exist(guild)
-                await self._sync_role_hierarchy(guild, roles)
-
-                processed = 0
-                for member in guild.members:
-                    try:
-                        if member.bot:
-                            processed += 1
-                            await asyncio.sleep(self.SLEEP_BETWEEN_OPS)
-                            continue
-                        if processed >= self.MAX_PER_GUILD:
-                            break
-
-                        exp, level = await progression.get_user(member.id, guild.id)
-                        desired_title = get_title(level).strip().lower()
-
-                        desired_role = discord.utils.find(
-                            lambda r: r.name and r.name.strip().lower() == desired_title,
-                            guild.roles
-                        )
-
-                        member_title_names = {r.name.strip().lower() for r in member.roles if r.name}
-                        other_title_names = {t.lower() for t in TITLE_ORDER} - {desired_title}
-                        has_other_titles = any(n in other_title_names for n in member_title_names)
-                        already_ok = (desired_role is not None and desired_role in member.roles and not has_other_titles)
-
-                        if not already_ok:
-                            try:
-                                fresh_member = await guild.fetch_member(member.id)
-                                await self.update_roles(fresh_member, level)
-                            except discord.Forbidden:
-                                print(f"[Roles] Missing perms to update roles for {member.id} in guild {guild.id}")
-                            except discord.HTTPException as he:
-                                print(f"[Roles] HTTP error updating roles for {member.id} in guild {guild.id}: {he}")
-                            except Exception as e:
-                                print(f"[Roles] Error updating roles for {member.id} in guild {guild.id}: {e}")
-
-                        processed += 1
-                        await asyncio.sleep(self.SLEEP_BETWEEN_OPS)
-                    except Exception as e:
-                        print(f"[Roles] Skipping member {member.id} in guild {guild.id}: {e}")
-                        processed += 1
-                        await asyncio.sleep(self.SLEEP_BETWEEN_OPS)
+                await self._ensure_guild_titles_and_hierarchy(guild)
+                await self._process_guild_members(guild, progression)
             except Exception as e:
                 print(f"[Roles] Error during guild sync {guild.id}: {e}")
 
