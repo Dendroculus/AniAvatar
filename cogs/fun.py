@@ -13,7 +13,6 @@ from cogs.utils.pollUtils import PollInputModal
 
 FALSE_GAMBLE_SESSION = "⚠️ This is not your gamble session."
 
-
 class Fun(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -174,6 +173,56 @@ class Fun(commands.Cog):
         progression_cog,
         amount: int,
     ) -> None:
+        async def _insufficient_funds() -> None:
+            await self._send(
+                ctx,
+                interaction,
+                f"❌ Could not place bet of {amount} <:Coins:1415353285270966403>. You don't have enough coins.",
+                ephemeral=True,
+            )
+            try:
+                new_balance_inner = await progression_cog.get_coins(user_id, guild_id)
+                vo_inner = self._get_active_view(guild_id, user_id)
+                if vo_inner and vo_inner.message:
+                    await vo_inner.message.edit(
+                        content=f"You have {new_balance_inner} <:Coins:1415353285270966403>. Select amount to gamble:",
+                        view=vo_inner,
+                    )
+            except (discord.HTTPException, discord.Forbidden, discord.NotFound):
+                pass
+
+        async def _settle_win(pre_balance_val: int) -> Optional[str]:
+            try:
+                await progression_cog.add_coins(user_id, guild_id, amount * 2)
+                if amount == pre_balance_val:
+                    return "<:MinoriAmazed:1416024121837490256> WOOOAA JACKPOT! You just doubled everything you own!"
+                return f"<:MinoriAmazed:1416024121837490256> You won {amount} <:Coins:1415353285270966403>!"
+            except Exception:
+                try:
+                    await progression_cog.add_coins(user_id, guild_id, amount)
+                except Exception:
+                    pass
+                await self._send(
+                    ctx,
+                    interaction,
+                    "❌ An error occurred while settling your win. We've attempted to refund your bet; contact an admin.",
+                    ephemeral=True,
+                )
+                return None
+
+        async def _refresh_prompt_with_balance() -> None:
+            try:
+                vo_inner = self._get_active_view(guild_id, user_id)
+                if not vo_inner or not vo_inner.message:
+                    return
+                updated = await progression_cog.get_coins(user_id, guild_id)
+                await vo_inner.message.edit(
+                    content=f"You have {updated} <:Coins:1415353285270966403>. Select amount to gamble:",
+                    view=vo_inner,
+                )
+            except (discord.HTTPException, discord.Forbidden, discord.NotFound):
+                pass
+
         if amount <= 0:
             await self._send(ctx, interaction, "❌ Invalid bet amount.", ephemeral=True)
             return
@@ -185,22 +234,7 @@ class Fun(commands.Cog):
         pre_balance = await progression_cog.get_coins(user_id, guild_id)
         reserved = await progression_cog.reserve_coins(user_id, guild_id, amount)
         if not reserved:
-            await self._send(
-                ctx,
-                interaction,
-                f"❌ Could not place bet of {amount} <:Coins:1415353285270966403>. You don't have enough coins.",
-                ephemeral=True,
-            )
-            try:
-                new_balance = await progression_cog.get_coins(user_id, guild_id)
-                vo = self._get_active_view(guild_id, user_id)
-                if vo and vo.message:
-                    await vo.message.edit(
-                        content=f"You have {new_balance} <:Coins:1415353285270966403>. Select amount to gamble:",
-                        view=vo,
-                    )
-            except (discord.HTTPException, discord.Forbidden, discord.NotFound):
-                pass
+            await _insufficient_funds()
             return
 
         base_chance = 0.5
@@ -209,25 +243,9 @@ class Fun(commands.Cog):
         won = random.random() < win_chance
 
         if won:
-            try:
-                await progression_cog.add_coins(user_id, guild_id, amount * 2)
-            except Exception:
-                try:
-                    await progression_cog.add_coins(user_id, guild_id, amount)  
-                except Exception:
-                    pass
-                await self._send(
-                    ctx,
-                    interaction,
-                    "❌ An error occurred while settling your win. We've attempted to refund your bet; contact an admin.",
-                    ephemeral=True,
-                )
+            result_text = await _settle_win(pre_balance)
+            if result_text is None:
                 return
-            result_text = (
-                "<:MinoriAmazed:1416024121837490256> WOOOAA JACKPOT! You just doubled everything you own!"
-                if amount == pre_balance
-                else f"<:MinoriAmazed:1416024121837490256> You won {amount} <:Coins:1415353285270966403>!"
-            )
         else:
             result_text = f"<:MinoriDissapointed:1416016691430821958> You lost {amount} <:Coins:1415353285270966403>."
 
@@ -238,15 +256,7 @@ class Fun(commands.Cog):
             f"{result_text} Your new balance: {new_balance:,} <:Coins:1415353285270966403>.",
         )
 
-        try:
-            vo = self._get_active_view(guild_id, user_id)
-            if vo and vo.message:
-                await vo.message.edit(
-                    content=f"You have {new_balance} <:Coins:1415353285270966403>. Select amount to gamble:",
-                    view=vo,
-                )
-        except (discord.HTTPException, discord.Forbidden, discord.NotFound):
-            pass
+        await _refresh_prompt_with_balance()
 
         count = self._count_attempt(guild_id, user_id)
         if count >= self.GAMBLE_MAX_ATTEMPTS:
@@ -345,7 +355,7 @@ class Fun(commands.Cog):
                 self.fun._set_active_view(self.guild_id, self.user_id, None)
                 self.stop()
             except asyncio.CancelledError:
-                raise
+                raise 
 
         async def _disable_controls(self):
             for item in self.children:
@@ -375,14 +385,7 @@ class Fun(commands.Cog):
                 except (discord.HTTPException, discord.Forbidden, discord.NotFound):
                     pass
 
-
-        async def select_callback(self, interaction: discord.Interaction):
-            if interaction.user.id != self.user_id:
-                await self.fun._send(self.ctx, interaction, FALSE_GAMBLE_SESSION, ephemeral=True)
-                return
-
-            self.reset_timeout()
-
+        def _parse_value_from_interaction(self, interaction: discord.Interaction) -> Optional[int]:
             try:
                 value_raw = None
                 if isinstance(getattr(interaction, "data", None), dict):
@@ -390,65 +393,16 @@ class Fun(commands.Cog):
                 if value_raw is None:
                     value_raw = self.select.values[0] if getattr(self.select, "values", None) else None
                 if value_raw is None:
-                    raise ValueError("no selection")
-                value = int(value_raw)
+                    return None
+                return int(value_raw)
             except (ValueError, TypeError, KeyError, AttributeError):
-                await self.fun._send(self.ctx, interaction, "❌ Invalid selection.", ephemeral=True)
-                await self._clear_selection()
-                return
+                return None
 
-            if value == -1:
-                await self._clear_selection()
+        async def _send_invalid_selection(self, interaction: discord.Interaction) -> None:
+            await self.fun._send(self.ctx, interaction, "❌ Invalid selection.", ephemeral=True)
+            await self._clear_selection()
 
-                class CustomModal(discord.ui.Modal):
-                    def __init__(inner_self):
-                        title_text = (
-                            "Custom Gamble"
-                            if self.initial_coins is None
-                            else f"Custom Gamble (Max {self.initial_coins})"
-                        )
-                        super().__init__(title=title_text)
-                        inner_self.amount_input = discord.ui.TextInput(
-                            label="Enter amount",
-                            placeholder="Enter a positive number",
-                            style=discord.TextStyle.short,
-                        )
-                        inner_self.add_item(inner_self.amount_input)
-
-                    async def on_submit(inner_self, inter: discord.Interaction):
-                        if inter.user.id != self.user_id:
-                            await self.fun._send(self.ctx, inter, FALSE_GAMBLE_SESSION, ephemeral=True)
-                            return
-                        try:
-                            amount = int(inner_self.amount_input.value)
-                        except (ValueError, TypeError):
-                            await self.fun._send(self.ctx, inter, "❌ Invalid number.", ephemeral=True)
-                            await self._clear_selection()
-                            return
-                        latest = await self.progression_cog.get_coins(self.user_id, self.guild_id)
-                        if amount <= 0 or amount > latest:
-                            await self.fun._send(
-                                self.ctx,
-                                inter,
-                                f"❌ Invalid amount. You have {latest} <:Coins:1415353285270966403>.",
-                                ephemeral=True,
-                            )
-                            await self._clear_selection()
-                            return
-                        await self.fun._process_gamble(
-                            self.ctx,
-                            inter,
-                            guild_id=self.guild_id,
-                            user_id=self.user_id,
-                            progression_cog=self.progression_cog,
-                            amount=amount,
-                        )
-                        await self._clear_selection()
-
-                await interaction.response.send_modal(CustomModal())
-                return
-
-            await self._disable_controls()
+        async def _edit_view_after_disable(self, interaction: discord.Interaction) -> None:
             try:
                 if not interaction.response.is_done():
                     await interaction.response.edit_message(view=self)
@@ -457,11 +411,65 @@ class Fun(commands.Cog):
             except (discord.HTTPException, discord.Forbidden, discord.NotFound):
                 pass
 
+        async def _show_custom_modal(self, interaction: discord.Interaction) -> None:
+            await self._clear_selection()
+
+            parent = self
+
+            class CustomModal(discord.ui.Modal):
+                def __init__(inner_self):
+                    title_text = (
+                        "Custom Gamble"
+                        if parent.initial_coins is None
+                        else f"Custom Gamble (Max {parent.initial_coins})"
+                    )
+                    super().__init__(title=title_text)
+                    inner_self.amount_input = discord.ui.TextInput(
+                        label="Enter amount",
+                        placeholder="Enter a positive number",
+                        style=discord.TextStyle.short,
+                    )
+                    inner_self.add_item(inner_self.amount_input)
+
+                async def on_submit(inner_self, inter: discord.Interaction):
+                    if inter.user.id != parent.user_id:
+                        await parent.fun._send(parent.ctx, inter, FALSE_GAMBLE_SESSION, ephemeral=True)
+                        return
+                    try:
+                        amount = int(inner_self.amount_input.value)
+                    except (ValueError, TypeError):
+                        await parent.fun._send(parent.ctx, inter, "❌ Invalid number.", ephemeral=True)
+                        await parent._clear_selection()
+                        return
+                    latest = await parent.progression_cog.get_coins(parent.user_id, parent.guild_id)
+                    if amount <= 0 or amount > latest:
+                        await parent.fun._send(
+                            parent.ctx,
+                            inter,
+                            f"❌ Invalid amount. You have {latest} <:Coins:1415353285270966403>.",
+                            ephemeral=True,
+                        )
+                        await parent._clear_selection()
+                        return
+                    await parent.fun._process_gamble(
+                        parent.ctx,
+                        inter,
+                        guild_id=parent.guild_id,
+                        user_id=parent.user_id,
+                        progression_cog=parent.progression_cog,
+                        amount=amount,
+                    )
+                    await parent._clear_selection()
+
+            await interaction.response.send_modal(CustomModal())
+
+        async def _handle_bet_value(self, interaction: discord.Interaction, value: int) -> None:
+            await self._disable_controls()
+            await self._edit_view_after_disable(interaction)
+
+            bet = value
             if value == -2:
-                current_coins = await self.progression_cog.get_coins(self.user_id, self.guild_id)
-                bet = current_coins
-            else:
-                bet = value
+                bet = await self.progression_cog.get_coins(self.user_id, self.guild_id)
 
             if bet <= 0:
                 await self.fun._send(self.ctx, interaction, "❌ Invalid bet amount.", ephemeral=True)
@@ -478,6 +486,23 @@ class Fun(commands.Cog):
                 amount=bet,
             )
             await self._clear_selection()
+
+        async def select_callback(self, interaction: discord.Interaction):
+            if interaction.user.id != self.user_id:
+                await self.fun._send(self.ctx, interaction, FALSE_GAMBLE_SESSION, ephemeral=True)
+                return
+
+            self.reset_timeout()
+
+            value = self._parse_value_from_interaction(interaction)
+            if value is None:
+                return await self._send_invalid_selection(interaction)
+
+            if value == -1:
+                await self._show_custom_modal(interaction)
+                return
+
+            await self._handle_bet_value(interaction, value)
 
         async def exit_callback(self, interaction: discord.Interaction):
             if interaction.user.id != self.user_id:
@@ -506,6 +531,23 @@ class Fun(commands.Cog):
         guild_id = ctx.guild.id
         base_interaction: Optional[discord.Interaction] = getattr(ctx, "interaction", None)
 
+        def _already_has_view() -> bool:
+            return self._get_active_view(guild_id, user_id) is not None
+
+        async def _send_prompt(prompt: str, view: "Fun.GambleView") -> Optional[discord.Message]:
+            if base_interaction:
+                try:
+                    if not base_interaction.response.is_done():
+                        await base_interaction.response.send_message(prompt, view=view)
+                        try:
+                            return await base_interaction.original_response()
+                        except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                            return None
+                    return await base_interaction.followup.send(prompt, view=view)
+                except (discord.HTTPException, discord.Forbidden, discord.NotFound):
+                    return await ctx.send(prompt, view=view)
+            return await ctx.send(prompt, view=view)
+
         remaining = self._cooldown_remaining(guild_id, user_id)
         if remaining > 0:
             ctx.command.reset_cooldown(ctx)
@@ -513,11 +555,11 @@ class Fun(commands.Cog):
             return await self._send(
                 ctx,
                 base_interaction,
-                f"<:MinoriConfused:1415707082988060874> Woah woah you have been gambling for a while, please wait for {mins}m {secs}s before gambling again.",
+                f"<:MinoriConfused:1415707082988060874> Woah woah you have been gambling for a while, please wait for `{mins}m {secs}s` before gambling again.",
                 ephemeral=True,
             )
 
-        if self._get_active_view(guild_id, user_id):
+        if _already_has_view():
             return await self._send(
                 ctx, base_interaction, "⚠️ You already have the gamble view open!", ephemeral=True
             )
@@ -541,21 +583,7 @@ class Fun(commands.Cog):
         self._set_active_view(guild_id, user_id, view)
 
         prompt = f"You have {user_coins} <:Coins:1415353285270966403>. Select amount to gamble:"
-        sent_message: Optional[discord.Message]
-        if base_interaction:
-            try:
-                if not base_interaction.response.is_done():
-                    await base_interaction.response.send_message(prompt, view=view)
-                    try:
-                        sent_message = await base_interaction.original_response()
-                    except (discord.NotFound, discord.Forbidden, discord.HTTPException):
-                        sent_message = None
-                else:
-                    sent_message = await base_interaction.followup.send(prompt, view=view)
-            except (discord.HTTPException, discord.Forbidden, discord.NotFound):
-                sent_message = await ctx.send(prompt, view=view)
-        else:
-            sent_message = await ctx.send(prompt, view=view)
+        sent_message = await _send_prompt(prompt, view)
 
         if isinstance(sent_message, discord.Message):
             view.message = sent_message
