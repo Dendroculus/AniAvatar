@@ -9,11 +9,13 @@ import io
 from discord import MessageReference
 from cogs.utils.progUtils import render_profile_image, get_title, get_title_emoji, TITLE_COLORS, create_leaderboard_image
 from cogs.utils.constants import BG_PATH, EMOJI_PATH, FONTS, TITLE_EMOJI_FILES
+from cogs.trading import format_coins
 
 
 PROFILE_PNG = "profile.png"
 ATTACHMENT_PROFILE = f"attachment://{PROFILE_PNG}"
 SQL_INSERT_OR_IGNORE_USER_COINS_ZERO = "INSERT OR IGNORE INTO user_coins (user_id, guild_id, coins) VALUES (?, ?, 0)"
+COINS_EMOJI = "<:Coins:1415353285270966403>"
 
 class MainThemeSelect(discord.ui.Select):
     def __init__(self, user_id, cog):
@@ -429,7 +431,7 @@ class Progression(commands.Cog):
         coins_amount = random.randint(30, 50)
         await self.add_coins(user_id, guild_id, coins_amount)
         await channel.send(
-            f"{member.display_name} received <:Coins:1415353285270966403> {coins_amount} coins for leveling up!",
+            f"{member.display_name} received {COINS_EMOJI} {coins_amount} coins for leveling up!",
             reference=MessageReference(message_id=lvlup_msg.id, channel_id=lvlup_msg.channel.id, guild_id=lvlup_msg.guild.id)
         )
 
@@ -583,17 +585,16 @@ class Progression(commands.Cog):
                 print(traceback.format_exc())
                 return None
 
-        def make_embed_and_file(rows_data, img_bytes, user_rank, user_exp_total):
+        def make_embed_and_file(rows_data, img_bytes, user_rank, user_coins):
             top_title = get_title(rows_data[0]["level"]) if rows_data else "Leaderboard"
             embed_color = TITLE_COLORS.get(top_title, discord.Color.purple())
             file = discord.File(io.BytesIO(img_bytes), filename="leaderboard.png")
-            exp_emoji_str = "<:EXP:1415642038589984839>"
             embed = discord.Embed(
                 title=f"{ctx.guild.name}'s Top Rank List <:CHAMPION:1414508304448749568>",
                 color=embed_color,
                 description=(f"**Your Rank**\n"
                              f"You are ranked **#{user_rank}** on this server\n"
-                             f"with a total of **{user_exp_total}** {exp_emoji_str}")
+                             f"with a total of **{user_coins}** {COINS_EMOJI}")
             )
             if ctx.guild.icon:
                 embed.set_thumbnail(url=ctx.guild.icon.url)
@@ -616,8 +617,9 @@ class Progression(commands.Cog):
             return await self.safe_send(ctx, "Failed to generate leaderboard image (check bot logs).")
 
         user_rank = await self.get_rank(ctx.author.id, ctx.guild.id)
-        user_exp, _ = await self.get_user(ctx.author.id, ctx.guild.id)
-        embed, file = make_embed_and_file(rows_data, img_bytes, user_rank, f"{user_exp:,}")
+        user_coins = await self.get_coins(ctx.author.id, ctx.guild.id)
+        formatted_coins = format_coins(user_coins)
+        embed, file = make_embed_and_file(rows_data, img_bytes, user_rank, formatted_coins)
 
         try:
             await ctx.send(embed=embed, file=file)
@@ -730,7 +732,6 @@ class Progression(commands.Cog):
 
         exp, level = await self.get_user(user_id, guild_id)
         old_level = level
-        old_title = get_title(old_level)
         
         exp_gain = random.randint(5 + level * 8, 10 + level * 12)
         level, new_exp, leveled_up = await self.add_exp(user_id, guild_id, exp_gain)
@@ -747,34 +748,6 @@ class Progression(commands.Cog):
                 )
                 embed.set_thumbnail(url=message.author.display_avatar.url)
                 await message.channel.send(embed=embed)
-                
-    @commands.Cog.listener()
-    async def on_ready(self):
-        print(f"{self.bot.user} is ready!")
-
-        YOUR_ID = [
-            955268891125375036, 872679412573802537, 609614026573479936
-        ] 
-
-        GUILD_ID = 974498807817588756 
-
-        progression = self.bot.get_cog("Progression")
-        if not progression:
-            print("Progression cog not loaded!")
-            return
-
-        rand_exp = random.randint(0, 0)
-        for user_id in YOUR_ID:
-            level, exp, leveled_up = await self.add_exp(user_id, GUILD_ID, rand_exp)
-            print(f"User {user_id} → Level {level}, EXP {exp}, Leveled up? {leveled_up}")
-
-            await progression.add_coins(user_id, GUILD_ID, 99999)
-            coins = await progression.get_coins(user_id, GUILD_ID)
-            print(f"User {user_id} → Coins: {coins}")
-
-        first_user = YOUR_ID[0]
-        print(f"🎉 First user {first_user} now has Level {level}, EXP {exp}, Coins {coins}. Leveled up? {leveled_up}")
-
     
 async def setup(bot):
     await bot.add_cog(Progression(bot))
