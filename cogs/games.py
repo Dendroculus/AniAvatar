@@ -102,14 +102,19 @@ class Games(commands.Cog):
             select = discord.ui.Select(placeholder="Choose an answer...", options=options)
             view.add_item(select)
 
-            async def callback(interaction: discord.Interaction):
+            async def callback(
+                interaction: discord.Interaction,
+                _future=future,
+                _select=select,
+                _view=view,
+            ):
                 if interaction.user != ctx.author:
                     await interaction.response.send_message("This is not your game!", ephemeral=True)
                     return
-                if not future.done():
-                    future.set_result(interaction.data["values"][0])
-                select.disabled = True
-                await interaction.response.edit_message(view=view)
+                if not _future.done():
+                    _future.set_result(interaction.data["values"][0])
+                _select.disabled = True
+                await interaction.response.edit_message(view=_view)
 
             select.callback = callback
 
@@ -122,7 +127,6 @@ class Games(commands.Cog):
                     score += 1
                     async def send_ctx(msg: str):
                         await ctx.send(msg)
-                    # Use gentler coin range for quiz mode
                     await self._handle_correct_answer(
                         ctx.author.id,
                         ctx.guild.id,
