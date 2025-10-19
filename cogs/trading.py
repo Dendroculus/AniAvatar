@@ -14,6 +14,7 @@ SMALL_EXP_POTION = "Small EXP Potion"
 MEDIUM_EXP_POTION = "Medium EXP Potion"
 LARGE_EXP_POTION = "Large EXP Potion"
 LEVEL_SKIP_TOKEN = "Level Skip Token"
+EXP_EMOJI = "<:EXP:1415642038589984839>"
 
 POTION_ITEMS = (SMALL_EXP_POTION, MEDIUM_EXP_POTION, LARGE_EXP_POTION, LEVEL_SKIP_TOKEN)
 
@@ -24,6 +25,7 @@ VALUES (?, ?, ?, ?)
 ON CONFLICT(user_id, guild_id, item_name) DO UPDATE SET quantity = quantity + ?
 """
 SQL_SELECT_PRICE_EMOJI = "SELECT price, emoji FROM shop_items WHERE name = ?"
+
 def format_coins(coins: int) -> str:
     if coins < 1_000:
         return str(coins)
@@ -118,7 +120,7 @@ class InventorySelect(discord.ui.Select):
                     async with conn.execute("SELECT level FROM users WHERE user_id = ? AND guild_id = ?", (self.user_id, self.guild_id)) as cur:
                         row_lvl = await cur.fetchone()
                     if row_lvl and row_lvl[0] >= self.cog.progression_cog.MAX_LEVEL:
-                        await interaction.followup.send("<:MinoriWink:1414899695209418762> You’ve already reached the max level! You can’t use <:EXP:1415642038589984839> items anymore.", ephemeral=True)
+                        await interaction.followup.send(f"<:MinoriWink:1414899695209418762> You’ve already reached the max level! You can’t use {EXP_EMOJI} items anymore.", ephemeral=True)
                         return
 
                 await conn.execute(
@@ -136,8 +138,8 @@ class InventorySelect(discord.ui.Select):
             if selected_item in POTION_ITEMS:
                 gain, extra_msg = await self.cog.apply_potion_effect(
                     self.user_id, self.guild_id, selected_item, interaction.channel
-                ) 
-                feedback_msg = f"You used {selected_emoji} **{selected_item}** and gained {gain} <:EXP:1415642038589984839>!"
+                )
+                feedback_msg = f"You used {selected_emoji} **{selected_item}** and gained {gain} {EXP_EMOJI}!"
                 if extra_msg:
                     feedback_msg += f"\n{extra_msg}" 
                     
@@ -254,7 +256,7 @@ class ShopSelect(discord.ui.Select):
         conn = self.progression_cog.conn
         async with conn.execute(SQL_SELECT_PRICE_EMOJI, (selected_item,)) as cur:
             row = await cur.fetchone()
-
+       
         if not row:
             await interaction.response.send_message("❌ This item no longer exists in the shop.", ephemeral=True)
             return
@@ -444,7 +446,7 @@ class Trading(commands.Cog):
             return 0, ""
 
         old_level = level
-        new_level, new_exp, leveled_up = await self.progression_cog.add_exp(user_id, guild_id, gain)
+        new_level, _ , leveled_up = await self.progression_cog.add_exp(user_id, guild_id, gain)
 
         extra_msg = ""
         if leveled_up and channel:
