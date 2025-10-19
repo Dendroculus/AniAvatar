@@ -217,19 +217,15 @@ class InventoryView(discord.ui.View):
         self._timeout_task = asyncio.create_task(self._timeout_loop())
 
     async def _timeout_loop(self):
-        try:
-            await asyncio.sleep(self.timeout_seconds)
-            if self.message:
-                try:
-                    await self.message.edit(content="❌ Inventory closed.", embed=None, view=None)
-                except (discord.HTTPException, discord.NotFound, discord.Forbidden):
-                    pass
-                
-            if self.cog:
-                self.cog.open_inventories.get(self.guild_id, {}).pop(self.user_id, None)
-                
-        except asyncio.CancelledError:
-            raise
+        await asyncio.sleep(self.timeout_seconds)
+        if self.message:
+            try:
+                await self.message.edit(content="❌ Inventory closed.", embed=None, view=None)
+            except (discord.HTTPException, discord.NotFound, discord.Forbidden):
+                pass
+            
+        if self.cog:
+            self.cog.open_inventories.get(self.guild_id, {}).pop(self.user_id, None)
 
     def reset_timer(self):
         self.start_timeout()
@@ -356,20 +352,16 @@ class ShopView(discord.ui.View):
         self._timeout_task = asyncio.create_task(self._timeout_loop())
 
     async def _timeout_loop(self):
-        try:
-            await asyncio.sleep(self.timeout_seconds)
-            if self.message:
-                try:
-                    await self.message.edit(content="❌ Shop closed.", embed=None, view=None)
-                except (discord.HTTPException, discord.NotFound, discord.Forbidden):
-                    pass
+        await asyncio.sleep(self.timeout_seconds)
+        if self.message:
+            try:
+                await self.message.edit(content="❌ Shop closed.", embed=None, view=None)
+            except (discord.HTTPException, discord.NotFound, discord.Forbidden):
+                pass
+            
+        if self.parent_cog:
+            self.parent_cog.open_shops.get(self.guild_id, {}).pop(self.user_id, None)
                 
-            if self.parent_cog:
-                self.parent_cog.open_shops.get(self.guild_id, {}).pop(self.user_id, None)
-                
-        except asyncio.CancelledError:
-            raise
-
     def reset_timer(self):
         self.start_timeout()
 
