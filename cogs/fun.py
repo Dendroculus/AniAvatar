@@ -345,17 +345,14 @@ class Fun(commands.Cog):
             self.timeout_task = self.bot.loop.create_task(self._timeout_handler())
 
         async def _timeout_handler(self):
-            try:
-                await asyncio.sleep(self.timeout_seconds)
-                if self.message:
-                    try:
-                        await self.message.edit(content="❌ Gamble timed out.", embed=None, view=None)
-                    except (discord.HTTPException, discord.Forbidden, discord.NotFound):
-                        pass
-                self.fun._set_active_view(self.guild_id, self.user_id, None)
-                self.stop()
-            except asyncio.CancelledError:
-                raise 
+            await asyncio.sleep(self.timeout_seconds)
+            if self.message:
+                try:
+                    await self.message.edit(content="❌ Gamble timed out.", embed=None, view=None)
+                except (discord.HTTPException, discord.Forbidden, discord.NotFound):
+                    pass
+            self.fun._set_active_view(self.guild_id, self.user_id, None)
+            self.stop()
 
         async def _disable_controls(self):
             for item in self.children:
