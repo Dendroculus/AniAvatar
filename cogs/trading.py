@@ -150,7 +150,7 @@ class InventorySelect(discord.ui.Select):
                     lock = self.cog.progression_cog.db_lock
                     async with lock:
                         async with conn.execute("SELECT name, emoji FROM shop_items") as cur:
-                            emap = {name: emoji for name, emoji in await cur.fetchall()}
+                            emap = dict(await cur.fetchall())
                     for item, qty in rewards:
                         emoji = emap.get(item, "📦")
                         reward_lines.append(f"{qty}x {emoji} {item}")
@@ -606,7 +606,7 @@ class Trading(commands.Cog):
             return
 
         async with conn.execute("SELECT name, emoji FROM shop_items") as cur:
-            emoji_map = {name: emoji for name, emoji in await cur.fetchall()}
+            emoji_map = dict(await cur.fetchall())
 
         
         caps = {

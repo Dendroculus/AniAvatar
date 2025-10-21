@@ -218,9 +218,9 @@ class Roles(commands.Cog):
                 return processed + 1
 
             if processed >= self.MAX_PER_GUILD:
-                return processed  # caller will break
+                return processed 
 
-            exp, level = await progression.get_user(member.id, guild.id)
+            _, level = await progression.get_user(member.id, guild.id)
             desired_title = get_title(level).strip().lower()
             already_ok, _ = self._compute_member_role_state(guild, member, desired_title)
             if not already_ok:
@@ -300,7 +300,7 @@ class Roles(commands.Cog):
         print(f"[Roles] Member {after.id} role change detected. Added: {[r.name for r in added_roles]}, Removed: {[r.name for r in removed_roles]}")
 
         try:
-            exp, level = await progression.get_user(after.id, after.guild.id)
+            _, level = await progression.get_user(after.id, after.guild.id)
             await self.update_roles(after, level)
             print(f"[Roles] Synced roles for {after.display_name} after manual role edit.")
         except Exception as e:
