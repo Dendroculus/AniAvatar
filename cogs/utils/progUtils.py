@@ -222,9 +222,9 @@ def _profile_get_adaptive_font_color(bg_path):
             c = c/255
             return c/12.92 if c <= 0.03928 else ((c+0.055)/1.055)**2.4
 
-        L_bg = 0.2126*lum(avg_r) + 0.7152*lum(avg_g) + 0.0722*lum(avg_b)
-        contrast_white = (max(L_bg, 1)+0.05)/(min(L_bg, 1)+0.05)
-        contrast_black = (max(L_bg, 0)+0.05)/(min(L_bg, 0)+0.05)
+        luminance_bg = 0.2126*lum(avg_r) + 0.7152*lum(avg_g) + 0.0722*lum(avg_b)
+        contrast_white = (max(luminance_bg, 1)+0.05)/(min(luminance_bg, 1)+0.05)
+        contrast_black = (max(luminance_bg, 0)+0.05)/(min(luminance_bg, 0)+0.05)
 
         return (255,255,255) if contrast_white >= contrast_black else (0,0,0)
     except Exception:
