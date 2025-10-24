@@ -6,7 +6,7 @@ EN | [中文](docs/readmeCN.md)
   <img src="https://img.shields.io/badge/Python-3.11+-blue.svg" alt="Python Version">
   <img src="https://img.shields.io/badge/discord.py-v2.x-7289DA.svg?logo=discord&logoColor=white" alt="discord.py">
   <img src="https://img.shields.io/badge/License-MIT-green.svg" alt="MIT">
-  <img src="https://img.shields.io/badge/status-active_development-orange.svg" alt="Major Updates Coming Soon">
+  <img src="https://img.shields.io/badge/status-Major_Updates Coming Soon-orange.svg" alt="Major Updates Coming Soon">
 </p>
 
 <p align="center">
