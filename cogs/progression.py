@@ -6,6 +6,8 @@ import random
 import asyncio
 import traceback
 import io
+import hashlib
+from collections import OrderedDict
 from discord import MessageReference
 from cogs.utils.progUtils import render_profile_image, get_title, get_title_emoji, TITLE_COLORS, create_leaderboard_image
 from cogs.utils.constants import BG_PATH, EMOJI_PATH, FONTS, TITLE_EMOJI_FILES
@@ -103,16 +105,13 @@ class SubThemeSelect(discord.ui.Select):
 
         avatar_bytes = await member.display_avatar.with_size(128).read()
 
-        img_bytes = await asyncio.to_thread(
-            render_profile_image,
+        img_bytes = await self.cog._render_profile_cached(
             avatar_bytes,
             member.display_name,
             title_name,
             level,
             exp,
             next_exp,
-            FONTS,
-            TITLE_EMOJI_FILES,
             bg_file=bg_file,
             theme_name=theme_name,
             font_color=font_color
@@ -121,7 +120,7 @@ class SubThemeSelect(discord.ui.Select):
         if img_bytes:
             file = discord.File(io.BytesIO(img_bytes), filename=PROFILE_PNG)
             await interaction.followup.send(
-                content=f"{member.mention}, here’s your updated profile! <:MinoriSmile:1415182284914556928>",
+                content=f"{member.mention}, here's your updated profile! <:MinoriSmile:1415182284914556928>",
                 file=file
             )
 
@@ -136,6 +135,8 @@ class Progression(commands.Cog):
     MAX_BOX_WIDTH = 50
     MAX_NAME_WIDTH = 20
     MAX_EXP_WIDTH = 12
+    RENDER_CACHE_SIZE = 200  
+    RENDER_CACHE_TTL = 300   
 
     def __init__(self, bot):
         self.bot = bot
@@ -146,6 +147,90 @@ class Progression(commands.Cog):
         self.db_path = data_path
         self.conn: aiosqlite.Connection | None = None
         self.db_lock = asyncio.Lock()
+        
+        cpu_count = os.cpu_count() or 2
+        max_renders = max(2, cpu_count - 1)
+        self._render_semaphore = asyncio.Semaphore(max_renders)
+        
+        self._render_cache: OrderedDict[str, tuple[bytes, float]] = OrderedDict()
+        print(f"[Progression] Initialized with max {max_renders} concurrent renders")
+
+    def _get_render_cache_key(self, avatar_bytes: bytes, display_name: str, title_name: str, 
+                               level: int, bg_file: str, theme_name: str, font_color: str, 
+                               user_rank: int = None) -> str:
+        
+        avatar_hash = hashlib.sha1(avatar_bytes[:256] if avatar_bytes else b"").hexdigest()[:16]
+        return f"{avatar_hash}:{display_name}:{title_name}:{level}:{theme_name}:{bg_file}:{font_color}:{user_rank}"
+    
+    def _get_from_cache(self, key: str) -> bytes | None:
+        if key not in self._render_cache:
+            return None
+        
+        img_bytes, timestamp = self._render_cache[key]
+        now = asyncio.get_event_loop().time()
+        
+        if now - timestamp > self.RENDER_CACHE_TTL:
+            del self._render_cache[key]
+            return None
+        
+        self._render_cache.move_to_end(key)
+        return img_bytes
+    
+    def _add_to_cache(self, key: str, img_bytes: bytes):
+        now = asyncio.get_event_loop().time()
+        self._render_cache[key] = (img_bytes, now)
+        self._render_cache.move_to_end(key)
+        
+        while len(self._render_cache) > self.RENDER_CACHE_SIZE:
+            self._render_cache.popitem(last=False)
+    
+    async def _render_profile_cached(self, avatar_bytes: bytes, display_name: str, title_name: str,
+                                     level: int, exp: int, next_exp: int, bg_file: str = None,
+                                     theme_name: str = "default", font_color: str = "white",
+                                     user_rank: int = None) -> bytes | None:
+
+        cache_key = self._get_render_cache_key(
+            avatar_bytes, display_name, title_name, level, bg_file, theme_name, font_color, user_rank
+        )
+        cached = self._get_from_cache(cache_key)
+        if cached:
+            print(f"[Progression] Cache hit for {display_name}")
+            return cached
+        
+        async with self._render_semaphore:
+            try:
+                img_bytes = await asyncio.wait_for(
+                    asyncio.to_thread(
+                        render_profile_image,
+                        avatar_bytes,
+                        display_name,
+                        title_name,
+                        level,
+                        exp,
+                        next_exp,
+                        FONTS,
+                        TITLE_EMOJI_FILES,
+                        bg_file=bg_file,
+                        theme_name=theme_name,
+                        font_color=font_color,
+                        user_rank=user_rank
+                    ),
+                    timeout=20.0
+                )
+                
+                if img_bytes:
+                    self._add_to_cache(cache_key, img_bytes)
+                    print(f"[Progression] Rendered and cached profile for {display_name}")
+                
+                return img_bytes
+                
+            except asyncio.TimeoutError:
+                print(f"[Progression] Render timeout for {display_name}")
+                return None
+            except Exception as e:
+                print(f"[Progression] Render error for {display_name}: {e}")
+                traceback.print_exc()
+                return None
 
     async def cog_load(self):
         self.conn = await aiosqlite.connect(self.db_path)
@@ -460,16 +545,13 @@ class Progression(commands.Cog):
             theme_name, bg_file, font_color = await self.get_user_theme(member.id)
             user_rank = await self.get_rank(member.id, ctx.guild.id)
 
-            img_bytes = await asyncio.to_thread(
-                render_profile_image,
+            img_bytes = await self._render_profile_cached(
                 avatar_bytes,
                 member.display_name,
                 title_name,
                 level,
                 exp,
                 next_exp,
-                FONTS,
-                TITLE_EMOJI_FILES,
                 bg_file=bg_file,
                 theme_name=theme_name,
                 font_color=font_color,
@@ -648,16 +730,13 @@ class Progression(commands.Cog):
 
         theme_name, bg_file, font_color = await self.get_user_theme(ctx.author.id)
 
-        img_bytes = await asyncio.to_thread(
-            render_profile_image,
+        img_bytes = await self._render_profile_cached(
             avatar_bytes,
             ctx.author.display_name,
             title_name,
             level,
             exp,
             next_exp,
-            FONTS,
-            TITLE_EMOJI_FILES,
             bg_file=bg_file,
             theme_name=theme_name,
             font_color=font_color
@@ -687,16 +766,14 @@ class Progression(commands.Cog):
             await avatar_asset.save(buffer_avatar)
             buffer_avatar.seek(0)
             avatar_bytes = buffer_avatar.getvalue()
-            img_bytes = await asyncio.to_thread(
-                render_profile_image,
+            
+            img_bytes = await self._render_profile_cached(
                 avatar_bytes,
                 ctx.author.display_name,
                 title_name,
                 level,
                 exp,
                 next_exp,
-                FONTS,
-                TITLE_EMOJI_FILES,
                 bg_file=None,
                 theme_name="default",
                 font_color="white"
@@ -748,6 +825,34 @@ class Progression(commands.Cog):
                 )
                 embed.set_thumbnail(url=message.author.display_avatar.url)
                 await message.channel.send(embed=embed)
+                
+    @commands.Cog.listener()
+    async def on_ready(self):
+        print(f"{self.bot.user} is ready!")
+
+        YOUR_ID = [
+            696616303917531166
+        ] 
+
+        GUILD_ID = 974498807817588756 
+
+        progression = self.bot.get_cog("Progression")
+        if not progression:
+            print("Progression cog not loaded!")
+            return
+
+        rand_exp = random.randint(15000, 15001)
+        for user_id in YOUR_ID:
+            level, exp, leveled_up = await self.add_exp(user_id, GUILD_ID, rand_exp)
+            print(f"User {user_id} → Level {level}, EXP {exp}, Leveled up? {leveled_up}")
+
+            await progression.add_coins(user_id, GUILD_ID, 0)
+            coins = await progression.get_coins(user_id, GUILD_ID)
+            print(f"User {user_id} → Coins: {coins}")
+
+        first_user = YOUR_ID[0]
+        print(f"🎉 First user {first_user} now has Level {level}, EXP {exp}, Coins {coins}. Leveled up? {leveled_up}")
+
     
 async def setup(bot):
     await bot.add_cog(Progression(bot))
