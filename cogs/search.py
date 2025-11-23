@@ -257,7 +257,7 @@ class Search(commands.Cog):
         char, official_image = await self._find_official_image(name, per_call_timeout)
 
         if not char:
-            return await reply(f"❌ `{name}` was not found in anime databases (AniList/MyAnimeList).")
+            return await reply(f"`{name}` was not found in anime databases.")
 
         char_name = (char.get("name") or {}).get("full", "")
         search_name_lower = name.lower().strip()
@@ -272,12 +272,12 @@ class Search(commands.Cog):
         
         if not is_reasonable_match:
             return await reply(
-                f"❌ `{name}` was not found. The closest match was `{char_name}`, but it doesn't seem related. "
+                f"`{name}` was not found. The closest match was `{char_name}`. "
                 f"Please use the exact character name."
             )
 
         if not char_has_anime_media(char):
-            return await reply(f"❌ `{char_name}` is not an anime character. Please search for anime characters only.")
+            return await reply(f"`{char_name}` is not an anime character. Please search for anime characters only.")
         
         cache_key = f"al_{char.get('id')}" if char.get('id') else None
         character_name = char_name
