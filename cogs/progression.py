@@ -9,7 +9,13 @@ import io
 import hashlib
 from collections import OrderedDict
 from discord import MessageReference
-from cogs.utils.progUtils import render_profile_image, get_title, get_title_emoji, TITLE_COLORS, create_leaderboard_image
+from cogs.utils.progUtils import (
+    ImageRenderer,  
+    get_title, 
+    get_title_emoji, 
+    TITLE_COLORS, 
+
+)
 from cogs.utils.constants import BG_PATH, EMOJI_PATH, FONTS, TITLE_EMOJI_FILES
 from cogs.trading import format_coins
 
@@ -153,6 +159,9 @@ class Progression(commands.Cog):
         self._render_semaphore = asyncio.Semaphore(max_renders)
         
         self._render_cache: OrderedDict[str, tuple[bytes, float]] = OrderedDict()
+        
+        self.renderer = ImageRenderer(cache_size=self. RENDER_CACHE_SIZE)
+        
         print(f"[Progression] Initialized with max {max_renders} concurrent renders")
 
     def _get_render_cache_key(self, avatar_bytes: bytes, display_name: str, title_name: str, 
@@ -185,9 +194,9 @@ class Progression(commands.Cog):
             self._render_cache.popitem(last=False)
     
     async def _render_profile_cached(self, avatar_bytes: bytes, display_name: str, title_name: str,
-                                     level: int, exp: int, next_exp: int, bg_file: str = None,
-                                     theme_name: str = "default", font_color: str = "white",
-                                     user_rank: int = None) -> bytes | None:
+                                 level: int, exp: int, next_exp: int, bg_file: str = None,
+                                 theme_name: str = "default", font_color: str = "white",
+                                 user_rank: int = None) -> bytes | None:
 
         cache_key = self._get_render_cache_key(
             avatar_bytes, display_name, title_name, level, bg_file, theme_name, font_color, user_rank
@@ -201,7 +210,7 @@ class Progression(commands.Cog):
             try:
                 img_bytes = await asyncio.wait_for(
                     asyncio.to_thread(
-                        render_profile_image,
+                        self.renderer.render_profile_image,  
                         avatar_bytes,
                         display_name,
                         title_name,
@@ -223,7 +232,7 @@ class Progression(commands.Cog):
                     print(f"[Progression] Rendered and cached profile for {display_name}")
                 
                 return img_bytes
-                
+                    
             except asyncio.TimeoutError:
                 print(f"[Progression] Render timeout for {display_name}")
                 return None
@@ -637,7 +646,7 @@ class Progression(commands.Cog):
             try:
                 return await asyncio.wait_for(
                     asyncio.to_thread(
-                        create_leaderboard_image,
+                        self.renderer.create_leaderboard_image,  
                         rows_data,
                         fonts=FONTS,
                         exp_icon_path=exp_icon_path
@@ -647,9 +656,9 @@ class Progression(commands.Cog):
             except asyncio.TimeoutError:
                 print("create_leaderboard_image timed out — retrying without gradient")
                 try:
-                    return await asyncio.wait_for(
-                        asyncio.to_thread(
-                            create_leaderboard_image,
+                    return await asyncio. wait_for(
+                        asyncio. to_thread(
+                            self.renderer.create_leaderboard_image,  
                             rows_data,
                             fonts=FONTS,
                             exp_icon_path=exp_icon_path,
@@ -831,7 +840,7 @@ class Progression(commands.Cog):
         print(f"{self.bot.user} is ready!")
 
         YOUR_ID = [
-            696616303917531166
+            955268891125375036
         ] 
 
         GUILD_ID = 974498807817588756 
