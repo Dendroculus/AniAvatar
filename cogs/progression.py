@@ -870,7 +870,8 @@ class Progression(commands.Cog):
                 )
                 embed.set_thumbnail(url=message.author.display_avatar.url)
                 await message.channel.send(embed=embed)
-                
+            
+    # THIS IS A TESTING LISTENER TO ADD EXP/COINS TO SPECIFIC USERS ON BOT STARTUP TO VERIFY FUNCTIONALITY REMOVE OR COMMENT OUT FOR PRODUCTION USE
     @commands.Cog.listener()
     async def on_ready(self):
         print(f"{self.bot.user} is ready!")

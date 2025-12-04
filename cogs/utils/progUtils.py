@@ -9,6 +9,7 @@ import colorsys
 import re
 import unicodedata
 import aiosqlite
+from typing import Optional
 
 """
 PERSONAL NOTE : 
@@ -741,7 +742,7 @@ class ImageRenderer:
         theme_name: str = "default",
         font_color: tuple = None,
         user_rank: int = None
-    ) -> bytes:
+    ) -> Optional[bytes]:
         try:
             fonts_pack = self._profile_prepare_fonts(fonts)
             width, height = ProfileCardLayout.WIDTH, ProfileCardLayout.HEIGHT
