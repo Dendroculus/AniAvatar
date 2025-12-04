@@ -40,3 +40,12 @@ build/
 # OS
 .DS_Store
 Thumbs.db
+
+# Common DB files (alternative to ignoring whole data/ folder)
+data/*.db
+data/*.sqlite
+data/*.sqlite3
+
+# Logs
+logs/
+*.log

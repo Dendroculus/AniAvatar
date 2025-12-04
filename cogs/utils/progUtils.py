@@ -9,7 +9,6 @@ import colorsys
 import re
 import unicodedata
 import aiosqlite
-from collections import OrderedDict
 
 """
 PERSONAL NOTE : 
@@ -782,7 +781,7 @@ class ImageRenderer:
         draw = ImageDraw.Draw(im)
         return im, draw
 
-    def _prepare_leaderboard_resources(self, draw, row_height, fonts, exp_icon_path):
+    def _prepare_leaderboard_resources(self, row_height, fonts, exp_icon_path):
         font_rank = self._safe_load_font(fonts.get("bold"), max(12, int(row_height * 0.65)))
         font_name = self._safe_load_font(fonts.get("bold"), max(12, int(row_height * 0.65)))
         font_medium = self._safe_load_font(fonts.get("medium"), max(10, int(row_height * 0.45)))
@@ -905,7 +904,7 @@ class ImageRenderer:
     def _draw_leaderboard_row(self, im, draw, r, i, layout, res, rank_offset):
         font_rank = res["font_rank"]
         font_name = res["font_name"]
-        font_medium = res["font_medium"]
+        # font_medium = res["font_medium"]
         font_bold = res["font_bold"]
         font_rank_height = res["font_rank_height"]
         font_medium_height = res["font_medium_height"]
@@ -1101,7 +1100,7 @@ class ImageRenderer:
                 background_color=background_color
             )
 
-            res = self._prepare_leaderboard_resources(draw, row_height, fonts, exp_icon_path)
+            res = self._prepare_leaderboard_resources(row_height, fonts, exp_icon_path)
 
             layout = self._compute_leaderboard_layout(
                 rows=rows,
