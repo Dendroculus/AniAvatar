@@ -7,6 +7,7 @@ import asyncio
 import traceback
 import io
 import hashlib
+from typing import Optional
 from collections import OrderedDict
 from discord import MessageReference
 from cogs.utils.progUtils import (
@@ -51,7 +52,6 @@ class MainThemeSelect(discord.ui.Select):
             view=SubThemeView(self.user_id, selected_theme, self.cog)
         )
         
-        
 class MainThemeView(discord.ui.View):
     def __init__(self, user_id, cog):
         super().__init__()
@@ -86,6 +86,17 @@ class SubThemeSelect(discord.ui.Select):
         bg_file = self.file_map[selected_label]
         theme_name = self.theme
         font_color = "white"
+        
+        current_theme_name, current_bg_file, current_font_color = await self.cog.get_user_theme(self.user_id)
+        if (
+            current_theme_name == theme_name
+            and (current_bg_file or "").lower() == bg_file.lower()
+            and current_font_color == font_color
+        ):
+            await interaction.response.send_message(
+                "<:MinoriSmile:1415182284914556928> You already use this profile theme and background.", ephemeral=True
+            )
+            return
 
         await self.cog.set_user_theme(self.user_id, theme_name, bg_file, font_color)
 
@@ -194,7 +205,7 @@ class Progression(commands.Cog):
             self._render_cache.popitem(last=False)
     
     async def _render_profile_cached(self, avatar_bytes: bytes, display_name: str, title_name: str,
-                                 level: int, exp: int, next_exp: int, bg_file: str = None,
+                                 level: int, exp: int, next_exp: int, bg_file: Optional[str] = None,
                                  theme_name: str = "default", font_color: str = "white",
                                  user_rank: int = None) -> bytes | None:
 
@@ -406,7 +417,7 @@ class Progression(commands.Cog):
                 return "galaxy", "GALAXY.PNG", "white"
             return row
 
-    async def set_user_theme(self, user_id: int, theme_name: str, bg_file: str, font_color: str = "white"):
+    async def set_user_theme(self, user_id: int, theme_name: str, bg_file: Optional[str], font_color: str = "white"):
         async with self.db_lock:
             await self.conn.execute(
                 "INSERT OR REPLACE INTO profile_theme (user_id, theme_name, bg_file, font_color) VALUES (?, ?, ?, ?)",
@@ -752,9 +763,34 @@ class Progression(commands.Cog):
         )
 
         file = discord.File(io.BytesIO(img_bytes), filename=PROFILE_PNG)
+        
+        # NOTE : SAME LOGIC AS IN SubThemeSelect TO GET THE SUB LABEL 
+        sub_label = "Default"
+        try:
+            if bg_file and bg_file.lower() != "null":
+                theme_path = os.path.join(BG_PATH, theme_name)
+                files = [f for f in os.listdir(theme_path)
+                         if f.lower().endswith((".png", ".jpg", ".jpeg"))]
+
+                lower_files = [f.lower() for f in files]
+                target = os.path.basename(bg_file).lower()
+
+                if target in lower_files:
+                    idx = lower_files.index(target)
+                    sub_label = f"Theme {idx + 1}"
+                else:
+                    sub_label = bg_file
+        except Exception:
+            sub_label = bg_file or "Unknown"
+            
         embed = discord.Embed(
-        title="Your current profile",
-        description="Below is your current profile card theme. You can change it by selecting a theme from the dropdown menu."
+            title=f"Your current profile theme: ",
+            description=(
+                f"Main theme: `{theme_name.capitalize()}`\n"
+                f"Background: `{sub_label}`\n\n"
+                "Below is your current profile card theme. "
+                "You can change it by selecting a theme from the dropdown menu."
+            )
         )
         embed.set_image(url=ATTACHMENT_PROFILE)
 
