@@ -261,9 +261,10 @@ async def google_image_search(query: str, api_key: str, cx: str, session: Option
             except Exception:
                 pass
         items = data.get("items") or []
+        image_extensions = (".png", ".jpg", ".jpeg", ".webp")
         links = [
             item.get("link") for item in items
-            if isinstance(item.get("link"), str) and item["link"].lower().endswith((".png", ".jpg", ".jpeg", ".webp"))
+            if isinstance(item.get("link"), str) and item["link"].lower().endswith(image_extensions)
         ]
         return links
     finally:
@@ -282,3 +283,4 @@ async def first_reachable_image(links: List[str], timeout: aiohttp.ClientTimeout
             except Exception:
                 continue
     return None
+
