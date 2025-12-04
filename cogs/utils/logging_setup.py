@@ -35,9 +35,15 @@ class JsonFormatter(logging.Formatter):
         self.ensure_ascii = ensure_ascii
         self.separators = separators  
 
-    def formatTime(self, record: logging.LogRecord) -> str:
+    def formatTime(self, record: logging.LogRecord, datefmt: str | None = None) -> str:
         t = time.gmtime(record.created) if self.utc else time.localtime(record.created)
-        return time.strftime("%Y-%m-%dT%H:%M:%SZ", t) if self.utc else time.strftime("%Y-%m-%dT%H:%M:%S", t)
+
+        if datefmt:
+            return time.strftime(datefmt, t)
+
+        if self.utc:
+            return time.strftime("%Y-%m-%dT%H:%M:%SZ", t)
+        return time.strftime("%Y-%m-%dT%H:%M:%S", t)
 
     def _base_dict(self, record: logging.LogRecord) -> Dict[str, Any]:
         base = {

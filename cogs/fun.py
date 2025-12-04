@@ -13,6 +13,7 @@ from cogs.utils.pollUtils import PollInputModal
 
 FALSE_GAMBLE_SESSION = "⚠️ This is not your gamble session."
 
+
 class Fun(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -22,7 +23,7 @@ class Fun(commands.Cog):
         self._gamble_counts: Dict[tuple, int] = {}
         self._gamble_cooldowns: Dict[tuple, float] = {}
         self.GAMBLE_MAX_ATTEMPTS = 20
-        self.GAMBLE_COOLDOWN_SECONDS = 5 * 60  
+        self.GAMBLE_COOLDOWN_SECONDS = 5 * 60
 
         self.data_path = os.path.join(os.path.dirname(__file__), "..", "data", "quotes.json")
         try:
@@ -163,7 +164,135 @@ class Fun(commands.Cog):
         poll_modal = PollInputModal(ctx, timeout_seconds=timeout_seconds)
         await ctx.interaction.response.send_modal(poll_modal)
 
-    async def _process_gamble(
+    # ===== New helpers for gamble logic (refactor) =====
+
+    async def _send_insufficient_funds(
+        self,
+        ctx: commands.Context,
+        interaction: discord.Interaction,
+        progression_cog,
+        guild_id: int,
+        user_id: int,
+        amount: int,
+    ) -> None:
+        await self._send(
+            ctx,
+            interaction,
+            f"❌ Could not place bet of {amount} <:Coins:1415353285270966403>. You don't have enough coins.",
+            ephemeral=True,
+        )
+        try:
+            new_balance_inner = await progression_cog.get_coins(user_id, guild_id)
+            vo_inner = self._get_active_view(guild_id, user_id)
+            if vo_inner and vo_inner.message:
+                await vo_inner.message.edit(
+                    content=(
+                        f"You have {new_balance_inner} <:Coins:1415353285270966403>. "
+                        "Select amount to gamble:"
+                    ),
+                    view=vo_inner,
+                )
+        except (discord.HTTPException, discord.Forbidden, discord.NotFound):
+            pass
+
+    async def _settle_win(
+        self,
+        ctx: commands.Context,
+        interaction: discord.Interaction,
+        progression_cog,
+        guild_id: int,
+        user_id: int,
+        amount: int,
+        pre_balance_val: int,
+    ) -> Optional[str]:
+        try:
+            await progression_cog.add_coins(user_id, guild_id, amount * 2)
+            if amount == pre_balance_val:
+                return (
+                    "<:MinoriAmazed:1416024121837490256> WOOOAA JACKPOT! "
+                    "You just doubled everything you own!"
+                )
+            return (
+                f"<:MinoriAmazed:1416024121837490256> You won {amount} "
+                "<:Coins:1415353285270966403>!"
+            )
+        except Exception:
+            try:
+                await progression_cog.add_coins(user_id, guild_id, amount)
+            except Exception:
+                pass
+            await self._send(
+                ctx,
+                interaction,
+                (
+                    "❌ An error occurred while settling your win. "
+                    "We've attempted to refund your bet; contact an admin."
+                ),
+                ephemeral=True,
+            )
+            return None
+
+    async def _refresh_gamble_prompt(
+        self,
+        progression_cog,
+        guild_id: int,
+        user_id: int,
+    ) -> None:
+        try:
+            vo_inner = self._get_active_view(guild_id, user_id)
+            if not vo_inner or not vo_inner.message:
+                return
+            updated = await progression_cog.get_coins(user_id, guild_id)
+            await vo_inner.message.edit(
+                content=(
+                    f"You have {updated} <:Coins:1415353285270966403>. "
+                    "Select amount to gamble:"
+                ),
+                view=vo_inner,
+            )
+        except (discord.HTTPException, discord.Forbidden, discord.NotFound):
+            pass
+
+    async def _handle_gamble_cooldown_and_disable_view(
+        self,
+        ctx: commands.Context,
+        interaction: discord.Interaction,
+        guild_id: int,
+        user_id: int,
+    ) -> None:
+        self._start_session_cooldown(guild_id, user_id)
+        await self._send(
+            ctx,
+            interaction,
+            (
+                "<:MinoriConfused:1415707082988060874> Woah woah you have been "
+                "gambling for a while — I think it's time to stop for a while. "
+                "You're on cooldown for 5 minutes."
+            ),
+            ephemeral=True,
+        )
+        vo = self._get_active_view(guild_id, user_id)
+        if vo:
+            try:
+                await vo._disable_controls()
+            except (discord.HTTPException, discord.Forbidden, discord.NotFound):
+                pass
+            self._set_active_view(guild_id, user_id, None)
+
+    async def _enable_gamble_view_controls_if_any(
+        self,
+        guild_id: int,
+        user_id: int,
+    ) -> None:
+        vo = self._get_active_view(guild_id, user_id)
+        if not vo:
+            return
+        try:
+            await vo._enable_controls()
+        except (discord.HTTPException, discord.Forbidden, discord.NotFound):
+            pass
+
+    async def _run_single_gamble(
         self,
         ctx: commands.Context,
         interaction: discord.Interaction,
@@ -173,56 +302,6 @@ class Fun(commands.Cog):
         progression_cog,
         amount: int,
     ) -> None:
-        async def _insufficient_funds() -> None:
-            await self._send(
-                ctx,
-                interaction,
-                f"❌ Could not place bet of {amount} <:Coins:1415353285270966403>. You don't have enough coins.",
-                ephemeral=True,
-            )
-            try:
-                new_balance_inner = await progression_cog.get_coins(user_id, guild_id)
-                vo_inner = self._get_active_view(guild_id, user_id)
-                if vo_inner and vo_inner.message:
-                    await vo_inner.message.edit(
-                        content=f"You have {new_balance_inner} <:Coins:1415353285270966403>. Select amount to gamble:",
-                        view=vo_inner,
-                    )
-            except (discord.HTTPException, discord.Forbidden, discord.NotFound):
-                pass
-
-        async def _settle_win(pre_balance_val: int) -> Optional[str]:
-            try:
-                await progression_cog.add_coins(user_id, guild_id, amount * 2)
-                if amount == pre_balance_val:
-                    return "<:MinoriAmazed:1416024121837490256> WOOOAA JACKPOT! You just doubled everything you own!"
-                return f"<:MinoriAmazed:1416024121837490256> You won {amount} <:Coins:1415353285270966403>!"
-            except Exception:
-                try:
-                    await progression_cog.add_coins(user_id, guild_id, amount)
-                except Exception:
-                    pass
-                await self._send(
-                    ctx,
-                    interaction,
-                    "❌ An error occurred while settling your win. We've attempted to refund your bet; contact an admin.",
-                    ephemeral=True,
-                )
-                return None
-
-        async def _refresh_prompt_with_balance() -> None:
-            try:
-                vo_inner = self._get_active_view(guild_id, user_id)
-                if not vo_inner or not vo_inner.message:
-                    return
-                updated = await progression_cog.get_coins(user_id, guild_id)
-                await vo_inner.message.edit(
-                    content=f"You have {updated} <:Coins:1415353285270966403>. Select amount to gamble:",
-                    view=vo_inner,
-                )
-            except (discord.HTTPException, discord.Forbidden, discord.NotFound):
-                pass
-
         if amount <= 0:
             await self._send(ctx, interaction, "❌ Invalid bet amount.", ephemeral=True)
             return
@@ -234,7 +313,9 @@ class Fun(commands.Cog):
         pre_balance = await progression_cog.get_coins(user_id, guild_id)
         reserved = await progression_cog.reserve_coins(user_id, guild_id, amount)
         if not reserved:
-            await _insufficient_funds()
+            await self._send_insufficient_funds(
+                ctx, interaction, progression_cog, guild_id, user_id, amount
+            )
             return
 
         base_chance = 0.5
@@ -243,45 +324,63 @@ class Fun(commands.Cog):
         won = random.random() < win_chance
 
         if won:
-            result_text = await _settle_win(pre_balance)
+            result_text = await self._settle_win(
+                ctx,
+                interaction,
+                progression_cog,
+                guild_id,
+                user_id,
+                amount,
+                pre_balance,
+            )
             if result_text is None:
                 return
         else:
-            result_text = f"<:MinoriDissapointed:1416016691430821958> You lost {amount} <:Coins:1415353285270966403>."
+            result_text = (
+                f"<:MinoriDissapointed:1416016691430821958> You lost {amount} "
+                "<:Coins:1415353285270966403>."
+            )
 
         new_balance = await progression_cog.get_coins(user_id, guild_id)
         await self._send(
             ctx,
             interaction,
-            f"{result_text} Your new balance: {new_balance:,} <:Coins:1415353285270966403>.",
+            (
+                f"{result_text} Your new balance: {new_balance:,} "
+                "<:Coins:1415353285270966403>."
+            ),
         )
+        await self._refresh_gamble_prompt(progression_cog, guild_id, user_id)
 
-        await _refresh_prompt_with_balance()
+    async def _process_gamble(
+        self,
+        ctx: commands.Context,
+        interaction: discord.Interaction,
+        *,
+        guild_id: int,
+        user_id: int,
+        progression_cog,
+        amount: int,
+    ) -> None:
+        await self._run_single_gamble(
+            ctx,
+            interaction,
+            guild_id=guild_id,
+            user_id=user_id,
+            progression_cog=progression_cog,
+            amount=amount,
+        )
 
         count = self._count_attempt(guild_id, user_id)
         if count >= self.GAMBLE_MAX_ATTEMPTS:
-            self._start_session_cooldown(guild_id, user_id)
-            await self._send(
-                ctx,
-                interaction,
-                "<:MinoriConfused:1415707082988060874> Woah woah you have been gambling for a while — I think it's time to stop for a while. You're on cooldown for 5 minutes.",
-                ephemeral=True,
+            await self._handle_gamble_cooldown_and_disable_view(
+                ctx, interaction, guild_id, user_id
             )
-            vo = self._get_active_view(guild_id, user_id)
-            if vo:
-                try:
-                    await vo._disable_controls()
-                except (discord.HTTPException, discord.Forbidden, discord.NotFound):
-                    pass
-                self._set_active_view(guild_id, user_id, None)
             return
 
-        vo = self._get_active_view(guild_id, user_id)
-        if vo:
-            try:
-                await vo._enable_controls()
-            except (discord.HTTPException, discord.Forbidden, discord.NotFound):
-                pass
+        await self._enable_gamble_view_controls_if_any(guild_id, user_id)
+
+    # ===== End of gamble refactor helpers =====
 
     class GambleView(discord.ui.View):
         def __init__(
@@ -295,7 +394,7 @@ class Fun(commands.Cog):
             initial_coins: Optional[int],
             timeout: int = 120,
         ):
-            super().__init__(timeout=None)  
+            super().__init__(timeout=None)
             self.fun = fun
             self.ctx = ctx
             self.bot = fun.bot
@@ -520,7 +619,9 @@ class Fun(commands.Cog):
     @commands.hybrid_command(name="gamble", description="Gamble your coins!")
     @commands.guild_only()
     @commands.dynamic_cooldown(
-        lambda i: commands.CooldownMapping.from_cooldown(1, 15, commands.BucketType.user).get_bucket(i).update_rate_limit(),
+        lambda i: commands.CooldownMapping.from_cooldown(1, 15, commands.BucketType.user)
+        .get_bucket(i)
+        .update_rate_limit(),
         type=commands.BucketType.user,
     )
     async def gamble(self, ctx: commands.Context):
@@ -552,7 +653,8 @@ class Fun(commands.Cog):
             return await self._send(
                 ctx,
                 base_interaction,
-                f"<:MinoriConfused:1415707082988060874> Woah woah you have been gambling for a while, please wait for `{mins}m {secs}s` before gambling again.",
+                f"<:MinoriConfused:1415707082988060874> Woah woah you have been gambling for a while, "
+                f"please wait for `{mins}m {secs}s` before gambling again.",
                 ephemeral=True,
             )
 
@@ -563,11 +665,15 @@ class Fun(commands.Cog):
 
         progression_cog = self.bot.get_cog("Progression")
         if not progression_cog:
-            return await self._send(ctx, base_interaction, "❌ Progression cog not loaded. Coins unavailable.", ephemeral=True)
+            return await self._send(
+                ctx, base_interaction, "❌ Progression cog not loaded. Coins unavailable.", ephemeral=True
+            )
 
         user_coins = await progression_cog.get_coins(user_id, guild_id)
         if user_coins <= 0:
-            return await self._send(ctx, base_interaction, "❌ You don't have any coins to gamble!", ephemeral=True)
+            return await self._send(
+                ctx, base_interaction, "❌ You don't have any coins to gamble!", ephemeral=True
+            )
 
         view = Fun.GambleView(
             fun=self,
