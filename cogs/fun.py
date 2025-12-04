@@ -164,7 +164,7 @@ class Fun(commands.Cog):
         poll_modal = PollInputModal(ctx, timeout_seconds=timeout_seconds)
         await ctx.interaction.response.send_modal(poll_modal)
 
-    # ===== New helpers for gamble logic (refactor) =====
+    # ===== Gamble helpers (logic split out to reduce complexity) =====
 
     async def _send_insufficient_funds(
         self,
@@ -380,7 +380,7 @@ class Fun(commands.Cog):
 
         await self._enable_gamble_view_controls_if_any(guild_id, user_id)
 
-    # ===== End of gamble refactor helpers =====
+    # ===== View for gamble =====
 
     class GambleView(discord.ui.View):
         def __init__(
@@ -616,6 +616,101 @@ class Fun(commands.Cog):
                 pass
             self.stop()
 
+
+    async def _send_gamble_cooldown_message(
+        self,
+        ctx: commands.Context,
+        interaction: Optional[discord.Interaction],
+        remaining: int,
+    ) -> None:
+        mins, secs = divmod(remaining, 60)
+        await self._send(
+            ctx,
+            interaction,
+            "<:MinoriConfused:1415707082988060874> Woah woah you have been gambling for a while, "
+            f"please wait for `{mins}m {secs}s` before gambling again.",
+            ephemeral=True,
+        )
+
+    async def _ensure_progression_cog(
+        self,
+        ctx: commands.Context,
+        interaction: Optional[discord.Interaction],
+    ):
+        progression_cog = self.bot.get_cog("Progression")
+        if not progression_cog:
+            await self._send(
+                ctx,
+                interaction,
+                "❌ Progression cog not loaded. Coins unavailable.",
+                ephemeral=True,
+            )
+            return None
+        return progression_cog
+
+    async def _ensure_user_has_coins(
+        self,
+        ctx: commands.Context,
+        interaction: Optional[discord.Interaction],
+        progression_cog,
+        user_id: int,
+        guild_id: int,
+    ) -> Optional[int]:
+        user_coins = await progression_cog.get_coins(user_id, guild_id)
+        if user_coins <= 0:
+            await self._send(
+                ctx,
+                interaction,
+                "❌ You don't have any coins to gamble!",
+                ephemeral=True,
+            )
+            return None
+        return user_coins
+
+    async def _send_gamble_prompt(
+        self,
+        ctx: commands.Context,
+        interaction: Optional[discord.Interaction],
+        view: "Fun.GambleView",
+        user_coins: int,
+    ) -> Optional[discord.Message]:
+        prompt = f"You have {user_coins} <:Coins:1415353285270966403>. Select amount to gamble:"
+
+        if interaction:
+            try:
+                if not interaction.response.is_done():
+                    await interaction.response.send_message(prompt, view=view)
+                    try:
+                        return await interaction.original_response()
+                    except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                        return None
+                return await interaction.followup.send(prompt, view=view)
+            except (discord.HTTPException, discord.Forbidden, discord.NotFound):
+                return await ctx.send(prompt, view=view)
+
+        return await ctx.send(prompt, view=view)
+
+    async def _attach_view_message_from_context(
+        self,
+        ctx: commands.Context,
+        view: "Fun.GambleView",
+        sent_message: Optional[discord.Message],
+    ) -> None:
+        if isinstance(sent_message, discord.Message):
+            view.message = sent_message
+            return
+
+        try:
+            if ctx.channel:
+                last = None
+                async for m in ctx.channel.history(limit=1):
+                    last = m
+                if last:
+                    view.message = last
+        except (discord.HTTPException, discord.Forbidden):
+            view.message = None
+
+
     @commands.hybrid_command(name="gamble", description="Gamble your coins!")
     @commands.guild_only()
     @commands.dynamic_cooldown(
@@ -627,53 +722,32 @@ class Fun(commands.Cog):
     async def gamble(self, ctx: commands.Context):
         user_id = ctx.author.id
         guild_id = ctx.guild.id
-        base_interaction: Optional[discord.Interaction] = getattr(ctx, "interaction", None)
-
-        def _already_has_view() -> bool:
-            return self._get_active_view(guild_id, user_id) is not None
-
-        async def _send_prompt(prompt: str, view: "Fun.GambleView") -> Optional[discord.Message]:
-            if base_interaction:
-                try:
-                    if not base_interaction.response.is_done():
-                        await base_interaction.response.send_message(prompt, view=view)
-                        try:
-                            return await base_interaction.original_response()
-                        except (discord.NotFound, discord.Forbidden, discord.HTTPException):
-                            return None
-                    return await base_interaction.followup.send(prompt, view=view)
-                except (discord.HTTPException, discord.Forbidden, discord.NotFound):
-                    return await ctx.send(prompt, view=view)
-            return await ctx.send(prompt, view=view)
+        interaction: Optional[discord.Interaction] = getattr(ctx, "interaction", None)
 
         remaining = self._cooldown_remaining(guild_id, user_id)
         if remaining > 0:
             ctx.command.reset_cooldown(ctx)
-            mins, secs = divmod(remaining, 60)
-            return await self._send(
+            await self._send_gamble_cooldown_message(ctx, interaction, remaining)
+            return
+
+        if self._get_active_view(guild_id, user_id) is not None:
+            await self._send(
                 ctx,
-                base_interaction,
-                f"<:MinoriConfused:1415707082988060874> Woah woah you have been gambling for a while, "
-                f"please wait for `{mins}m {secs}s` before gambling again.",
+                interaction,
+                "⚠️ You already have the gamble view open!",
                 ephemeral=True,
             )
+            return
 
-        if _already_has_view():
-            return await self._send(
-                ctx, base_interaction, "⚠️ You already have the gamble view open!", ephemeral=True
-            )
-
-        progression_cog = self.bot.get_cog("Progression")
+        progression_cog = await self._ensure_progression_cog(ctx, interaction)
         if not progression_cog:
-            return await self._send(
-                ctx, base_interaction, "❌ Progression cog not loaded. Coins unavailable.", ephemeral=True
-            )
+            return
 
-        user_coins = await progression_cog.get_coins(user_id, guild_id)
-        if user_coins <= 0:
-            return await self._send(
-                ctx, base_interaction, "❌ You don't have any coins to gamble!", ephemeral=True
-            )
+        user_coins = await self._ensure_user_has_coins(
+            ctx, interaction, progression_cog, user_id, guild_id
+        )
+        if user_coins is None:
+            return
 
         view = Fun.GambleView(
             fun=self,
@@ -685,21 +759,8 @@ class Fun(commands.Cog):
         )
         self._set_active_view(guild_id, user_id, view)
 
-        prompt = f"You have {user_coins} <:Coins:1415353285270966403>. Select amount to gamble:"
-        sent_message = await _send_prompt(prompt, view)
-
-        if isinstance(sent_message, discord.Message):
-            view.message = sent_message
-        else:
-            try:
-                if ctx.channel:
-                    last = None
-                    async for m in ctx.channel.history(limit=1):
-                        last = m
-                    if last:
-                        view.message = last
-            except (discord.HTTPException, discord.Forbidden):
-                view.message = None
+        sent_message = await self._send_gamble_prompt(ctx, interaction, view, user_coins)
+        await self._attach_view_message_from_context(ctx, view, sent_message)
 
     @commands.hybrid_command(name="animequotes", description="Give a random anime quote")
     async def animequotes(self, ctx: commands.Context):
