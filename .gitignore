@@ -43,6 +43,8 @@ Thumbs.db
 
 # Common DB files (alternative to ignoring whole data/ folder)
 data/*.db
+data/*.db-shm
+data/*.db-wal
 data/*.sqlite
 data/*.sqlite3
 
