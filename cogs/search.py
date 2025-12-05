@@ -4,7 +4,7 @@ from discord.ui import View, Select
 import aiohttp
 import os
 from dotenv import load_dotenv
-from collections import OrderedDict
+from collections import OrderedDict, deque
 
 from cogs.utils.anime_api import (
     fetch_character_by_name,
@@ -23,13 +23,13 @@ ANILIST_API = "https://graphql.anilist.co"
 
 
 class Search(commands.Cog):
-    """Cog providing anime and character avatar utilities. 
+    """Cog providing anime and character avatar utilities.
 
     Commands:
-    - /anime: search for anime metadata (interactive select). 
-    - /animepfp: fetch 1-4 anime character profile pictures (AniList preferred, Google as fallback). 
+    - /anime: search for anime metadata (interactive select).
+    - /animepfp: fetch 1-4 anime character profile pictures (AniList preferred, Google as fallback).
 
-    PERSONAL NOTE: Google image results require GOOGLE_API_KEY and SEARCH_ENGINE_ID environment variables. 
+    PERSONAL NOTE: Google image results require GOOGLE_API_KEY and SEARCH_ENGINE_ID environment variables.
     """
     NOISE_WORDS = {
         "pfp", "pfps", "hd", "avatar", "icon", "anime", "wallpaper",
@@ -40,6 +40,8 @@ class Search(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self._anilist_cache: OrderedDict[str, dict] = OrderedDict()
+        # Track sent images per user per character using deque for efficient FIFO: {user_id: {character_id: deque(image_urls)}}
+        self._sent_images: dict[int, dict[int, deque]] = {}
 
     def _cache_get(self, key: str) -> dict:
         entry = self._anilist_cache.get(key)
@@ -60,6 +62,20 @@ class Search(commands.Cog):
         entry = self._cache_get(key)
         if url not in entry["anilist_images"]:
             entry["anilist_images"].append(url)
+
+    def _get_sent_images(self, user_id: int, char_id: int) -> deque:
+        """Get the deque of images already sent to this user for this character."""
+        if user_id not in self._sent_images:
+            self._sent_images[user_id] = {}
+        if char_id not in self._sent_images[user_id]:
+            self._sent_images[user_id][char_id] = deque(maxlen=100)  # Auto-removes oldest when full
+        return self._sent_images[user_id][char_id]
+
+    def _mark_images_as_sent(self, user_id: int, char_id: int, image_urls: list[str]):
+        """Mark images as sent to this user for this character."""
+        sent_deque = self._get_sent_images(user_id, char_id)
+        for url in image_urls:
+            sent_deque.append(url)  # deque with maxlen automatically pops from left when full
 
     def _strip_noise(self, query: str) -> str:
         words = [w for w in (query or "").split() if w.lower() not in self.NOISE_WORDS]
@@ -133,20 +149,35 @@ class Search(commands.Cog):
         timeout: aiohttp.ClientTimeout,
         count: int,
         exclude: set[str],
+        search_variation: int = 0,
     ) -> list[str]:
-        """Fetch multiple unique Google images for a character."""
+        """Fetch multiple unique Google images for a character.
+
+        Args:
+            character_name: Name of the character to search for
+            cache_key: Cache key for storing results
+            timeout: HTTP timeout for requests
+            count: Number of images to fetch
+            exclude: Set of image URLs to exclude
+            search_variation: Search variation number (0-2) to try different queries
+        """
         if not GOOGLE_API_KEY or not SEARCH_ENGINE_ID:
             return []
 
-        links = await google_image_search(f"{character_name} anime pfp", GOOGLE_API_KEY, SEARCH_ENGINE_ID)
+        # Try different search queries to get more variety
+        search_queries = [
+            f"{character_name} anime pfp",
+            f"{character_name} anime character",
+            f"{character_name} anime art",
+        ]
+
+        search_query = search_queries[min(search_variation, len(search_queries) - 1)]
+        links = await google_image_search(search_query, GOOGLE_API_KEY, SEARCH_ENGINE_ID)
         if not links:
             return []
 
+        # Filter out excluded images first
         candidates = [l for l in links if l not in exclude]
-        if cache_key:
-            entry = self._cache_get(cache_key)
-            unsent = [l for l in candidates if l not in entry["google"] and l not in entry["anilist_images"]]
-            candidates = unsent or [l for l in candidates if l not in entry["anilist_images"]]
 
         found_images = []
         for candidate in candidates:
@@ -167,8 +198,10 @@ class Search(commands.Cog):
     async def _process_character_selection(self, ctx: commands.Context, char: dict, count: int, count_was_clamped: bool, original_count: int, interaction_deferred: bool):
         """Process the selected character and send the PFP embeds."""
         per_call_timeout = aiohttp.ClientTimeout(total=10)
-        
+
         interaction = getattr(ctx, "interaction", None)
+        user_id = ctx.author.id
+        char_id = char.get("id")
 
         async def send_message(content: str = None, *, embeds: list[discord.Embed] = None, embed: discord.Embed = None, ephemeral: bool = False):
             if embeds is None and embed is not None:
@@ -185,10 +218,6 @@ class Search(commands.Cog):
                     return await ctx.send(embeds=embeds)
 
         async def reply(content: str = None, *, embeds: list[discord.Embed] = None, embed: discord.Embed = None, ephemeral: bool = False):
-            if count_was_clamped:
-                await send_message(
-                    f"You requested {original_count} images, but the maximum is 4. Sending 4 images instead."
-                )
             return await send_message(content, embeds=embeds, embed=embed, ephemeral=ephemeral)
 
         if not char_has_anime_media(char):
@@ -197,6 +226,10 @@ class Search(commands.Cog):
 
         char_name = (char.get("name") or {}).get("full", "")
         cache_key = f"al_{char.get('id')}" if char.get("id") else None
+
+        # Get images already sent to this user for this character (as a set for fast lookup)
+        sent_deque = self._get_sent_images(user_id, char_id) if char_id else deque()
+        sent_images = set(sent_deque)  # Convert to set for O(1) lookup
 
         # Get official image
         official_image = None
@@ -212,30 +245,48 @@ class Search(commands.Cog):
 
         collected_images: list[tuple[str, str]] = []  # (url, source)
 
-        if official_image:
-            used_before = False
+        # Add official image if not sent before
+        if official_image and official_image not in sent_images:
             if cache_key:
-                entry = self._cache_get(cache_key)
-                used_before = official_image in entry["anilist_images"]
+                self._cache_add_anilist(cache_key, official_image)
+            collected_images.append((official_image, char.get("source") or "AniList"))
 
-            if not used_before:
-                if cache_key:
-                    self._cache_add_anilist(cache_key, official_image)
-                collected_images.append((official_image, char.get("source") or "AniList"))
+        # Build exclusion set: already sent images + currently collected images
+        exclude = sent_images.copy()
+        exclude.update({img[0] for img in collected_images})
 
+        # Fetch Google images if needed - try multiple search variations
         if len(collected_images) < count:
             remaining = count - len(collected_images)
-            exclude = {img[0] for img in collected_images}
-            google_images = await self._find_multiple_google_images(char_name, cache_key, per_call_timeout, remaining, exclude)
-            for img_url in google_images:
-                collected_images.append((img_url, "Google API"))
 
+            # Try up to 3 different search variations to find enough images
+            for variation in range(3):
+                if len(collected_images) >= count:
+                    break
+
+                google_images = await self._find_multiple_google_images(
+                    char_name, cache_key, per_call_timeout, remaining, exclude, search_variation=variation
+                )
+
+                for img_url in google_images:
+                    if len(collected_images) >= count:
+                        break
+                    collected_images.append((img_url, "Google API"))
+                    exclude.add(img_url)  # Add to exclusion for next variation
+
+                remaining = count - len(collected_images)
+
+        # If still no images, inform user
         if not collected_images:
-            google_images = await self._find_multiple_google_images(char_name, cache_key, per_call_timeout, count, set())
-            if not google_images:
-                return await reply(f"❌ No reachable images found for **{char_name}**.")
-            for img_url in google_images:
-                collected_images.append((img_url, "Google API"))
+            return await reply(f"❌ No new images found for **{char_name}**. Try again later for fresh results!")
+
+        # Mark these images as sent (deque will auto-remove oldest if > maxlen)
+        if char_id:
+            self._mark_images_as_sent(user_id, char_id, [img[0] for img in collected_images])
+
+        # Send clamp warning if needed
+        if count_was_clamped:
+            await send_message(f"⚠️ You requested {original_count} images, but the maximum is 4. Sending {len(collected_images)} image(s) instead.")
 
         embeds = []
         for i, (img_url, source) in enumerate(collected_images):
@@ -376,16 +427,17 @@ class Search(commands.Cog):
     @commands.cooldown(1, 15, commands.BucketType.user)
     async def animepfp(self, ctx: commands.Context, name: str, count: int = 1):
         """
-        Fetch an anime character profile picture. 
+        Fetch an anime character profile picture.
 
         Parameters:
-        - name: full character name (string).  Use exact names for best matches.
-        - count: number of images to return (int).  Defaults to 1.  Values greater than 4 will be clamped to 4 and a warning sent.
+        - name: full character name (string). Use exact names for best matches.
+        - count: number of images to return (int). Defaults to 1. Values greater than 4 will be clamped to 4 and a warning sent.
 
         Behavior:
-        - Prefers official AniList image when available and not previously served. 
+        - Prefers official AniList image when available and not previously served.
         - Falls back to Google Image search (requires GOOGLE_API_KEY and SEARCH_ENGINE_ID).
-        - Returns up to `count` unique images (1-4). 
+        - Returns up to `count` unique images (1-4).
+        - Tracks sent images per user to avoid duplicates.
         """
         name = (name or "").strip()
         if not name:
@@ -393,7 +445,9 @@ class Search(commands.Cog):
 
         count_was_clamped = count > 4
         original_count = count
-        count = max(1, min(4, count))
+        count = min(4, count)
+        if count < 1:
+            count = 1
 
         interaction = getattr(ctx, "interaction", None)
         deferred = False
@@ -428,10 +482,10 @@ class Search(commands.Cog):
                 data = await resp.json()
 
         characters = data.get("data", {}).get("Page", {}).get("characters", [])
-        
+
         # Filter to only anime characters
         anime_characters = [c for c in characters if c.get("media", {}).get("nodes")]
-        
+
         if not anime_characters:
             return await ctx.send(f"❌ No anime characters found for `{name}`.")
 
@@ -464,10 +518,10 @@ class Search(commands.Cog):
             char_id = int(select_interaction.data["values"][0])
             selected_char = next(c for c in anime_characters if c["id"] == char_id)
             selected_char["source"] = "AniList"
-            
+
             # Update the original message to remove the dropdown
             await select_interaction.edit_original_response(content="Processing your selection...", view=None)
-            
+
             # Process the selected character
             await self._process_character_selection(ctx, selected_char, count, count_was_clamped, original_count, deferred)
 
@@ -475,7 +529,7 @@ class Search(commands.Cog):
         select.callback = select_callback
         view = View()
         view.add_item(select)
-        
+
         if deferred and interaction is not None:
             await interaction.followup.send("Multiple characters found. Please pick one:", view=view)
         else:
