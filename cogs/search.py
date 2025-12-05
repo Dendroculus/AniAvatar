@@ -21,8 +21,20 @@ SEARCH_ENGINE_ID = os.getenv("SEARCH_ENGINE_ID")
 
 ANILIST_API = "https://graphql.anilist.co"
 
+
 class Search(commands.Cog):
-    NOISE_WORDS = {"pfp", "pfps", "hd", "avatar", "icon", "anime", "wallpaper", "image", "picture", "pic", "profile"}
+    """Cog providing anime and character avatar utilities.
+
+    Commands:
+    - /anime: search for anime metadata (interactive select).
+    - /animepfp: fetch 1-4 anime character profile pictures (AniList preferred, Google as fallback).
+
+    Note: Google image results require GOOGLE_API_KEY and SEARCH_ENGINE_ID environment variables.
+    """
+    NOISE_WORDS = {
+        "pfp", "pfps", "hd", "avatar", "icon", "anime", "wallpaper",
+        "image", "picture", "pic", "profile"
+    }
     CACHE_MAX_KEYS = 200
 
     def __init__(self, bot):
@@ -57,7 +69,12 @@ class Search(commands.Cog):
         cleaned_query = self._strip_noise(original_query)
 
         char = await fetch_character_by_name(original_query, prefer="AniList")
-        if char and char.get("source") == "AniList" and not char_has_anime_media(char) and cleaned_query != original_query:
+        if (
+            char
+            and char.get("source") == "AniList"
+            and not char_has_anime_media(char)
+            and cleaned_query != original_query
+        ):
             alt = await fetch_character_by_name(cleaned_query, prefer="AniList")
             if alt and char_has_anime_media(alt):
                 char = alt
@@ -109,6 +126,44 @@ class Search(commands.Cog):
             self._cache_add_google(cache_key, chosen)
         return chosen
 
+    async def _find_multiple_google_images(
+        self,
+        character_name: str,
+        cache_key: str | None,
+        timeout: aiohttp.ClientTimeout,
+        count: int,
+        exclude: set[str],
+    ) -> list[str]:
+        """Fetch multiple unique Google images for a character."""
+        if not GOOGLE_API_KEY or not SEARCH_ENGINE_ID:
+            return []
+
+        links = await google_image_search(f"{character_name} anime pfp", GOOGLE_API_KEY, SEARCH_ENGINE_ID)
+        if not links:
+            return []
+
+        candidates = [l for l in links if l not in exclude]
+        if cache_key:
+            entry = self._cache_get(cache_key)
+            unsent = [l for l in candidates if l not in entry["google"] and l not in entry["anilist_images"]]
+            candidates = unsent or [l for l in candidates if l not in entry["anilist_images"]]
+
+        found_images = []
+        for candidate in candidates:
+            if len(found_images) >= count:
+                break
+            try:
+                async with aiohttp.ClientSession(timeout=timeout) as session:
+                    ok = await is_image_url_ok(session, candidate, timeout)
+                if ok:
+                    found_images.append(candidate)
+                    if cache_key:
+                        self._cache_add_google(cache_key, candidate)
+            except Exception:
+                continue
+
+        return found_images
+
     @commands.hybrid_command(name="anime", description="Search for an anime by name")
     @commands.cooldown(1, 15, commands.BucketType.user)
     async def anime(self, ctx: commands.Context, *, query: str):
@@ -156,13 +211,15 @@ class Search(commands.Cog):
             title = anime["title"]["english"] or anime["title"]["romaji"]
             episodes = anime.get("episodes") or "N/A"
             season = anime.get("season") or "N/A"
-            options.append(discord.SelectOption(
-                label=title[:100],
-                description=f"Episodes: {episodes} | Season: {season}"[:100],
-                value=str(anime["id"])
-            ))
+            options.append(
+                discord.SelectOption(
+                    label=title[:100],
+                    description=f"Episodes: {episodes} | Season: {season}"[:100],
+                    value=str(anime["id"]),
+                )
+            )
 
-        async def select_callback(interaction: discord.Interaction):            
+        async def select_callback(interaction: discord.Interaction):
             if interaction.user != ctx.author:
                 await interaction.response.send_message("This is not your command!", ephemeral=True)
                 return
@@ -178,12 +235,7 @@ class Search(commands.Cog):
             if len(description) > 4096:
                 description = description[:4093] + "..."
 
-            embed = discord.Embed(
-                title=title,
-                url=url,
-                description=description,
-                color=discord.Color.blurple()
-            )
+            embed = discord.Embed(title=title, url=url, description=description, color=discord.Color.blurple())
             if anime_data.get("coverImage", {}).get("medium"):
                 embed.set_thumbnail(url=anime_data["coverImage"]["medium"])
             if anime_data.get("bannerImage"):
@@ -200,7 +252,11 @@ class Search(commands.Cog):
             embed.add_field(name="End Date", value=end_str, inline=True)
 
             embed.add_field(name="Duration", value=f"{anime_data.get('duration', 'N/A')} min/ep", inline=True)
-            embed.add_field(name="Studio", value=anime_data["studios"]["nodes"][0]["name"] if anime_data["studios"]["nodes"] else "N/A", inline=True)
+            embed.add_field(
+                name="Studio",
+                value=anime_data["studios"]["nodes"][0]["name"] if anime_data["studios"]["nodes"] else "N/A",
+                inline=True,
+            )
             embed.add_field(name="Source", value=anime_data.get("source", "N/A"), inline=True)
 
             embed.add_field(name="Score", value=f"{anime_data.get('averageScore', 'N/A')}%", inline=True)
@@ -213,7 +269,7 @@ class Search(commands.Cog):
 
             embed.set_footer(
                 text="Provided by AniList",
-                icon_url="https://anilist.co/img/icons/android-chrome-512x512.png"
+                icon_url="https://anilist.co/img/icons/android-chrome-512x512.png",
             )
             await interaction.edit_original_response(embed=embed, view=None)
 
@@ -223,13 +279,32 @@ class Search(commands.Cog):
         view.add_item(select)
         await ctx.send("Select an anime from the search results:", view=view)
 
-    @commands.hybrid_command(name="animepfp", description="Fetch an anime character PFP (use the full character name for best results)")
+    @commands.hybrid_command(
+        name="animepfp",
+        description="Fetch an anime character PFP (use the full character name for best results)",
+    )
     @commands.guild_only()
     @commands.cooldown(1, 15, commands.BucketType.user)
-    async def animepfp(self, ctx: commands.Context, *, name: str):
+    async def animepfp(self, ctx: commands.Context, name: str, count: int = 1):
+        """
+        Fetch an anime character profile picture.
+
+        Parameters:
+        - name: full character name (string). Use exact names for best matches.
+        - count: number of images to return (int). Defaults to 1. Values greater than 4 will be clamped to 4 and a warning sent.
+
+        Behavior:
+        - Prefers official AniList image when available and not previously served.
+        - Falls back to Google Image search (requires GOOGLE_API_KEY and SEARCH_ENGINE_ID).
+        - Returns up to `count` unique images (1-4).
+        """
         name = (name or "").strip()
         if not name:
             return await ctx.send("❌ Please provide a character name.")
+
+        count_was_clamped = count > 4
+        original_count = count
+        count = max(1, min(4, count))
 
         per_call_timeout = aiohttp.ClientTimeout(total=10)
 
@@ -242,17 +317,26 @@ class Search(commands.Cog):
             except Exception:
                 deferred = False
 
-        async def reply(content: str = None, *, embed: discord.Embed = None, ephemeral: bool = False):
+        async def send_message(content: str = None, *, embeds: list[discord.Embed] = None, embed: discord.Embed = None, ephemeral: bool = False):
+            if embeds is None and embed is not None:
+                embeds = [embed]
             if deferred and interaction is not None:
                 if content is not None:
                     return await interaction.followup.send(content, ephemeral=ephemeral)
                 else:
-                    return await interaction.followup.send(embed=embed, ephemeral=ephemeral)
+                    return await interaction.followup.send(embeds=embeds, ephemeral=ephemeral)
             else:
                 if content is not None:
                     return await ctx.send(content)
                 else:
-                    return await ctx.send(embed=embed)
+                    return await ctx.send(embeds=embeds)
+
+        async def reply(content: str = None, *, embeds: list[discord.Embed] = None, embed: discord.Embed = None, ephemeral: bool = False):
+            if count_was_clamped:
+                await send_message(
+                    f"You requested {original_count} images, but the maximum is 4. Sending 4 images instead."
+                )
+            return await send_message(content, embeds=embeds, embed=embed, ephemeral=ephemeral)
 
         char, official_image = await self._find_official_image(name, per_call_timeout)
 
@@ -262,28 +346,26 @@ class Search(commands.Cog):
         char_name = (char.get("name") or {}).get("full", "")
         search_name_lower = name.lower().strip()
         char_name_lower = char_name.lower().strip()
-        
+
         is_reasonable_match = (
-            search_name_lower in char_name_lower or 
-            char_name_lower in search_name_lower or
-            search_name_lower.replace(" ", "") in char_name_lower.replace(" ", "") or
-            char_name_lower.replace(" ", "") in search_name_lower.replace(" ", "")
+            search_name_lower in char_name_lower
+            or char_name_lower in search_name_lower
+            or search_name_lower.replace(" ", "") in char_name_lower.replace(" ", "")
+            or char_name_lower.replace(" ", "") in search_name_lower.replace(" ", "")
         )
-        
+
         if not is_reasonable_match:
             return await reply(
-                f"`{name}` was not found. The closest match was `{char_name}`. "
-                f"Please use the exact character name."
+                f"`{name}` was not found. The closest match was `{char_name}`. Please use the exact character name."
             )
 
         if not char_has_anime_media(char):
             return await reply(f"`{char_name}` is not an anime character. Please search for anime characters only.")
-        
-        cache_key = f"al_{char.get('id')}" if char.get('id') else None
+
+        cache_key = f"al_{char.get('id')}" if char.get("id") else None
         character_name = char_name
-        
-        selected_image = None
-        source = None
+
+        collected_images: list[tuple[str, str]] = []  # (url, source)
 
         if official_image:
             used_before = False
@@ -291,31 +373,41 @@ class Search(commands.Cog):
                 entry = self._cache_get(cache_key)
                 used_before = official_image in entry["anilist_images"]
 
-            if used_before:
-                google_img = await self._find_google_image(character_name, cache_key, per_call_timeout)
-                if google_img:
-                    selected_image = google_img
-                    source = "Google API"
-                else:
-                    if cache_key:
-                        self._cache_add_anilist(cache_key, official_image)
-                    selected_image = official_image
-                    source = char.get("source") or "AniList"
-            else:
+            if not used_before:
                 if cache_key:
                     self._cache_add_anilist(cache_key, official_image)
-                selected_image = official_image
-                source = char.get("source") or "AniList"
-        else:
-            selected_image = await self._find_google_image(character_name, cache_key, per_call_timeout)
-            if not selected_image:
-                return await reply(f"❌ No reachable images found for **{character_name}**.")
-            source = "Google API"
+                collected_images.append((official_image, char.get("source") or "AniList"))
 
-        embed = discord.Embed(title=f"Anime PFP for {character_name}", color=discord.Color.purple())
-        embed.set_image(url=selected_image)
-        embed.set_footer(text=f"Source: {source}")
-        return await reply(embed=embed)
+        if len(collected_images) < count:
+            remaining = count - len(collected_images)
+            exclude = {img[0] for img in collected_images}
+            google_images = await self._find_multiple_google_images(character_name, cache_key, per_call_timeout, remaining, exclude)
+            for img_url in google_images:
+                collected_images.append((img_url, "Google API"))
+
+        if not collected_images:
+            google_images = await self._find_multiple_google_images(character_name, cache_key, per_call_timeout, count, set())
+            if not google_images:
+                return await reply(f"❌ No reachable images found for **{character_name}**.")
+            for img_url in google_images:
+                collected_images.append((img_url, "Google API"))
+
+        embeds = []
+        for i, (img_url, source) in enumerate(collected_images):
+            embed = discord.Embed(
+                title=(
+                    f"Anime PFP for {character_name}"
+                    if len(collected_images) == 1
+                    else f"Anime PFP for {character_name} ({i + 1}/{len(collected_images)})"
+                ),
+                color=discord.Color.purple(),
+            )
+            embed.set_image(url=img_url)
+            embed.set_footer(text=f"Source: {source}")
+            embeds.append(embed)
+
+        return await reply(embeds=embeds)
+
 
 async def setup(bot):
     await bot.add_cog(Search(bot))
