@@ -40,17 +40,6 @@ class ErrorHandler(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    def _respond_ctx_docstring():
-        """
-        Helper semantics:
-        - ctx may be from a prefix command or a hybrid command executed as an interaction.
-        - We attempt to respond via the interaction first (if present) to preserve slash UX.
-        - Ephemeral default prevents error messages from being publicly visible unless code requests otherwise.
-        - Forbidden/HTTPException are ignored because they typically indicate the bot lacks
-          permission to send messages; attempting to report that failure will itself fail.
-        """
-        return None
-
     async def _respond_ctx(self, ctx, message: str, ephemeral: bool = True):
         # Respond to a Context invocation; prefer the underlying interaction when present.
         interaction = getattr(ctx, "interaction", None)
