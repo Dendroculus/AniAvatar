@@ -14,7 +14,46 @@ from cogs.utils.pollUtils import PollInputModal
 FALSE_GAMBLE_SESSION = "⚠️ This is not your gamble session."
 
 
+"""
+fun.py
+
+Purpose:
+- Lightweight collection of user-facing entertainment commands and interactive views
+  (gambling UI, quote lookup, waifu image fetch, and poll-creation helper).
+- Encapsulates UI/state for a per-user "gamble" view that interacts with the Progression
+  cog for coin balance/reservation. The view is stateful and must be attached to the
+  message that presented it so users can continue interacting with it.
+
+Design and operational notes (important):
+- Concurrency: GambleView instances are tied to a guild_id,user_id pair and tracked in
+  self.active_views to ensure only one view per user exists. Access to quote selection
+  and other small shared state is protected by an asyncio.Lock where appropriate.
+- Safety: The gambling flow reserves coins before attempting to settle a wager. On
+  downstream errors the code attempts to refund or partially refund bets where possible.
+- UX: The cog favors ephemeral responses for errors and uses interaction response/followup
+  semantics to integrate both prefix and slash invocations.
+- Extensibility: The gambling logic is intentionally split into small helper methods
+  (_run_single_gamble, _process_gamble, etc.) so operators can change win odds, cooldowns,
+  or maximum attempts without touching UI code.
+- Persistence: This module relies on an external Progression cog for coin storage and
+  atomic reserve/add operations; ensure that cog provides the methods used here.
+"""
+
 class Fun(commands.Cog):
+    """
+    Fun cog providing entertainment commands.
+
+    Key responsibilities:
+    - Provide image/quote commands (e.g., waifu, animequotes).
+    - Expose a slash-only poll creator that uses PollInputModal for long-form input.
+    - Manage the lifecycle of interactive GambleView objects and enforce per-user cooldowns.
+
+    Important attributes:
+    - active_views: nested mapping guild_id -> user_id -> GambleView to ensure a single
+      active gamble UI per user.
+    - _gamble_counts/_gamble_cooldowns: per-session attempt counters and cooldown timers
+      used to protect users from excessive gambling attempts.
+    """
     def __init__(self, bot):
         self.bot = bot
         self.gamble_cooldowns = {}
@@ -50,6 +89,18 @@ class Fun(commands.Cog):
         ephemeral: bool = False,
         **kwargs: Any,
     ) -> Optional[discord.Message]:
+        """
+        Unified send helper that works with both prefix Context and Interaction flows.
+
+        Behavior:
+        - If an Interaction is provided prefer interaction.response / followup semantics
+          to preserve slash-command UX. Fall back to ctx.send when interaction responses
+          fail (permissions, message not found).
+        - Returns the sent Message when available; returns None when the message could
+          not be retrieved (e.g., original_response not accessible).
+        - Ephemeral flag is removed when falling back to ctx.send because that concept
+          is not applicable to prefix messages.
+        """
         if interaction:
             try:
                 if not interaction.response.is_done():
@@ -66,6 +117,11 @@ class Fun(commands.Cog):
         return await ctx.send(content, **kwargs)
 
     def _cooldown_remaining(self, guild_id: int, user_id: int) -> int:
+        """
+        Return remaining cooldown seconds for a user's gamble session in a guild.
+
+        Uses self._gamble_cooldowns keyed by (guild_id, user_id).
+        """
         key = (guild_id, user_id)
         now = time.time()
         expires = self._gamble_cooldowns.get(key)
@@ -74,20 +130,34 @@ class Fun(commands.Cog):
         return 0
 
     def _start_session_cooldown(self, guild_id: int, user_id: int) -> None:
+        """
+        Begin the configured gamble cooldown for the given user, and clear the attempt counter.
+        """
         key = (guild_id, user_id)
         self._gamble_cooldowns[key] = time.time() + self.GAMBLE_COOLDOWN_SECONDS
         self._gamble_counts.pop(key, None)
 
     def _count_attempt(self, guild_id: int, user_id: int) -> int:
+        """
+        Increment and return the number of gamble attempts in the current session.
+        """
         key = (guild_id, user_id)
         new_val = self._gamble_counts.get(key, 0) + 1
         self._gamble_counts[key] = new_val
         return new_val
 
     def _clear_attempts(self, guild_id: int, user_id: int) -> None:
+        """
+        Clear the per-session attempt counter for a user.
+        """
         self._gamble_counts.pop((guild_id, user_id), None)
 
     def _set_active_view(self, guild_id: int, user_id: int, view: Optional["Fun.GambleView"]) -> None:
+        """
+        Register or unregister an active GambleView for a specific user in a guild.
+
+        If view is None the mapping is removed; otherwise the view is set.
+        """
         self.active_views.setdefault(guild_id, {})
         if view is None:
             self.active_views[guild_id].pop(user_id, None)
@@ -95,9 +165,19 @@ class Fun(commands.Cog):
             self.active_views[guild_id][user_id] = view
 
     def _get_active_view(self, guild_id: int, user_id: int) -> Optional["Fun.GambleView"]:
+        """
+        Return the active GambleView for a user if present; otherwise None.
+        """
         return self.active_views.get(guild_id, {}).get(user_id)
 
     def get_balanced_quotes(self, num_quotes: int):
+        """
+        Return up to num_quotes quotes balancing across categories to avoid repeats.
+
+        Notes:
+        - Maintains a per-instance `used_quotes` set to reduce immediate repetition.
+        - When all quotes are exhausted the used set is cleared and selection resumes.
+        """
         titles = list(self.quotes_dict.keys())
         if not titles:
             return []
@@ -124,6 +204,9 @@ class Fun(commands.Cog):
     @commands.hybrid_command(name="waifu", description="Get a random waifu image")
     @commands.cooldown(1, 5, commands.BucketType.user)
     async def waifu(self, ctx):
+        """
+        Fetch a safe-for-work image from the waifu.pics API and send it as an embed.
+        """
         url = "https://api.waifu.pics/sfw/waifu"
 
         async with aiohttp.ClientSession() as session:
@@ -144,6 +227,11 @@ class Fun(commands.Cog):
     @commands.guild_only()
     @app_commands.describe(duration="How long should the poll last in minutes?")
     async def poll(self, ctx: commands.Context, duration: int):
+        """
+        Slash-only entrypoint to create a poll using a modal (PollInputModal).
+
+        The command validates duration bounds and opens the Modal via interaction response.
+        """
         if not getattr(ctx, "interaction", None):
             return await ctx.send(
                 "<:MinoriConfused:1415707082988060874> Please use the slash (/) version of this command so the bot can open modals."
@@ -175,6 +263,11 @@ class Fun(commands.Cog):
         user_id: int,
         amount: int,
     ) -> None:
+        """
+        Inform the user they don't have enough coins and attempt to refresh the gamble prompt.
+
+        If the active view exists we also edit the prompt with the latest balance to keep UI state consistent.
+        """
         await self._send(
             ctx,
             interaction,
@@ -205,6 +298,12 @@ class Fun(commands.Cog):
         amount: int,
         pre_balance_val: int,
     ) -> Optional[str]:
+        """
+        Credit winnings to the user and return a localized success message fragment.
+
+        On failures the function attempts a minimal refund and returns None indicating
+        an unrecoverable error occurred and the caller should abort further processing.
+        """
         try:
             await progression_cog.add_coins(user_id, guild_id, amount * 2)
             if amount == pre_balance_val:
@@ -238,6 +337,11 @@ class Fun(commands.Cog):
         guild_id: int,
         user_id: int,
     ) -> None:
+        """
+        Update the active gamble view prompt with the user's current balance.
+
+        This keeps UI accurate when external events (other commands) modify balance.
+        """
         try:
             vo_inner = self._get_active_view(guild_id, user_id)
             if not vo_inner or not vo_inner.message:
@@ -260,6 +364,12 @@ class Fun(commands.Cog):
         guild_id: int,
         user_id: int,
     ) -> None:
+        """
+        When a user exceeds the maximum allowed attempts, start a cooldown and disable the view.
+
+        The function also attempts to persistently disable controls on the view so the UI
+        is no longer actionable.
+        """
         self._start_session_cooldown(guild_id, user_id)
         await self._send(
             ctx,
@@ -284,6 +394,11 @@ class Fun(commands.Cog):
         guild_id: int,
         user_id: int,
     ) -> None:
+        """
+        Re-enable UI controls for a user's active GambleView, if present.
+
+        This is used to re-allow the user to continue gambling after a round completes.
+        """
         vo = self._get_active_view(guild_id, user_id)
         if not vo:
             return
@@ -302,6 +417,16 @@ class Fun(commands.Cog):
         progression_cog,
         amount: int,
     ) -> None:
+        """
+        Execute a single gamble attempt:
+        - Validate amount
+        - Reserve coins via progression_cog
+        - Compute win probability based on bet ratio
+        - Settle win or loss and update user with the result and new balance
+
+        This function intentionally performs minimal UI changes (uses helper methods to
+        inform about insufficient funds and to refresh prompts).
+        """
         if amount <= 0:
             await self._send(ctx, interaction, "❌ Invalid bet amount.", ephemeral=True)
             return
@@ -362,6 +487,12 @@ class Fun(commands.Cog):
         progression_cog,
         amount: int,
     ) -> None:
+        """
+        Orchestrate a full gamble cycle:
+        - Run one gamble
+        - Increment the attempt counter and apply session cooldown if threshold exceeded
+        - Re-enable the GambleView controls for subsequent interactions
+        """
         await self._run_single_gamble(
             ctx,
             interaction,
@@ -383,6 +514,14 @@ class Fun(commands.Cog):
     # ===== View for gamble =====
 
     class GambleView(discord.ui.View):
+        """
+        Interactive view presented to users to select gamble amounts.
+
+        Lifecycle:
+        - Constructed with references to the parent Fun instance and progression cog.
+        - The view maintains a short-lived timeout_task to auto-timeout the UI.
+        - The view manipulates its own disabled state to prevent double submissions.
+        """
         def __init__(
             self,
             *,
@@ -423,12 +562,18 @@ class Fun(commands.Cog):
             self.reset_timeout()
 
         def _create_select_options(self):
+            """
+            Helper to build discord.SelectOption objects for the current options_list.
+            """
             return [
                 discord.SelectOption(label=label, value=str(value), emoji=emoji)
                 for label, value, emoji in self.options_list
             ]
 
         def _create_select(self):
+            """
+            Construct and return a Select UI element wired to the view's select_callback.
+            """
             select = discord.ui.Select(
                 placeholder="Select amount to gamble",
                 options=self._create_select_options(),
@@ -439,11 +584,18 @@ class Fun(commands.Cog):
             return select
 
         def reset_timeout(self):
+            """
+            Restart the view's inactivity timeout task. Used to extend the UI lifetime
+            after user interactions.
+            """
             if self.timeout_task:
                 self.timeout_task.cancel()
             self.timeout_task = self.bot.loop.create_task(self._timeout_handler())
 
         async def _timeout_handler(self):
+            """
+            Background coroutine that marks the view timed-out and clears active view mapping.
+            """
             await asyncio.sleep(self.timeout_seconds)
             if self.message:
                 try:
@@ -454,6 +606,9 @@ class Fun(commands.Cog):
             self.stop()
 
         async def _disable_controls(self):
+            """
+            Disable all interactive children and attempt to persist the disabled state to the message.
+            """
             for item in self.children:
                 if hasattr(item, "disabled"):
                     item.disabled = True
@@ -464,6 +619,9 @@ class Fun(commands.Cog):
                     pass
 
         async def _enable_controls(self):
+            """
+            Re-enable interactive children and update the message view where possible.
+            """
             for item in self.children:
                 if hasattr(item, "disabled"):
                     item.disabled = False
@@ -474,6 +632,9 @@ class Fun(commands.Cog):
                     pass
 
         async def _clear_selection(self):
+            """
+            Reset the Select to its original set of options and update the message.
+            """
             self.select.options = self._create_select_options()
             if self.message:
                 try:
@@ -482,6 +643,11 @@ class Fun(commands.Cog):
                     pass
 
         def _parse_value_from_interaction(self, interaction: discord.Interaction) -> Optional[int]:
+            """
+            Parse an integer selection value from the interaction payload or the Select state.
+
+            Returns None for invalid or missing values.
+            """
             try:
                 value_raw = None
                 if isinstance(getattr(interaction, "data", None), dict):
@@ -495,10 +661,18 @@ class Fun(commands.Cog):
                 return None
 
         async def _send_invalid_selection(self, interaction: discord.Interaction) -> None:
+            """
+            Notify the user that their selection was invalid and reset the selection UI.
+            """
             await self.fun._send(self.ctx, interaction, "❌ Invalid selection.", ephemeral=True)
             await self._clear_selection()
 
         async def _edit_view_after_disable(self, interaction: discord.Interaction) -> None:
+            """
+            Attempt to persist the view state after controls have been disabled.
+
+            Uses interaction.response.edit_message when possible, otherwise edits the stored message.
+            """
             try:
                 if not interaction.response.is_done():
                     await interaction.response.edit_message(view=self)
@@ -508,6 +682,12 @@ class Fun(commands.Cog):
                 pass
 
         async def _show_custom_modal(self, interaction: discord.Interaction) -> None:
+            """
+            Present a small inline Modal for entering a custom gamble amount.
+
+            The inner CustomModal enforces that only the session owner may submit and
+            validates the provided amount against the user's current balance.
+            """
             await self._clear_selection()
 
             parent = self
@@ -560,6 +740,11 @@ class Fun(commands.Cog):
             await interaction.response.send_modal(CustomModal())
 
         async def _handle_bet_value(self, interaction: discord.Interaction, value: int) -> None:
+            """
+            Core handler for numeric bet values including "All In" (-2) semantics.
+
+            Disables controls during processing to avoid duplicate submissions.
+            """
             await self._disable_controls()
             await self._edit_view_after_disable(interaction)
 
@@ -584,6 +769,11 @@ class Fun(commands.Cog):
             await self._clear_selection()
 
         async def select_callback(self, interaction: discord.Interaction):
+            """
+            Select callback invoked when a user chooses a gamble option.
+
+            Validates session ownership, parses the selection and dispatches to the appropriate handler.
+            """
             if interaction.user.id != self.user_id:
                 await self.fun._send(self.ctx, interaction, FALSE_GAMBLE_SESSION, ephemeral=True)
                 return
@@ -601,6 +791,9 @@ class Fun(commands.Cog):
             await self._handle_bet_value(interaction, value)
 
         async def exit_callback(self, interaction: discord.Interaction):
+            """
+            Exit the gamble UI. Only the session owner may exit; cleans up active view mapping.
+            """
             if interaction.user.id != self.user_id:
                 await self.fun._send(self.ctx, interaction, FALSE_GAMBLE_SESSION, ephemeral=True)
                 return
@@ -616,13 +809,15 @@ class Fun(commands.Cog):
                 pass
             self.stop()
 
-
     async def _send_gamble_cooldown_message(
         self,
         ctx: commands.Context,
         interaction: Optional[discord.Interaction],
         remaining: int,
     ) -> None:
+        """
+        Notify the user of remaining session cooldown in a user-friendly minutes:seconds format.
+        """
         mins, secs = divmod(remaining, 60)
         await self._send(
             ctx,
@@ -637,6 +832,11 @@ class Fun(commands.Cog):
         ctx: commands.Context,
         interaction: Optional[discord.Interaction],
     ):
+        """
+        Ensure the Progression cog is loaded and return it.
+
+        The gamble flow depends on the Progression cog; if missing the user is informed.
+        """
         progression_cog = self.bot.get_cog("Progression")
         if not progression_cog:
             await self._send(
@@ -656,6 +856,11 @@ class Fun(commands.Cog):
         user_id: int,
         guild_id: int,
     ) -> Optional[int]:
+        """
+        Verify the user has a positive coin balance before starting a gamble session.
+
+        Returns the coin balance or None if the user cannot gamble.
+        """
         user_coins = await progression_cog.get_coins(user_id, guild_id)
         if user_coins <= 0:
             await self._send(
@@ -674,6 +879,11 @@ class Fun(commands.Cog):
         view: "Fun.GambleView",
         user_coins: int,
     ) -> Optional[discord.Message]:
+        """
+        Present the gamble prompt and attach the provided view.
+
+        Returns the message object when possible to allow the caller to tie the view to the message.
+        """
         prompt = f"You have {user_coins} <:Coins:1415353285270966403>. Select amount to gamble:"
 
         if interaction:
@@ -696,6 +906,12 @@ class Fun(commands.Cog):
         view: "Fun.GambleView",
         sent_message: Optional[discord.Message],
     ) -> None:
+        """
+        Attach the given view to the message returned by _send_gamble_prompt.
+
+        When the send helper could not provide the Message object the function attempts
+        to find the last message in the channel as a best-effort fallback.
+        """
         if isinstance(sent_message, discord.Message):
             view.message = sent_message
             return
@@ -720,6 +936,14 @@ class Fun(commands.Cog):
         type=commands.BucketType.user,
     )
     async def gamble(self, ctx: commands.Context):
+        """
+        Entrypoint to open a GambleView for the invoking user.
+
+        Flow:
+        - Check per-session cooldown
+        - Ensure Progression cog is available and the user has coins
+        - Create and display a GambleView and register it in active_views
+        """
         user_id = ctx.author.id
         guild_id = ctx.guild.id
         interaction: Optional[discord.Interaction] = getattr(ctx, "interaction", None)
@@ -764,6 +988,11 @@ class Fun(commands.Cog):
 
     @commands.hybrid_command(name="animequotes", description="Give a random anime quote")
     async def animequotes(self, ctx: commands.Context):
+        """
+        Send a single balanced anime quote wrapped in an embed.
+
+        The selection is guarded by a lock to avoid concurrent modification of used_quotes.
+        """
         async with self.lock:
             result = self.get_balanced_quotes(1)
             if not result:
@@ -780,4 +1009,4 @@ class Fun(commands.Cog):
 
 
 async def setup(bot):
-    await bot.add_cog(Fun(bot))
+    await bot.add_cog(Fun(bot)) 
