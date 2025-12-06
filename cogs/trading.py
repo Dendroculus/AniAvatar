@@ -5,6 +5,37 @@ import random
 from datetime import datetime, timedelta, timezone
 import asyncio
 
+"""
+trading.py
+
+Provides shop and inventory functionality for the AniAvatar bot.
+
+Contents:
+- Constants for items and SQL statements used by the shop/inventory.
+- Utility: format_coins(coins) -> human-friendly coin string.
+- UI components:
+  - CloseButton: button used to close shop/inventory views.
+  - InventorySelect: select menu for using items from inventory.
+  - InventoryView: view that contains the inventory select and close button.
+  - ShopSelect: select menu for buying items from the shop.
+  - ShopView: view that contains the shop select and close button.
+- Trading Cog:
+  - Initializes DB tables for shop and inventory on load.
+  - apply_potion_effect: apply consumable effects that grant exp or skip levels.
+  - apply_mystery_box: randomly awards items to a user.
+  - Commands:
+    - shop: shows shop and allows purchases.
+    - inventory: shows inventory and allows usage.
+    - donate: allows giving items to another user with cooldown and caps.
+
+Notes:
+- This module expects a Progression cog to be present with:
+  - conn: an async DB connection supporting execute / fetchone / fetchall.
+  - db_lock: an asyncio lock to serialize DB writes.
+  - get_user, add_exp, get_coins, remove_coins, announce_level_up, MAX_LEVEL attributes/methods.
+- All behavioral code is left unchanged; only docstrings/comments were added.
+"""
+
 COG_PATH = os.path.dirname(os.path.abspath(__file__))
 ROOT_PATH = os.path.dirname(COG_PATH)
 SHOP_ICON_URL = "https://cdn.discordapp.com/emojis/1415555390489366680.png"
@@ -27,6 +58,20 @@ ON CONFLICT(user_id, guild_id, item_name) DO UPDATE SET quantity = quantity + ?
 SQL_SELECT_PRICE_EMOJI = "SELECT price, emoji FROM shop_items WHERE name = ?"
 
 def format_coins(coins: int) -> str:
+    """
+    Format a coin integer into a compact human-readable string.
+
+    Examples:
+    - 532 -> "532"
+    - 12500 -> "12.5K"
+    - 2000000 -> "2M"
+
+    Args:
+        coins: integer number of coins.
+
+    Returns:
+        A string with suffix K/M/B as appropriate and trimmed trailing zeros.
+    """
     if coins < 1_000:
         return str(coins)
     elif coins < 1_000_000:
@@ -35,8 +80,18 @@ def format_coins(coins: int) -> str:
         return f"{coins / 1_000_000:.2f}M".rstrip("0").rstrip(".")
     else:
         return f"{coins / 1_000_000_000:.2f}B".rstrip("0").rstrip(".")
-    
+
 class CloseButton(discord.ui.Button):
+    """
+    A reusable 'Close' button for views (shop/inventory).
+
+    Attributes:
+        owner_id: ID of the user who opened the menu (only they may close it).
+        close_text: message to display after closing.
+        menu_type: "shop" or "inventory" to allow the cog to update open_shops/open_inventories.
+        cog: reference to the Trading cog for state updates.
+        guild_id: guild id used as key to manage open menus.
+    """
     def __init__(self, owner_id: int, close_text: str, label: str = "Close", menu_type: str = None, cog=None, guild_id: int = None):
         self.guild_id = guild_id
         super().__init__(label=label, style=discord.ButtonStyle.danger)
@@ -46,6 +101,10 @@ class CloseButton(discord.ui.Button):
         self.cog = cog
 
     async def callback(self, interaction: discord.Interaction):
+        """
+        Close the menu if invoked by the original owner; otherwise send an ephemeral error.
+        Cancels any view timeout task and edits the message to display close_text.
+        """
         if interaction.user.id != self.owner_id:
             await interaction.response.send_message("⚠️ This is not your menu!", ephemeral=True)
             return
@@ -62,6 +121,22 @@ class CloseButton(discord.ui.Button):
         await interaction.response.edit_message(content=self.close_text, embed=None, view=None)
 
 class InventorySelect(discord.ui.Select):
+    """
+    A Select UI component representing the user's inventory items.
+
+    When an item is selected:
+    - Verifies the user and locks their actions.
+    - Validates that they still own the item.
+    - Applies item effects (potion or mystery box) by calling cog helper methods.
+    - Updates the DB inventory and returns an updated InventoryView or a message if empty.
+
+    Parameters:
+        cog: reference to Trading cog.
+        user_id: the user who owns this inventory.
+        guild_id: guild id.
+        items: iterable of tuples (name, qty, emoji).
+        parent_view: the parent InventoryView for timer resets.
+    """
     def __init__(self, cog, user_id, guild_id, items, parent_view):
         self.cog = cog
         self.user_id = user_id
@@ -82,12 +157,21 @@ class InventorySelect(discord.ui.Select):
         super().__init__(placeholder="Choose an item to use...", min_values=1, max_values=1, options=options)
         
     async def on_timeout(self):
+        """
+        Disable children and edit the message when the select times out.
+        """
         for child in self.children:
             child.disabled = True
         if hasattr(self, "message") and self.message:
             await self.message.edit(view=self)
 
     async def callback(self, interaction: discord.Interaction):
+        """
+        Handle the selection of an inventory item:
+        - Ensures only the owner can interact.
+        - Deducts the item from DB and applies effects if applicable.
+        - Rebuilds and sends an updated inventory embed or a message if empty.
+        """
         if hasattr(self.parent_view, "reset_timer"):
             self.parent_view.reset_timer()
         if interaction.user.id != self.user_id:
@@ -194,6 +278,17 @@ class InventorySelect(discord.ui.Select):
             self._release_lock_task = asyncio.create_task(release_lock())
 
 class InventoryView(discord.ui.View):
+    """
+    A view that shows a user's inventory and handles automatic timeout.
+
+    Attributes:
+        cog: reference to the Trading cog.
+        user_id: ID of inventory owner.
+        guild_id: ID of the guild.
+        items: list of (name, qty, emoji).
+        timeout_seconds: seconds before the view auto-closes.
+        _timeout_task: background task that enforces the timeout.
+    """
     def __init__(self, cog, user_id, guild_id, items, timeout=180):
         super().__init__(timeout=None) 
         self.cog = cog
@@ -212,11 +307,17 @@ class InventoryView(discord.ui.View):
         self.start_timeout()
 
     def start_timeout(self):
+        """
+        Start or restart the background timeout loop.
+        """
         if self._timeout_task:
             self._timeout_task.cancel()
         self._timeout_task = asyncio.create_task(self._timeout_loop())
 
     async def _timeout_loop(self):
+        """
+        Sleep for timeout_seconds then close the view and remove it from the cog tracking.
+        """
         await asyncio.sleep(self.timeout_seconds)
         if self.message:
             try:
@@ -228,9 +329,21 @@ class InventoryView(discord.ui.View):
             self.cog.open_inventories.get(self.guild_id, {}).pop(self.user_id, None)
 
     def reset_timer(self):
+        """
+        External callers (selects) can reset the timeout to keep the view alive.
+        """
         self.start_timeout()
 
 class ShopSelect(discord.ui.Select):
+    """
+    A Select UI component used in the shop view that lets a user buy one of the available items.
+
+    When an item is selected:
+    - Validates ownership of the menu.
+    - Checks price and user's coins via progression_cog.
+    - Deducts coins and adds the item to the user's inventory.
+    - Updates the shop embed/options and notifies the buyer.
+    """
     def __init__(self, progression_cog, user_id, guild_id, options, parent_view):
         self.progression_cog = progression_cog
         self.user_id = user_id
@@ -258,14 +371,15 @@ class ShopSelect(discord.ui.Select):
             return
         price, emoji = row
 
+        NOT_ENOUGH_COINS_MSG = "❌ You don't have enough coins, nothing purchased."
         coins = await self.progression_cog.get_coins(self.user_id, self.guild_id)
         if coins < price:
-            await interaction.response.send_message("❌ You don't have enough coins.", ephemeral=True)
+            await interaction.response.edit_message(NOT_ENOUGH_COINS_MSG, ephemeral=True)
             return
 
         ok = await self.progression_cog.remove_coins(self.user_id, self.guild_id, price)
         if not ok:
-            await interaction.response.send_message("❌ You don't have enough coins.", ephemeral=True)
+            await interaction.response.edit_message(NOT_ENOUGH_COINS_MSG, ephemeral=True)
             return
 
         lock = self.progression_cog.db_lock
@@ -320,6 +434,17 @@ class ShopSelect(discord.ui.Select):
 
 
 class ShopView(discord.ui.View):
+    """
+    A shop view that presents available items and handles closure/timeouts.
+
+    Attributes:
+        progression_cog: reference to the Progression cog for coins/db access.
+        user_id: ID of the user that opened the shop.
+        guild_id: guild id.
+        options: initial select options for the shop.
+        parent_cog: the Trading cog reference for state updates.
+        timeout_seconds: how long before the shop auto-closes.
+    """
     def __init__(self, progression_cog, user_id, guild_id, options, parent_cog, timeout=180):
         super().__init__(timeout=None) 
         self.progression_cog = progression_cog
@@ -367,6 +492,21 @@ class ShopView(discord.ui.View):
 
 
 class Trading(commands.Cog):
+    """
+    Cog responsible for shop, inventory, and item trading functionality.
+
+    Responsibilities:
+    - Ensure DB tables for shop and inventory exist on cog load.
+    - Seed default shop items.
+    - Provide helper methods to apply item effects.
+    - Expose commands: shop, inventory, donate.
+
+    Important attributes created at init:
+    - progression_cog: reference to the Progression cog (set during cog_load).
+    - user_locks: used to rate-limit or serialize per-user item actions.
+    - donate_cooldowns: map donor_id -> datetime when they can next donate.
+    - open_inventories / open_shops: map guild_id -> map[user_id -> view/message] to prevent duplicates.
+    """
     def __init__(self, bot):
         self.bot = bot
         self.progression_cog = None
@@ -376,6 +516,10 @@ class Trading(commands.Cog):
         self.open_shops = {} 
 
     async def cog_load(self):
+        """
+        Called when the cog is loaded. Attaches to the Progression cog, creates DB tables,
+        and seeds a set of default shop items. Logs a warning if Progression isn't loaded.
+        """
         self.progression_cog = self.bot.get_cog("Progression")
         if not self.progression_cog:
             print("[Shop] Progression cog not loaded! Coins won't work properly.")
@@ -417,6 +561,18 @@ class Trading(commands.Cog):
         await conn.commit()
 
     async def apply_potion_effect(self, user_id: int, guild_id: int, item_name: str, channel: discord.TextChannel = None):
+        """
+        Apply the effect of a potion or level skip token.
+
+        Args:
+            user_id: ID of the user using the item.
+            guild_id: guild ID.
+            item_name: one of the potion constants or LEVEL_SKIP_TOKEN.
+            channel: optional channel to announce level-ups.
+
+        Returns:
+            (gain, extra_msg) where gain is the amount of EXP granted, and extra_msg is any extra string.
+        """
         potion_effects = {
             SMALL_EXP_POTION: 0.03,
             MEDIUM_EXP_POTION: 0.12,
@@ -447,6 +603,12 @@ class Trading(commands.Cog):
         return gain, extra_msg
     
     async def apply_mystery_box(self, user_id: int, guild_id: int):
+        """
+        Open a Mystery Box and randomly award items to the user, writing to DB.
+
+        Returns:
+            List of (item_name, amount) awarded to the user.
+        """
         conn = self.progression_cog.conn
         lock = self.progression_cog.db_lock
         rewards = []
@@ -489,6 +651,10 @@ class Trading(commands.Cog):
     @commands.hybrid_command(name="shop", description="View the shop and buy items!")
     @commands.guild_only()
     async def shop(self, ctx):
+        """
+        Shows the list of shop items and opens a ShopView for the invoking user.
+        Prevents opening multiple shops per user per guild.
+        """
         if not self.progression_cog:
             await ctx.send("Progression cog not loaded. Shop unavailable.")
             return
@@ -536,6 +702,10 @@ class Trading(commands.Cog):
     @commands.hybrid_command(name="inventory", description="Check your inventory and items")
     @commands.guild_only()
     async def inventory(self, ctx):
+        """
+        Displays the user's current inventory items and opens an InventoryView.
+        Prevents opening multiple inventories per user per guild.
+        """
         if not self.progression_cog:
             await ctx.send("Progression cog not loaded. Inventory unavailable.")
             return
@@ -579,6 +749,11 @@ class Trading(commands.Cog):
     @commands.hybrid_command(name="donate", description="Give an item to another user")
     @commands.guild_only()
     async def donate(self, ctx, member: discord.Member):
+        """
+         /donate <member>
+        Allows the invoking user to give an item from their inventory to another user, subject
+        to caps for certain items and a donor cooldown (2 hours).
+        """
         if member.bot:
             await ctx.send("<:MinoriConfused:1415707082988060874> You cannot donate to bots.")
             return

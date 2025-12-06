@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 from collections import defaultdict
 from typing import Optional, List, Dict
 import discord
@@ -16,17 +17,51 @@ class Roles(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self._locks: Dict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
-        self.SYNC_INTERVAL_MINUTES = 120  
-        self.MAX_PER_GUILD = 30
-        self.SLEEP_BETWEEN_OPS = 0.25
+        self.SYNC_INTERVAL_MINUTES = 720
+        self.MAX_PER_GUILD = 30  # retained for compatibility if needed elsewhere
+        self.SLEEP_BETWEEN_OPS = 0.25  # retained for compatibility if needed elsewhere
 
+        # Producer-Consumer queue
+        self.queue: asyncio.Queue[tuple[int, int, int]] = asyncio.Queue()
+
+        # Background worker task
+        self.worker_task = asyncio.create_task(self.worker())
+
+        # Periodic fail-safe (no member fetching)
         self.sync_roles_loop.change_interval(minutes=self.SYNC_INTERVAL_MINUTES)
         self.sync_roles_loop.start()
 
     async def cog_unload(self):
         self.sync_roles_loop.cancel()
+        self.worker_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await self.worker_task
 
+    #  Producer API 
+    async def queue_role_update(self, guild_id: int, user_id: int, level: int):
+        """Public method to enqueue a role update."""
+        await self.queue.put((guild_id, user_id, level))
 
+    #  Worker 
+    async def worker(self):
+        """Background consumer processing queued role updates."""
+        while True:
+            guild_id, user_id, level = await self.queue.get()
+            try:
+                lock = self._locks[guild_id]
+                async with lock:
+                    await self.update_roles_by_ids(guild_id, user_id, level)
+            except discord.Forbidden:
+                print(f"[Roles] Forbidden updating roles for user {user_id} in guild {guild_id}")
+            except discord.NotFound:
+                print(f"[Roles] Guild or user not found (guild {guild_id}, user {user_id})")
+            except Exception as e:
+                print(f"[Roles] Error processing queued role update (guild {guild_id}, user {user_id}): {e}")
+            finally:
+                self.queue.task_done()
+                await asyncio.sleep(1.5)  # Respect rate limits
+
+    #  Core role helpers 
     async def update_roles_by_ids(self, guild_id: int, user_id: int, level: int):
         guild = self.bot.get_guild(guild_id)
         if not guild:
@@ -143,11 +178,6 @@ class Roles(commands.Cog):
         if member.bot:
             return
         try:
-            try:
-                member = await member.guild.fetch_member(member.id)
-            except Exception:
-                pass
-
             guild = member.guild
             title = get_title(level)
 
@@ -198,55 +228,8 @@ class Roles(commands.Cog):
         roles = await self._ensure_titles_exist(guild)
         await self._sync_role_hierarchy(guild, roles)
 
-    @staticmethod
-    def _compute_member_role_state(guild: discord.Guild, member: discord.Member, desired_title: str) -> tuple[bool, Optional[discord.Role]]:
-        desired_norm = desired_title.strip().lower()
-        desired_role = discord.utils.find(
-            lambda r: r.name and r.name.strip().lower() == desired_norm, guild.roles
-        )
-
-        member_title_names = {r.name.strip().lower() for r in member.roles if r.name}
-        other_title_names = {t.lower() for t in TITLE_ORDER} - {desired_norm}
-        has_other_titles = any(n in other_title_names for n in member_title_names)
-
-        already_ok = (desired_role is not None and desired_role in member.roles and not has_other_titles)
-        return already_ok, desired_role
-
-    async def _process_member_if_needed(self, guild: discord.Guild, member: discord.Member, progression, processed: int) -> int:
-        try:
-            if member.bot:
-                return processed + 1
-
-            if processed >= self.MAX_PER_GUILD:
-                return processed 
-
-            _, level = await progression.get_user(member.id, guild.id)
-            desired_title = get_title(level).strip().lower()
-            already_ok, _ = self._compute_member_role_state(guild, member, desired_title)
-            if not already_ok:
-                try:
-                    fresh_member = await guild.fetch_member(member.id)
-                    await self.update_roles(fresh_member, level)
-                except discord.Forbidden:
-                    print(f"[Roles] Missing perms to update roles for {member.id} in guild {guild.id}")
-                except discord.HTTPException as he:
-                    print(f"[Roles] HTTP error updating roles for {member.id} in guild {guild.id}: {he}")
-                except Exception as e:
-                    print(f"[Roles] Error updating roles for {member.id} in guild {guild.id}: {e}")
-            return processed + 1
-        except Exception as e:
-            print(f"[Roles] Skipping member {member.id} in guild {guild.id}: {e}")
-            return processed + 1
-
-    async def _process_guild_members(self, guild: discord.Guild, progression) -> None:
-        processed = 0
-        for member in guild.members:
-            processed = await self._process_member_if_needed(guild, member, progression, processed)
-            if processed >= self.MAX_PER_GUILD:
-                break
-            await asyncio.sleep(self.SLEEP_BETWEEN_OPS)
-
-    @tasks.loop(minutes=120) 
+    #  Fail-safe loop (no member iteration) 
+    @tasks.loop(minutes=720)
     async def sync_roles_loop(self):
         progression = self.bot.get_cog("Progression")
         if not progression:
@@ -256,17 +239,18 @@ class Roles(commands.Cog):
         for guild in self.bot.guilds:
             try:
                 await self._ensure_guild_titles_and_hierarchy(guild)
-                await self._process_guild_members(guild, progression)
+                # TODO: Iterate through active users in Database and enqueue role updates
             except Exception as e:
                 print(f"[Roles] Error during guild sync {guild.id}: {e}")
 
-        print("[Roles] Fail-safe role sync complete.")
+        print("[Roles] Fail-safe role sync tick complete.")
 
     @sync_roles_loop.before_loop
     async def before_sync_roles(self):
         await self.bot.wait_until_ready()
         print("[Roles] Started periodic role fail-safe sync loop.")
 
+    #  Events 
     @commands.Cog.listener()
     async def on_ready(self):
         print("[Roles] Ensuring progression roles and order on startup...")
@@ -301,10 +285,11 @@ class Roles(commands.Cog):
 
         try:
             _, level = await progression.get_user(after.id, after.guild.id)
-            await self.update_roles(after, level)
-            print(f"[Roles] Synced roles for {after.display_name} after manual role edit.")
+            await self.queue_role_update(after.guild.id, after.id, level)
+            print(f"[Roles] Queued role resync for {after.display_name} after manual role edit.")
         except Exception as e:
-            print(f"[Roles] Failed to resync roles for {after.id}: {e}")
+            print(f"[Roles] Failed to queue resync for {after.id}: {e}")
+
 
 async def setup(bot):
     await bot.add_cog(Roles(bot))
