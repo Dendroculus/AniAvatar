@@ -21,8 +21,24 @@ LVL_Y = -4             # move LVL text value column up/down neg is up otherwise
 
 """
 
+# Module purpose:
+# This module contains utilities and a single ImageRenderer class used to render
+# profile cards and leaderboards as PNG images. It bundles:
+# - lightweight image caching to avoid reloading identical resources repeatedly,
+# - deterministic layout computation that adapts to font metrics and row heights,
+# - protective error handling for degraded environments (missing fonts, avatars, or files),
+# - small helpers for sanitizing and measuring Unicode-aware text (including CJK handling).
+#
+# Operational notes (useful for maintainers):
+# - Most functions are intentionally defensive: they accept malformed persisted values
+#   and return sane defaults rather than raising; this keeps the bot resilient during startup.
+# - Where possible callers should pass shared resources (fonts, sessions) to avoid high
+#   allocation overhead; internal helpers implement an "owns" pattern for optional sessions.
+# - The ImageRenderer is not thread-safe; it is intended to be used from the bot's asyncio
+#   event loop. If rendering must be performed concurrently consider serializing access
+#   or creating separate renderer instances per worker.
 
-# ==================== Exceptions ====================
+#  Exceptions 
 
 class AvatarError(Exception):
     """Base exception for avatar-related issues."""
@@ -34,7 +50,7 @@ class AvatarBytesMissing(AvatarError):
     """Raised when avatar bytes are missing."""
 
 
-# ==================== Layout Classes ====================
+#  Layout Classes 
 
 class ProfileCardLayout:
     WIDTH = 600
@@ -54,6 +70,12 @@ class ProfileCardLayout:
 
     PROGRESS_BAR_HEIGHT = 24
 
+    """Layout constants for rendering a single profile card.
+    These values are expressed in pixels and are used throughout the profile card
+    rendering pipeline to position avatar, text, badges and progress bar consistently.
+    Maintain these values when tuning the visual design; dependent logic computes
+    offsets based on these base numbers.
+    """
 
 class LeaderboardLayout:
     RANK_OFFSET_DEFAULT = -8   
@@ -61,6 +83,13 @@ class LeaderboardLayout:
     BADGE_SHIFT = 35           
     NAME_MAX_CHARS = 14     
 
+    """Leaderboard layout tuning parameters.
+
+    Notes:
+    - COLUMN_SHIFT and BADGE_SHIFT allow small visual adjustments for different fonts
+      or badge artwork. Changing them affects the computed level column start position.
+    - NAME_MAX_CHARS is a conservative truncation threshold used before measuring text width.
+    """
 
 # ==================== Constants ====================
 
@@ -94,6 +123,16 @@ _space_collapse_re = re.compile(r'\s+', flags=re.UNICODE)
 
 
 def format_number(num: int) -> str:
+    """
+    Format a large integer into a short human-friendly string.
+
+    Examples:
+      - 123 -> "123"
+      - 1500 -> "1.50K" (trailing zeros removed)
+      - 2_500_000 -> "2.50M"
+
+    Use in places where space is constrained (leaderboard EXP columns).
+    """
     if num < 1_000:
         return str(num)
     elif num < 1_000_000:
@@ -102,9 +141,19 @@ def format_number(num: int) -> str:
         return f"{num / 1_000_000:.2f}M".rstrip("0").rstrip(".")
     else:
         return f"{num / 1_000_000_000:.2f}B".rstrip("0").rstrip(".")
-    
+
 
 def strip_emojis(s: str) -> str:
+    """
+    Remove invisible joiner/variation characters and pictographic emoji runs.
+
+    The function:
+    - strips zero-width and variation selectors,
+    - filters out 'So' and 'Sk' Unicode categories which typically contain emojis,
+    - removes control characters and collapses whitespace.
+
+    This provides a cleaner string suitable for measuring and truncating for images.
+    """
     if not s:
         return s
     s = _INVISIBLE_RE.sub("", s)
@@ -122,6 +171,12 @@ def strip_emojis(s: str) -> str:
 
 
 def is_cjk_char(ch: str) -> bool: 
+    """
+    Return True when the given character is in a CJK (or related) Unicode block.
+
+    Useful so the renderer can choose a CJK-capable font for runs containing those
+    characters, improving visual fidelity for east-asian names.
+    """
     if not ch:
         return False
     try:
@@ -146,6 +201,12 @@ def is_cjk_char(ch: str) -> bool:
 
 
 def split_into_runs(text: str):
+    """
+    Split text into consecutive runs of CJK vs non-CJK characters.
+
+    Returns a list of tuples: (run_text, is_cjk_run).
+    This is used to render mixed-language names with appropriate fonts per-run.
+    """
     if not text:
         return []
     runs = []
@@ -164,6 +225,11 @@ def split_into_runs(text: str):
 
 
 def get_title(level: int):
+    """
+    Map a numeric level to a human-friendly title string.
+
+    The thresholds are intentionally non-linear to spread titles across level tiers.
+    """
     if level < 5: return "Novice"
     elif level < 10: return "Warrior"
     elif level < 15: return "Elite"
@@ -183,6 +249,9 @@ def get_title(level: int):
 
 
 def get_title_emoji(level: int):
+    """
+    Return a compact emoji token representing the title tier for UI text fallback.
+    """
     if level < 5: return "<:NOVICE:1414508405002862663>"
     elif level < 10: return "<:WARRIOR:1414508311650242661>"
     elif level < 15: return "<:ELITE:1414508395301699724>"
@@ -202,6 +271,12 @@ def get_title_emoji(level: int):
 
 
 async def get_user_rank(user_id: int, guild_id: int, max_level: int):
+    """
+    Query the users table for ordering by level/exp and return the 1-based rank for user_id.
+
+    Returns None when the user is not present in the ordering. This function opens a
+    short-lived aiosqlite connection (context-managed) which is appropriate for occasional use.
+    """
     async with aiosqlite.connect(DB_PATH) as conn:
         async with conn.execute(
             """
@@ -222,6 +297,12 @@ async def get_user_rank(user_id: int, guild_id: int, max_level: int):
 
 
 def truncate_to_width(text, font, max_w, draw):
+    """
+    Truncate a string by binary-searching the maximum prefix that fits within max_w.
+
+    The function appends a short ellipsis marker ('. .') to indicate truncation while
+    avoiding overly expensive repeated measurements.
+    """
     if draw.textlength(text, font=font) <= max_w:
         return text
     lo, hi = 0, len(text)
@@ -234,13 +315,21 @@ def truncate_to_width(text, font, max_w, draw):
     return text[:max(0, lo-1)] + ". ."
 
 
-# ==================== Main Image Renderer Class ====================
+#  Main Image Renderer Class 
 
 class ImageRenderer:
     """
     Encapsulates all image rendering logic and caching for profile cards and leaderboards.
-    """
 
+    Implementation notes:
+    - Caches are simple in-memory dicts keyed by small fingerprints; they are not
+      persisted across process restarts. The cache_size parameter is advisory.
+    - All image drawing uses Pillow primitives; the renderer prefers high-quality
+      resampling (LANCZOS) where available.
+    - The renderer contains multiple helper methods responsible for font resolution,
+      gradient generation and safe image loading; these helpers intentionally swallow
+      non-fatal exceptions and return fallback imagery so callers rarely need to handle errors.
+    """
     def __init__(self, cache_size=200):
         """
         Initialize the ImageRenderer with empty caches.
@@ -254,7 +343,7 @@ class ImageRenderer:
         self._font_cache = {}
         self._cache_size = cache_size
 
-    # ==================== Cache Management Methods ====================
+    #  Main Image Renderer Class 
 
     def _avatar_cache_key_from_bytes(self, avatar_bytes, size, quick_hash_len=64):
         if not avatar_bytes:
@@ -307,7 +396,7 @@ class ImageRenderer:
             self._panel_grad_cache[key] = img
         return img
 
-    # ==================== Color and Gradient Utilities ====================
+    #  Color and Gradient Utilities 
 
     @staticmethod
     def _lerp(a, b, t):
@@ -400,7 +489,7 @@ class ImageRenderer:
                 draw.line([(0,y),(w,y)], fill=(r,g,b,255))
         return grad
 
-    # ==================== Text Drawing Utilities ====================
+    #  Text Drawing Utilities 
 
     @staticmethod
     def _draw_cjk_profile(draw, pos, text, primary_font, cjk_font, fill, small=False, stroke_width=2, stroke_fill=(0,0,0,255)):
@@ -509,7 +598,7 @@ class ImageRenderer:
                     gd[x,i] = col
         im.paste(grad,(int(position[0]-pad_x),int(position[1]-pad_y)),mask)
 
-    # ==================== Profile Card Rendering ====================
+    #  Profile Card Rendering 
 
     def _profile_get_adaptive_font_color(self, bg_path):
         try:
@@ -743,6 +832,13 @@ class ImageRenderer:
         font_color: tuple = None,
         user_rank: int = None
     ) -> Optional[bytes]:
+        """
+        Render a profile card into PNG bytes.
+
+        The method composes avatar, username, labels, progress bar and optional badge,
+        then downsizes to a compact output resolution. If any step fails the function
+        returns None and prints the traceback for operator debugging.
+        """
         try:
             fonts_pack = self._profile_prepare_fonts(fonts)
             width, height = ProfileCardLayout.WIDTH, ProfileCardLayout.HEIGHT
@@ -765,7 +861,7 @@ class ImageRenderer:
             traceback.print_exc()
             return None
 
-    # ==================== Leaderboard Rendering ====================
+    # Leaderboard Rendering 
 
     def _setup_leaderboard_canvas(self, width, height, gradient, gradient_direction, gradient_colors, gradient_noise, gradient_seed, background_color):
         if gradient:
@@ -1080,6 +1176,14 @@ class ImageRenderer:
         debug_save_path: str = None,
         rank_offset: int = LeaderboardLayout.RANK_OFFSET_DEFAULT
     ) -> bytes:
+        """
+        Create a full leaderboard image from a sequence of row dictionaries.
+
+        Each row dict may contain keys commonly used in the project:
+        - name, avatar_bytes, rank, level, exp, next_exp, title
+        The function composes each row and returns PNG bytes. On error a small red
+        4x4 fallback PNG blob is returned so callers can detect rendering failure.
+        """
         try:
             fonts = fonts or FONTS
             rows = list(rows or [])

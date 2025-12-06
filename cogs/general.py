@@ -8,11 +8,15 @@ class DeleteView(ui.View):
         self.user = user
         
     @discord.ui.button(label="Delete", style=ButtonStyle.danger)
-    async def delete(self, interaction: discord.Interaction, button: ui.Button):
-        if interaction.user.id == self.user.id:
+    async def delete(self, interaction: discord.Interaction, _: discord.ui.Button): # _ is the button instance to avoid unused variable warning
+        if interaction.user.id != self.user.id:
+            return await interaction.response.send_message("You can't delete someone else's message.", ephemeral=True)
+        
+        await interaction.response.defer()
+        try:
             await interaction.message.delete()
-        else :
-            await interaction.response.send_message("You can't delete someone else's message.", ephemeral=True)
+        except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+            pass
 
 class General(commands.Cog):
     def __init__(self, bot):

@@ -10,7 +10,44 @@ from itertools import cycle
 from cogs.utils.anime_api import fetch_random_character, build_character_select_options
 from cogs.utils.game_text import random_win_message, random_lose_message, compute_rewards, award_rewards
 
+"""
+games.py
+
+Purpose:
+- Provide lightweight, user-facing game commands such as trivia quizzes and
+  character-guessing games. These commands are intentionally ephemeral and
+  self-contained; they reward users via the Progression cog when appropriate.
+
+Design notes (important):
+- Concurrency and UX:
+  - Per-question interaction handlers use a short timeout (15s) and a per-message
+    discord.ui.View with a Select component; this keeps individual question state
+    isolated to a single message and prevents cross-talk between concurrent games.
+  - create_select_callback returns a coroutine function that closes over per-game
+    state (view and message) so multiple games can run concurrently without
+    interfering with each other.
+- Rewarding:
+  - Reward amounts are computed using helper utilities (compute_rewards / award_rewards)
+    to centralize leveling/economy rules in one place.
+  - The code checks for the Progression cog before attempting to award to avoid
+    hard failures when the progression subsystem is not loaded.
+- Data resilience:
+  - Trivia/question pools are read from JSON on cog init and normalized into a dict
+    keyed by category. The cog tracks a used_questions set to reduce immediate repeats.
+- Maintainability:
+  - Game logic is split into small helper methods to make adjustments to difficulty,
+    reward scaling or timeouts straightforward without touching UI wiring.
+"""
+
 class Games(commands.Cog):
+    """
+    Games cog: trivia and character-guessing interactions.
+
+    Responsibilities:
+    - Load trivia data and provide a balanced sampling strategy to avoid repeats.
+    - Present per-question UI, handle user answers, and reward correct responses.
+    - Integrate with anime_api to provide image-based character guessing.
+    """
     def __init__(self, bot):
         self.bot = bot
         self.data_path = os.path.join(os.path.dirname(__file__), "..", "data", "trivia.json")
@@ -24,9 +61,20 @@ class Games(commands.Cog):
         else:
             self.trivia_dict = {"Mixed": []}
 
+        # used_questions prevents immediate repetition across quiz runs; it's intentionally
+        # kept in-memory so it resets on bot restart (avoids long-term state management).
         self.used_questions = set()
 
     def get_balanced_questions(self, num_questions: int):
+        """
+        Return up to `num_questions` sampled across available categories.
+
+        Strategy:
+        - Shuffle category order, then iterate categories in a round-robin fashion
+          selecting one unseen question per category until the requested number is reached.
+        - When the pool of tracked `used_questions` covers all available questions, the set
+          is cleared to allow reselection (keeps behavior simple and deterministic).
+        """
         titles = list(self.trivia_dict.keys())
         random.shuffle(titles)
         questions = []
@@ -49,12 +97,26 @@ class Games(commands.Cog):
         self,
         user_id: int,
         guild_id: int,
-        send_fn, 
+        send_fn,
         *,
         exp_mul=(2, 3),
         exp_base=(5, 10),
         coin_range=(15, 30)
     ):
+        """
+        Handle awarding rewards for a correct answer.
+
+        Parameters:
+        - user_id, guild_id: identity for awarding.
+        - send_fn: a callable used to deliver text feedback (can be ctx.send or an interaction-aware wrapper).
+        - exp_mul, exp_base, coin_range: reward-determining parameters forwarded to compute_rewards.
+
+        Behavior:
+        - If the Progression cog is missing, the function gracefully notifies the user
+          and returns without attempting to award.
+        - compute_rewards encapsulates reward scaling; award_rewards applies the rewards
+          and persists them via the Progression cog.
+        """
         profile_cog = self.bot.get_cog("Progression")
         if not profile_cog:
             await send_fn("✅ Correct!")
@@ -83,6 +145,15 @@ class Games(commands.Cog):
         app_commands.Choice(name="20", value=20),
     ])
     async def animequiz(self, ctx, questions: app_commands.Choice[int]):
+        """
+        Run a sequential trivia quiz presented question-by-question.
+
+        Interaction model:
+        - For each question, present a Select-based view with shuffled options and wait up to 15s
+          for the invoking user to answer.
+        - Uses a short-lived Future to bridge the interaction callback and the linear quiz loop.
+        - Correct answers are handled by _handle_correct_answer which takes care of rewards.
+        """
         num_questions = questions.value
         quiz_questions = self.get_balanced_questions(num_questions)
         score = 0
@@ -108,6 +179,7 @@ class Games(commands.Cog):
                 _select=select,
                 _view=view,
             ):
+                # Only allow the quiz invoker to answer this question.
                 if interaction.user != ctx.author:
                     await interaction.response.send_message("This is not your game!", ephemeral=True)
                     return
@@ -148,6 +220,16 @@ class Games(commands.Cog):
     @commands.hybrid_command(name="guesscharacter", description="Guess a random popular anime character")
     @commands.guild_only()
     async def guesscharacter(self, ctx):
+        """
+        Image-based character guess game.
+
+        Flow:
+        - Fetch a random popular character (preferring AniList), then create a randomized
+          select menu with one correct and several distractors returned by
+          build_character_select_options.
+        - The callback created by create_select_callback enforces that only the invoking user
+          can answer and disables the select after an attempt.
+        """
         try:
             character = await fetch_random_character(prefer="AniList")
         except Exception:
@@ -180,6 +262,14 @@ class Games(commands.Cog):
         select.callback = self.create_select_callback(view, message)
 
     def create_select_callback(self, view, message):
+        """
+        Factory that creates a Select callback bound to the provided view and message.
+
+        The returned coroutine:
+        - Validates ownership (only the original invoker may answer).
+        - Awards rewards on correct answers via _handle_correct_answer (uses an interaction-aware sender).
+        - Disables the Select and updates the message view after an answer.
+        """
         async def callback(interaction: discord.Interaction):
             if interaction.user.id != view.author_id:
                 await interaction.response.send_message("This is not your game!", ephemeral=True)
