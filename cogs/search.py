@@ -514,7 +514,18 @@ class Search(commands.Cog):
                 await select_interaction.response.send_message("This is not your command!", ephemeral=True)
                 return
 
-            await select_interaction.response.defer()
+
+            try:
+                if not select_interaction.response.is_done():
+                    await select_interaction.response.defer()
+                await select_interaction.edit_original_response(
+                    content="Minori is fetching images for you...",
+                    view=None,
+                )
+            except (discord.NotFound, discord.HTTPException):
+                # stale/unknown interaction or already responded or other HTTP issue
+                return None
+            
             char_id = int(select_interaction.data["values"][0])
             selected_char = next(c for c in anime_characters if c["id"] == char_id)
             selected_char["source"] = "AniList"
