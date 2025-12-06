@@ -20,6 +20,37 @@ from cogs.utils.progUtils import (
 from cogs.utils.constants import BG_PATH, EMOJI_PATH, FONTS, TITLE_EMOJI_FILES
 from cogs.trading import format_coins
 
+"""
+progression.py
+
+Purpose:
+- Manage user progression (EXP and levels), profile themes, and an on-demand image-based
+  profile/leaderboard rendering pipeline.
+- Provide coin management APIs used by other cogs (get_coins, add_coins, remove_coins,
+  reserve_coins) along with safe persistence in SQLite.
+
+Design notes and important operational guidance:
+- Concurrency:
+  - Database access is serialized by `self.db_lock` to avoid concurrent writes from
+    multiple coroutines. This keeps SQLite usage safe under asyncio.
+  - Image rendering is offloaded to threads and controlled by a semaphore (`_render_semaphore`)
+    to limit concurrency and avoid saturating CPU or memory with large Pillow tasks.
+- Caching:
+  - Rendered profile images are cached in-memory in `_render_cache` (LRU-like OrderedDict).
+    Cache entries have TTL (RENDER_CACHE_TTL) to reduce memory usage and keep visuals fresh.
+  - Cache keys include a short hash of avatar bytes and textual attributes to avoid accidental
+    collisions when images or display names change.
+- Fail-safe behavior:
+  - Many operations are defensive: failures in rendering or avatar fetch degrade gracefully
+    (returning placeholder data or None), and are logged. This prioritizes bot availability.
+- Integration:
+  - This cog expects a `Progression` role for awarding coins/exp and integrates with
+    other subsystems (e.g., trading.format_coins) for display formatting.
+- Notes for maintainers:
+  - Avoid heavy synchronous work on the event loop; rendering is already offloaded but any
+    additional expensive operations should follow the same pattern (to_thread + timeout).
+  - The DB schema creation is idempotent; migrating columns must be performed with care.
+"""
 
 PROFILE_PNG = "profile.png"
 ATTACHMENT_PROFILE = f"attachment://{PROFILE_PNG}"
@@ -27,6 +58,14 @@ SQL_INSERT_OR_IGNORE_USER_COINS_ZERO = "INSERT OR IGNORE INTO user_coins (user_i
 COINS_EMOJI = "<:Coins:1415353285270966403>"
 
 class MainThemeSelect(discord.ui.Select):
+    """
+    Select menu listing top-level theme folders for profile backgrounds.
+
+    Responsibilities:
+    - Present available theme folders (derived from BG_PATH) as Select options.
+    - Validate that the invoking user owns the selection (protects other users' selections).
+    - On selection, transition the interaction to a SubThemeView to pick a specific background.
+    """
     def __init__(self, user_id, cog):
         self.user_id = user_id
         self.cog = cog
@@ -53,12 +92,26 @@ class MainThemeSelect(discord.ui.Select):
         )
         
 class MainThemeView(discord.ui.View):
+    """
+    Wrapper view that adds a MainThemeSelect for a specific user.
+
+    This view is ephemeral per-invocation and used by the profiletheme command.
+    """
     def __init__(self, user_id, cog):
         super().__init__()
         self.cog = cog
         self.add_item(MainThemeSelect(user_id, cog))
         
 class SubThemeSelect(discord.ui.Select):
+    """
+    Select menu showing concrete background image files within a chosen theme folder.
+
+    Behavior:
+    - Maps "Theme N" labels to actual filenames and persists the user's theme choice
+      via Progression.set_user_theme.
+    - Verifies ownership (only the invoking user may confirm a background).
+    - After saving, renders and sends an updated profile image preview to the user.
+    """
     def __init__(self, user_id, theme, cog):
         self.theme = theme
         self.cog = cog
@@ -142,12 +195,25 @@ class SubThemeSelect(discord.ui.Select):
             )
 
 class SubThemeView(discord.ui.View):
+    """
+    Simple wrapper view that holds a SubThemeSelect for the chosen theme.
+    """
     def __init__(self, user_id, theme, cog):
         super().__init__()
         self.cog = cog  
         self.add_item(SubThemeSelect(user_id, theme, cog))
     
 class Progression(commands.Cog):
+    """
+    Progression cog: handles levels, EXP, coins, and profile/leaderboard rendering.
+
+    Key features:
+    - SQLite-backed storage for users, profile themes, and coins.
+    - Profile image rendering using ImageRenderer with a thread-offload and semaphore
+      to limit concurrent CPU work.
+    - Leaderboard image generation based on top users in a guild.
+    - Per-message cooldown for give EXP on activity, to limit spam-based leveling.
+    """
     MAX_LEVEL = 999
     MAX_BOX_WIDTH = 50
     MAX_NAME_WIDTH = 20
@@ -178,11 +244,22 @@ class Progression(commands.Cog):
     def _get_render_cache_key(self, avatar_bytes: bytes, display_name: str, title_name: str, 
                                level: int, bg_file: str, theme_name: str, font_color: str, 
                                user_rank: int = None) -> str:
-        
+        """
+        Compute a compact cache key for rendered profile images.
+
+        The key is designed to change when visible attributes do (avatar, name, title, level,
+        theme, bg_file, font color, rank). It uses a short SHA1-derived prefix of avatar bytes
+        to balance collision risk and key length.
+        """
         avatar_hash = hashlib.sha1(avatar_bytes[:256] if avatar_bytes else b"").hexdigest()[:16]
         return f"{avatar_hash}:{display_name}:{title_name}:{level}:{theme_name}:{bg_file}:{font_color}:{user_rank}"
     
     def _get_from_cache(self, key: str) -> bytes | None:
+        """
+        Retrieve image bytes from in-memory cache if present and not expired.
+
+        Also moves the key to the end to implement LRU-like behavior.
+        """
         if key not in self._render_cache:
             return None
         
@@ -197,6 +274,9 @@ class Progression(commands.Cog):
         return img_bytes
     
     def _add_to_cache(self, key: str, img_bytes: bytes):
+        """
+        Add a rendered image to cache, evicting oldest entries when the cache exceeds its size.
+        """
         now = asyncio.get_event_loop().time()
         self._render_cache[key] = (img_bytes, now)
         self._render_cache.move_to_end(key)
@@ -208,7 +288,16 @@ class Progression(commands.Cog):
                                  level: int, exp: int, next_exp: int, bg_file: Optional[str] = None,
                                  theme_name: str = "default", font_color: str = "white",
                                  user_rank: int = None) -> bytes | None:
+        """
+        Render a profile card into bytes with caching and concurrency control.
 
+        Behavior:
+        - Check in-memory cache first.
+        - If not cached, acquire a semaphore permit and offload rendering to a thread
+          via asyncio.to_thread with a 20s timeout.
+        - On success, cache the output and return bytes; on failure return None.
+        - This keeps the event loop responsive while supporting high-quality Pillow renders.
+        """
         cache_key = self._get_render_cache_key(
             avatar_bytes, display_name, title_name, level, bg_file, theme_name, font_color, user_rank
         )
@@ -253,6 +342,12 @@ class Progression(commands.Cog):
                 return None
 
     async def cog_load(self):
+        """
+        Initialize persistent database tables when the cog is loaded.
+
+        This method creates users, profile_theme, and user_coins tables if they do not exist.
+        It's idempotent and safe to run on every cog reload.
+        """
         self.conn = await aiosqlite.connect(self.db_path)
         await self.conn.execute("PRAGMA journal_mode=WAL;")
         await self.conn.execute("PRAGMA synchronous=NORMAL;")
@@ -284,6 +379,10 @@ class Progression(commands.Cog):
         await self.conn.commit()
 
     async def cog_unload(self):
+        """
+        Close the database connection when the cog is unloaded; swallow errors to avoid
+        disrupting bot shutdown.
+        """
         try:
             if self.conn:
                 await self.conn.close()
@@ -291,6 +390,12 @@ class Progression(commands.Cog):
             pass
         
     async def safe_send(self, ctx, *args, **kwargs):
+        """
+        Send a message using either interaction response/followup semantics or ctx.send.
+
+        This helper centralizes the logic for hybrid commands and reduces duplicated
+        try/except blocks in command implementations.
+        """
         interaction = getattr(ctx, "interaction", None)
         if interaction is not None:
             try:
@@ -305,6 +410,12 @@ class Progression(commands.Cog):
             return await ctx.send(*args, **kwargs)
     
     async def _fetch_avatar_bytes(self, member_or_user, size=128, timeout=3.0):
+        """
+        Fetch avatar bytes with a short timeout.
+
+        Returns b"" on failure and logs the error. This protects rendering code from
+        indefinite waits when fetching remote avatars.
+        """
         try:
             return await asyncio.wait_for(member_or_user.display_avatar.with_size(size).read(), timeout=timeout)
         except Exception as e:
@@ -312,6 +423,14 @@ class Progression(commands.Cog):
             return b""
 
     async def _build_rows_data(self, ctx, rows, avatar_size=128, avatar_timeout=3.0):
+        """
+        Build the structured rows used by the leaderboard renderer.
+
+        - rows: list of tuples (user_id, level, exp) as returned by SQL query.
+        - The function concurrently fetches display names and avatar bytes for each user
+          and returns a list of dicts suitable for create_leaderboard_image.
+        - Failures for individual fetches are logged and replaced with placeholders.
+        """
         meta = [(idx, user_id, level, exp) for idx, (user_id, level, exp) in enumerate(rows, start=1)]
 
         async def get_name_and_avatar(user_id: int) -> tuple[str, bytes]:
@@ -352,6 +471,11 @@ class Progression(commands.Cog):
         return rows_data
 
     async def get_coins(self, user_id: int, guild_id: int) -> int:
+        """
+        Return the coin balance for a user in a guild, creating the row if missing.
+
+        This function uses the db_lock to protect writes and returns an integer.
+        """
         async with self.db_lock:
             async with self.conn.execute("SELECT coins FROM user_coins WHERE user_id = ? AND guild_id = ?", (user_id, guild_id)) as cur:
                 row = await cur.fetchone()
@@ -362,6 +486,12 @@ class Progression(commands.Cog):
             return int(row[0])
 
     async def add_coins(self, user_id: int, guild_id: int, amount: int):
+        """
+        Add `amount` coins to a user's balance; creates the row if necessary.
+
+        Uses an INSERT OR UPDATE pattern to avoid race conditions and keeps the write
+        inside the db_lock.
+        """
         if amount == 0:
             return
         amount = int(amount)
@@ -380,6 +510,9 @@ class Progression(commands.Cog):
             await self.conn.commit()
         
     async def ensure_user_row(self, user_id: int, guild_id: int):
+        """
+        Ensure a user_coins row exists for the given user; useful for test/setup flows.
+        """
         async with self.db_lock:
             await self.conn.execute(
                 SQL_INSERT_OR_IGNORE_USER_COINS_ZERO,
@@ -388,6 +521,11 @@ class Progression(commands.Cog):
             await self.conn.commit()
 
     async def remove_coins(self, user_id: int, guild_id: int, amount: int) -> bool:
+        """
+        Attempt to subtract `amount` coins from the user's balance only if they have enough.
+
+        Returns True on success, False otherwise.
+        """
         amount = int(amount)
         if amount <= 0:
             return False
@@ -405,9 +543,20 @@ class Progression(commands.Cog):
                 return cur.rowcount > 0
 
     async def reserve_coins(self, user_id: int, guild_id: int, amount: int) -> bool:
+        """
+        Alias used by gamble flows that currently directly remove_coins as a reservation.
+
+        If reservation semantics need to change (e.g., using a reserved column) update
+        this function only to keep callers unaffected.
+        """
         return await self.remove_coins(user_id, guild_id, amount)
 
     async def get_user_theme(self, user_id: int):
+        """
+        Return the stored profile theme for a user, inserting a default row if missing.
+
+        Returns a tuple (theme_name, bg_file, font_color).
+        """
         async with self.db_lock:
             async with self.conn.execute("SELECT theme_name, bg_file, font_color FROM profile_theme WHERE user_id = ?", (user_id,)) as cur:
                 row = await cur.fetchone()
@@ -418,6 +567,9 @@ class Progression(commands.Cog):
             return row
 
     async def set_user_theme(self, user_id: int, theme_name: str, bg_file: Optional[str], font_color: str = "white"):
+        """
+        Persist the user's theme selection into profile_theme.
+        """
         async with self.db_lock:
             await self.conn.execute(
                 "INSERT OR REPLACE INTO profile_theme (user_id, theme_name, bg_file, font_color) VALUES (?, ?, ?, ?)",
@@ -426,9 +578,17 @@ class Progression(commands.Cog):
             await self.conn.commit()
     
     def truncate(self, text: str, max_len: int):
+        """
+        Truncate a string to max_len and append ellipsis if truncated.
+
+        Helper used to keep names within image layout constraints.
+        """
         return text if len(text) <= max_len else text[:max_len - 3] + "..."
 
     async def get_user(self, user_id: int, guild_id: int):
+        """
+        Return (exp, level) for a user, creating a default row if necessary.
+        """
         async with self.db_lock:
             async with self.conn.execute(
                 "SELECT exp, level FROM users WHERE user_id = ? AND guild_id = ?",
@@ -445,6 +605,11 @@ class Progression(commands.Cog):
             return row
 
     async def add_exp(self, user_id: int, guild_id: int, amount: int):
+        """
+        Add EXP to a user and handle level-ups in a loop.
+
+        Returns a tuple (new_level, new_exp, leveled_up_bool).
+        """
         async with self.db_lock:
             async with self.conn.execute(
                 "SELECT exp, level FROM users WHERE user_id = ? AND guild_id = ?",
@@ -486,6 +651,9 @@ class Progression(commands.Cog):
             return level, new_exp, leveled_up
 
     async def get_rank(self, user_id: int, guild_id: int):
+        """
+        Compute the 1-based rank of a user within a guild ordered by level desc, exp desc.
+        """
         async with self.db_lock:
             async with self.conn.execute(
                 "SELECT COUNT(*)+1 FROM users WHERE guild_id = ? AND (level > (SELECT level FROM users WHERE user_id = ? AND guild_id = ?) OR (level = (SELECT level FROM users WHERE user_id = ? AND guild_id = ?) AND exp > (SELECT exp FROM users WHERE user_id = ? AND guild_id = ?)))",
@@ -495,6 +663,10 @@ class Progression(commands.Cog):
                 return int(row[0]) if row else 1
 
     async def get_rank_for(self, guild_id: int, level: int, exp: int):
+        """
+        Compute what rank a hypothetical (level, exp) would have inside the guild.
+        Useful for announcements comparing old/new ranks on level-up.
+        """
         async with self.db_lock:
             async with self.conn.execute(
                 "SELECT COUNT(*)+1 FROM users WHERE guild_id = ? AND (level > ? OR (level = ? AND exp > ?))",
@@ -504,6 +676,11 @@ class Progression(commands.Cog):
                 return int(row[0]) if row else 1
 
     async def announce_level_up(self, guild_id: int, user_id: int, new_level: int, old_level: int, channel: discord.abc.Messageable):
+        """
+        Announce a user's level-up in a specified channel.
+
+        Sends an embed summarizing the level/title change and grants a small coin reward.
+        """
         guild = self.bot.get_guild(guild_id)
         if not guild:
             return
@@ -542,6 +719,11 @@ class Progression(commands.Cog):
 
     @commands.Cog.listener()
     async def on_guild_remove(self, guild: discord.Guild):
+        """
+        Cleanup handler that removes user rows for a guild when the bot is removed from it.
+
+        This keeps the users table compact and avoids retaining stale data for left guilds.
+        """
         async with self.db_lock:
             await self.conn.execute("DELETE FROM users WHERE guild_id = ?", (guild.id,))
             await self.conn.commit()
@@ -550,6 +732,12 @@ class Progression(commands.Cog):
     @commands.hybrid_command(name="profile", description="Check your level, EXP, and title")
     @commands.guild_only()
     async def profile(self, ctx, member: discord.Member = None):
+        """
+        Command to display a rendered profile card for a user (or the invoking user).
+
+        The command attempts to render a profile image (with caching) and delivers it
+        as a file attachment; when rendering fails a friendly error is shown.
+        """
         member = member or ctx.author
         if member.bot:
             await ctx.send(f"{member.display_name} is a bot and cannot have a profile.")
@@ -598,6 +786,14 @@ class Progression(commands.Cog):
     @commands.hybrid_command(name="leaderboard", description="Show server rankings leaderboard")
     @commands.guild_only()
     async def leaderboard_image(self, ctx):
+        """
+        Generate and send a leaderboard image showing the top users in a guild.
+
+        Implementation notes:
+        - Performs a DB query for the top users, gathers avatars/names concurrently,
+          and offloads image composition to threads with a timeout.
+        - Falls back to a gradient-less render if the primary render times out.
+        """
         try:
             await ctx.defer()
         except Exception:
@@ -738,6 +934,12 @@ class Progression(commands.Cog):
     @commands.hybrid_command(name="profiletheme", description="Choose your profile card background theme")
     @commands.guild_only()
     async def profiletheme(self, ctx):
+        """
+        Allow users to view and change their profile card theme through an interactive view.
+
+        The command sends a rendered preview of the user's current theme and attaches a
+        MainThemeView that starts the selection flow.
+        """
         exp, level = await self.get_user(ctx.author.id, ctx.guild.id)
         title_name = get_title(level)
         next_exp = 50 * level + 20 * level**2 if level < self.MAX_LEVEL else None
@@ -800,6 +1002,9 @@ class Progression(commands.Cog):
     @commands.hybrid_command(name="resetprofiletheme",description="Reset your profile card theme to default")
     @commands.guild_only()
     async def resetprofiletheme(self, ctx):
+        """
+        Reset a user's stored theme to the default and send a preview of the default profile.
+        """
         try:
             await self.set_user_theme(ctx.author.id, "default", None, "white")
 
@@ -839,6 +1044,11 @@ class Progression(commands.Cog):
 
     @commands.Cog.listener()
     async def on_message(self, message):
+        """
+        Grant EXP for user messages with a small per-user/guild cooldown to deter farming.
+
+        On level-up, announce and optionally post rank-up information to the same channel.
+        """
         if message.author.bot or not message.guild:
             return
 
@@ -874,6 +1084,12 @@ class Progression(commands.Cog):
     # THIS IS A TESTING LISTENER TO ADD EXP/COINS TO SPECIFIC USERS ON BOT STARTUP TO VERIFY FUNCTIONALITY REMOVE OR COMMENT OUT FOR PRODUCTION USE
     @commands.Cog.listener()
     async def on_ready(self):
+        """
+        Development helper that seeds EXP/coins for a predefined list of users on startup.
+
+        NOTE: This block is explicitly intended for testing and should be removed in
+        production deployments or gated behind configuration.
+        """
         print(f"{self.bot.user} is ready!")
 
         YOUR_ID = [
@@ -892,7 +1108,7 @@ class Progression(commands.Cog):
             level, exp, leveled_up = await self.add_exp(user_id, GUILD_ID, rand_exp)
             print(f"User {user_id} → Level {level}, EXP {exp}, Leveled up? {leveled_up}")
 
-            await progression.add_coins(user_id, GUILD_ID, 0)
+            await progression.add_coins(user_id, GUILD_ID, 9999)
             coins = await progression.get_coins(user_id, GUILD_ID)
             print(f"User {user_id} → Coins: {coins}")
 
