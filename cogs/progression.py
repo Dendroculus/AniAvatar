@@ -784,7 +784,7 @@ class Progression(commands.Cog):
             sub_label = bg_file or "Unknown"
             
         embed = discord.Embed(
-            title=f"Your current profile theme: ",
+            title="Your current profile theme: ",
             description=(
                 f"Main theme: `{theme_name.capitalize()}`\n"
                 f"Background: `{sub_label}`\n\n"
