@@ -5,6 +5,8 @@ import random
 from datetime import datetime, timedelta, timezone
 import asyncio
 
+from cogs.utils.emojis import CustomEmojis, MinoriEmojis, ShopEmojis
+
 """
 trading.py
 
@@ -45,7 +47,7 @@ SMALL_EXP_POTION = "Small EXP Potion"
 MEDIUM_EXP_POTION = "Medium EXP Potion"
 LARGE_EXP_POTION = "Large EXP Potion"
 LEVEL_SKIP_TOKEN = "Level Skip Token"
-EXP_EMOJI = "<:EXP:1415642038589984839>"
+EXP_EMOJI = f"{CustomEmojis['EXP']}"
 
 POTION_ITEMS = (SMALL_EXP_POTION, MEDIUM_EXP_POTION, LARGE_EXP_POTION, LEVEL_SKIP_TOKEN)
 
@@ -204,7 +206,7 @@ class InventorySelect(discord.ui.Select):
                     async with conn.execute("SELECT level FROM users WHERE user_id = ? AND guild_id = ?", (self.user_id, self.guild_id)) as cur:
                         row_lvl = await cur.fetchone()
                     if row_lvl and row_lvl[0] >= self.cog.progression_cog.MAX_LEVEL:
-                        await interaction.followup.send(f"<:MinoriWink:1414899695209418762> You’ve already reached the max level! You can’t use {EXP_EMOJI} items anymore.", ephemeral=True)
+                        await interaction.followup.send(f"{MinoriEmojis['MinoriWink']} You’ve already reached the max level! You can’t use {EXP_EMOJI} items anymore.", ephemeral=True)
                         return
 
                 await conn.execute(
@@ -238,7 +240,7 @@ class InventorySelect(discord.ui.Select):
                     for item, qty in rewards:
                         emoji = emap.get(item, "📦")
                         reward_lines.append(f"{qty}x {emoji} {item}")
-                    feedback_msg = f"<:MysteryBox:1415707555325415485> You opened a {MYSTERY_BOX_NAME} and got:\n" + "\n".join(reward_lines)
+                    feedback_msg = f"{ShopEmojis['MysteryBox']} You opened a {MYSTERY_BOX_NAME} and got:\n" + "\n".join(reward_lines)
 
             lock = self.cog.progression_cog.db_lock
             async with lock:
@@ -356,81 +358,95 @@ class ShopSelect(discord.ui.Select):
         if interaction.user.id != self.user_id:
             await interaction.response.send_message("⚠️ You can only buy items for yourself.", ephemeral=True)
             return
-        
+
         if hasattr(self.parent_view, "reset_timer"):
             self.parent_view.reset_timer()
-            
-        selected_item = self.values[0]
 
-        conn = self.progression_cog.conn
-        async with conn.execute(SQL_SELECT_PRICE_EMOJI, (selected_item,)) as cur:
-            row = await cur.fetchone()
-       
-        if not row:
-            await interaction.response.send_message("❌ This item no longer exists in the shop.", ephemeral=True)
-            return
-        price, emoji = row
-
-        NOT_ENOUGH_COINS_MSG = "❌ You don't have enough coins, nothing purchased."
-        coins = await self.progression_cog.get_coins(self.user_id, self.guild_id)
-        if coins < price:
-            await interaction.response.edit_message(NOT_ENOUGH_COINS_MSG, ephemeral=True)
+        # Prevent concurrent clicks for more robustness
+        if getattr(self.parent_view, "processing", False):
+            await interaction.response.send_message("A purchase is already being processed. Please wait.", ephemeral=True)
             return
 
-        ok = await self.progression_cog.remove_coins(self.user_id, self.guild_id, price)
-        if not ok:
-            await interaction.response.edit_message(NOT_ENOUGH_COINS_MSG, ephemeral=True)
-            return
-
-        lock = self.progression_cog.db_lock
-        async with lock:
-            await conn.execute("""
-                INSERT INTO user_inventory (user_id, guild_id, item_name, quantity)
-                VALUES (?, ?, ?, 1)
-                ON CONFLICT(user_id, guild_id, item_name) DO UPDATE SET quantity = quantity + 1
-            """, (self.user_id, self.guild_id, selected_item))
-            await conn.commit()
-
-        new_balance = await self.progression_cog.get_coins(self.user_id, self.guild_id)
-        async with conn.execute(SQL_SELECT_PRICE_EMOJI, (selected_item,)) as cur:
-            row = await cur.fetchone()
-        if not row:
-            await interaction.response.send_message("❌ This item no longer exists in the shop.", ephemeral=True)
-            return
-
-        price, selected_emoji = row  
-        
-        async with conn.execute("SELECT name, price, emoji FROM shop_items") as cur:
-            items = await cur.fetchall()
-
-        embed = discord.Embed(
-            title="🛒 Minori Bargains",
-            description=f"Your Coins: **{format_coins(new_balance)}**",
-            color=discord.Color.dark_purple()
-        )
-        embed.set_thumbnail(url=SHOP_ICON_URL)
-        for name, price, emoji in items:
-            embed.add_field(name=f"{emoji} {name}", value=f"{price} coins", inline=False)
-
-        new_options = []
-        for name, price, emoji in items:
-            new_options.append(discord.SelectOption(
-                label=name,
-                description=f"Buy {name} for {price} coins",
-                emoji=emoji,
-                value=name,
-            ))
-        self.options = new_options
-
+        self.parent_view.processing = True
+        self.disabled = True
         msg_to_edit = getattr(self, "message", None) or getattr(self.parent_view, "message", None)
+
         await interaction.response.defer()
-        
         if msg_to_edit:
-            await msg_to_edit.edit(embed=embed, view=self.parent_view)
-        else:
-            await interaction.followup.edit_message(interaction.message.id, embed=embed, view=self.parent_view)
-            
-        await interaction.followup.send(f"You bought **1x {selected_item}** {selected_emoji}!", ephemeral=True)
+            await msg_to_edit.edit(view=self.parent_view)
+
+        try:
+            selected_item = self.values[0]
+
+            conn = self.progression_cog.conn
+            async with conn.execute(SQL_SELECT_PRICE_EMOJI, (selected_item,)) as cur:
+                row = await cur.fetchone()
+
+            if not row:
+                await interaction.followup.send("❌ This item no longer exists in the shop.", ephemeral=True)
+                return
+            price, selected_emoji = row
+
+            NOT_ENOUGH_COINS_MSG = "❌ You don't have enough coins, nothing purchased."
+            coins = await self.progression_cog.get_coins(self.user_id, self.guild_id)
+            if coins < price:
+                await interaction.followup.send(NOT_ENOUGH_COINS_MSG, ephemeral=True)
+                return
+
+            ok = await self.progression_cog.remove_coins(self.user_id, self.guild_id, price)
+            if not ok:
+                await interaction.followup.send(NOT_ENOUGH_COINS_MSG, ephemeral=True)
+                return
+
+            lock = self.progression_cog.db_lock
+            async with lock:
+                await conn.execute(
+                    """
+                    INSERT INTO user_inventory (user_id, guild_id, item_name, quantity)
+                    VALUES (?, ?, ?, 1)
+                    ON CONFLICT(user_id, guild_id, item_name) DO UPDATE SET quantity = quantity + 1
+                    """,
+                    (self.user_id, self.guild_id, selected_item),
+                )
+                await conn.commit()
+
+            new_balance = await self.progression_cog.get_coins(self.user_id, self.guild_id)
+            async with conn.execute("SELECT name, price, emoji FROM shop_items") as cur:
+                items = await cur.fetchall()
+
+            embed = discord.Embed(
+                title="🛒 Minori Bargains",
+                description=f"Your Coins: **{format_coins(new_balance)}**",
+                color=discord.Color.dark_purple(),
+            )
+            embed.set_thumbnail(url=SHOP_ICON_URL)
+
+            new_options = []
+            for name, item_price, item_emoji in items:
+                embed.add_field(name=f"{item_emoji} {name}", value=f"{item_price} coins", inline=False)
+                new_options.append(
+                    discord.SelectOption(
+                        label=name,
+                        description=f"Buy {name} for {item_price} coins",
+                        emoji=item_emoji,
+                        value=name,
+                    )
+                )
+            self.options = new_options
+
+            if msg_to_edit:
+                await msg_to_edit.edit(embed=embed, view=self.parent_view)
+            else:
+                await interaction.followup.edit_message(interaction.message.id, embed=embed, view=self.parent_view)
+
+            await interaction.followup.send(f"You bought **1x {selected_item}** {selected_emoji}!", ephemeral=True)
+
+        finally:
+            # Re-enable
+            self.disabled = False
+            self.parent_view.processing = False
+            if msg_to_edit:
+                await msg_to_edit.edit(view=self.parent_view)
 
 
 class ShopView(discord.ui.View):
@@ -455,6 +471,7 @@ class ShopView(discord.ui.View):
         self.message = None
         self.timeout_seconds = timeout
         self._timeout_task = None
+        self.processing = False
 
         self.select = ShopSelect(self.progression_cog, self.user_id, self.guild_id, self.options, self)
         self.add_item(self.select)
@@ -547,11 +564,11 @@ class Trading(commands.Cog):
         await conn.commit()
 
         default_items = [
-            (SMALL_EXP_POTION, "consumable", 125, "<:SmallExpBoostPotion:1415347886186561628>"),
-            (MEDIUM_EXP_POTION, "consumable", 250, "<:MediumExpBoostPotion:1415347878343217266>"),
-            (LARGE_EXP_POTION, "consumable", 500, "<:LargeExpBoostPotion:1415347869493493781>"),
-            (LEVEL_SKIP_TOKEN, "consumable", 1500, "<:LevelSkipToken:1415349457511383161>"),
-            (MYSTERY_BOX_NAME, "consumable", 3000, "<:MysteryBox:1415707555325415485>"),
+            (SMALL_EXP_POTION, "consumable", 125, f"{ShopEmojis['SmallExpBoostPotion']}"),
+            (MEDIUM_EXP_POTION, "consumable", 250, f"{ShopEmojis['MediumExpBoostPotion']}"),
+            (LARGE_EXP_POTION, "consumable", 500, f"{ShopEmojis['LargeExpBoostPotion']}"),
+            (LEVEL_SKIP_TOKEN, "consumable", 1500, f"{ShopEmojis['LevelSkipToken']}"),
+            (MYSTERY_BOX_NAME, "consumable", 3000, f"{ShopEmojis['MysteryBox']}"),
         ]
         for name, type_, price, emoji in default_items:
             await conn.execute(
@@ -755,14 +772,14 @@ class Trading(commands.Cog):
         to caps for certain items and a donor cooldown (2 hours).
         """
         if member.bot:
-            await ctx.send("<:MinoriConfused:1415707082988060874> You cannot donate to bots.")
+            await ctx.send(f"{MinoriEmojis['MinoriConfused']} You cannot donate to bots.")
             return
         
         donor_id = ctx.author.id
         receiver_id = member.id
         
         if donor_id == receiver_id:
-            await ctx.send("<:MinoriConfused:1415707082988060874> You cannot donate to yourself.")
+            await ctx.send(f"{MinoriEmojis['MinoriConfused']} You cannot donate to yourself.")
             return
         
         guild_id = ctx.guild.id
@@ -771,7 +788,7 @@ class Trading(commands.Cog):
         now = datetime.now(timezone.utc)
         if donor_id in self.donate_cooldowns and now < self.donate_cooldowns[donor_id]:
             remaining = self.donate_cooldowns[donor_id] - now
-            await ctx.send(f"<:TIME:1415961777912545341> You can donate again in {str(remaining).split('.')[0]}")
+            await ctx.send(f"{CustomEmojis['TIME']} You can donate again in {str(remaining).split('.')[0]}")
             return
 
         async with conn.execute(SQL_USER_INV_SELECT, (donor_id, guild_id)) as cur:

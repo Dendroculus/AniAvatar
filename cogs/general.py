@@ -1,6 +1,7 @@
 import discord
 from discord.ext import commands
 from discord import ui, ButtonStyle
+from cogs.utils.emojis import MinoriEmojis, CustomEmojis
 
 class DeleteView(ui.View):
     def __init__(self, user, timeout = None):
@@ -25,12 +26,12 @@ class General(commands.Cog):
     @commands.hybrid_command(name="ping", description="Shows bot latency")
     async def ping(self, ctx):
         latency = round(self.bot.latency * 1000)
-        await ctx.send(f"<:PINGPONG:1419285533892542536> Pong! `{latency}ms`")
+        await ctx.send(f"{CustomEmojis['PINGPONG']} Pong! `{latency}ms`")
     
     @commands.hybrid_command(name="help", description="Show bot commands")
     async def help(self, ctx):
         embed = discord.Embed(
-            title=" <:MinoriWink:1414899695209418762>  Minori - your anime profile & fun companion!",
+            title=f" {MinoriEmojis['MinoriWink']} Minori - your anime profile & fun companion!",
             description="Here’s a list of available commands, organized by category.",
             color=discord.Color.purple()
         )

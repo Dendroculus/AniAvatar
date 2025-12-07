@@ -4,6 +4,8 @@ import discord
 import aiohttp
 import traceback
 
+from cogs.utils.emojis import CustomEmojis
+
 """
 Errors module - centralized command and slash-command error handling.
 
@@ -102,7 +104,7 @@ class ErrorHandler(commands.Cog):
         if isinstance(err, commands.CommandOnCooldown):
             # Provide a precise retry delay with one decimal place to help users time retries.
             retry = err.retry_after
-            msg = f"<:TIME:1415961777912545341> Please wait for {retry:.1f}s before using that command again."
+            msg = f"{CustomEmojis['TIME']} Please wait for {retry:.1f}s before using that command again."
             await self._respond_ctx(ctx, msg, ephemeral=True)
             return
 

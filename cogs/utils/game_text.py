@@ -1,35 +1,39 @@
 import random
 from typing import Optional, Tuple
+from cogs.utils.emojis import ShopEmojis, MinoriEmojis, CustomEmojis
+
+# EXP IS CustomEmojis["EXP"]
+# COINS IS ShopEmojis["Coins"]
 
 WIN_TEMPLATES = [
-    "Correct! You earned +{exp} <:EXP:1415642038589984839> and +{coins} <:Coins:1415353285270966403>!",
-    "Nice work! Rewards: +{exp} <:EXP:1415642038589984839> | +{coins} <:Coins:1415353285270966403>",
-    "Correct answer! +{exp} <:EXP:1415642038589984839>, +{coins} <:Coins:1415353285270966403> gained.",
-    "Yatta! +{exp} <:EXP:1415642038589984839> EXP and +{coins} <:Coins:1415353285270966403> Coins! Keep it up!",
-    "Kyaa~! Rewards incoming! +{exp} <:EXP:1415642038589984839>, +{coins} <:Coins:1415353285270966403>!",
-    "Woohoo! Your efforts shine! +{exp} <:EXP:1415642038589984839> | +{coins} <:Coins:1415353285270966403>",
-    "Yosh! You’ve done it! +{exp} <:EXP:1415642038589984839> EXP and +{coins} <:Coins:1415353285270966403> Coins!",
-    "Otsukaresama! Your hard work paid off: +{exp} <:EXP:1415642038589984839> and +{coins} <:Coins:1415353285270966403>!",
+    f"Correct! You earned +{{exp}} {CustomEmojis['EXP']} and +{{coins}} {ShopEmojis['Coins']}!",
+    f"Nice work! Rewards: +{{exp}} {CustomEmojis['EXP']} | +{{coins}} {ShopEmojis['Coins']}",
+    f"Correct answer! +{{exp}} {CustomEmojis['EXP']}, +{{coins}} {ShopEmojis['Coins']} gained.",
+    f"Yatta! +{{exp}} {CustomEmojis['EXP']} EXP and +{{coins}} {ShopEmojis['Coins']} Coins! Keep it up!",
+    f"Kyaa~! Rewards incoming! +{{exp}} {CustomEmojis['EXP']}, +{{coins}} {ShopEmojis['Coins']}!",
+    f"Woohoo! Your efforts shine! +{{exp}} {CustomEmojis['EXP']} | +{{coins}} {ShopEmojis['Coins']}",
+    f"Yosh! You’ve done it! +{{exp}} {CustomEmojis['EXP']} EXP and +{{coins}} {ShopEmojis['Coins']} Coins!",
+    f"Otsukaresama! Your hard work paid off: +{{exp}} {CustomEmojis['EXP']} and +{{coins}} {ShopEmojis['Coins']}",
 ]
 
 LOSE_TEMPLATES_NO_ANIME = [
-    "<:MinoriDissapointed:1416016691430821958> Oops… {name} slipped away!",
-    "<:MinoriDissapointed:1416016691430821958> Ahh! The answer was {name}…",
-    "<:MinoriConfused:1415707082988060874> Huh?! The correct one was {name}!",
-    "<:MinoriDissapointed:1416016691430821958> Not quite… {name} got past you!",
-    "<:MinoriConfused:1415707082988060874> Eh?! You missed {name}!",
-    "<:MinoriDissapointed:1416016691430821958> Whoops! {name} was the right one!",
-    "<:MinoriConfused:1415707082988060874> Hmm… the answer was {name}.",
+    f"{MinoriEmojis['MinoriDissapointed']} Oops… {{name}} slipped away!",
+    f"{MinoriEmojis['MinoriDissapointed']} Ahh! The answer was {{name}}…",
+    f"{MinoriEmojis['MinoriConfused']} Huh?! The correct one was {{name}}!",
+    f"{MinoriEmojis['MinoriDissapointed']} Not quite… {{name}} got past you!",
+    f"{MinoriEmojis['MinoriConfused']} Eh?! You missed {{name}}!",
+    f"{MinoriEmojis['MinoriDissapointed']} Whoops! {{name}} was the right one!",
+    f"{MinoriEmojis['MinoriConfused']} Hmm… the answer was {{name}}.",
 ]
 
 LOSE_TEMPLATES_WITH_ANIME = [
-    "<:MinoriDissapointed:1416016691430821958> Oops… {name} from {anime} slipped away!",
-    "<:MinoriDissapointed:1416016691430821958> Ahh! The answer was {name} from {anime}…",
-    "<:MinoriConfused:1415707082988060874> Huh?! The correct one was {name} from {anime}!",
-    "<:MinoriDissapointed:1416016691430821958> Not quite… {name} from {anime} got past you!",
-    "<:MinoriConfused:1415707082988060874> Eh?! You missed {name} from {anime}!",
-    "<:MinoriDissapointed:1416016691430821958> Whoops! {name} from {anime} was the right one!",
-    "<:MinoriConfused:1415707082988060874> Hmm… the answer was {name} from {anime}.",
+    f"{MinoriEmojis['MinoriDissapointed']} Oops… {{name}} from {{anime}} slipped away!",
+    f"{MinoriEmojis['MinoriDissapointed']} Ahh! The answer was {{name}} from {{anime}}…",
+    f"{MinoriEmojis['MinoriConfused']} Huh?! The correct one was {{name}} from {{anime}}!",
+    f"{MinoriEmojis['MinoriDissapointed']} Not quite… {{name}} from {{anime}} got past you!",
+    f"{MinoriEmojis['MinoriConfused']} Eh?! You missed {{name}} from {{anime}}!",
+    f"{MinoriEmojis['MinoriDissapointed']} Whoops! {{name}} from {{anime}} was the right one!",
+    f"{MinoriEmojis['MinoriConfused']} Hmm… the answer was {{name}} from {{anime}}.",
 ]
 
 def random_win_message(exp: int, coins: int) -> str:
