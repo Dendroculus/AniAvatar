@@ -19,6 +19,7 @@ from cogs.utils.progUtils import (
 )
 from cogs.utils.constants import BG_PATH, EMOJI_PATH, FONTS, TITLE_EMOJI_FILES
 from cogs.trading import format_coins
+from cogs.utils.emojis import CustomEmojis, MinoriEmojis, TitleEmojis, ShopEmojis
 
 """
 progression.py
@@ -55,7 +56,7 @@ Design notes and important operational guidance:
 PROFILE_PNG = "profile.png"
 ATTACHMENT_PROFILE = f"attachment://{PROFILE_PNG}"
 SQL_INSERT_OR_IGNORE_USER_COINS_ZERO = "INSERT OR IGNORE INTO user_coins (user_id, guild_id, coins) VALUES (?, ?, 0)"
-COINS_EMOJI = "<:Coins:1415353285270966403>"
+COINS_EMOJI = f"{ShopEmojis['Coins']}"
 
 class MainThemeSelect(discord.ui.Select):
     """
@@ -147,7 +148,7 @@ class SubThemeSelect(discord.ui.Select):
             and current_font_color == font_color
         ):
             await interaction.response.send_message(
-                "<:MinoriSmile:1415182284914556928> You already use this profile theme and background.", ephemeral=True
+                f"{MinoriEmojis['MinoriSmile']} You already use this profile theme and background.", ephemeral=True
             )
             return
 
@@ -190,7 +191,7 @@ class SubThemeSelect(discord.ui.Select):
         if img_bytes:
             file = discord.File(io.BytesIO(img_bytes), filename=PROFILE_PNG)
             await interaction.followup.send(
-                content=f"{member.mention}, here's your updated profile! <:MinoriSmile:1415182284914556928>",
+                content=f"{member.mention}, here's your updated profile! {MinoriEmojis['MinoriSmile']}",
                 file=file
             )
 
@@ -241,9 +242,19 @@ class Progression(commands.Cog):
         
         print(f"[Progression] Initialized with max {max_renders} concurrent renders")
 
-    def _get_render_cache_key(self, avatar_bytes: bytes, display_name: str, title_name: str, 
-                               level: int, bg_file: str, theme_name: str, font_color: str, 
-                               user_rank: int = None) -> str:
+    def _get_render_cache_key(
+        self,
+        avatar_bytes: bytes,
+        display_name: str,
+        title_name: str,
+        level: int,
+        exp: int,
+        next_exp: int,
+        bg_file: str,
+        theme_name: str,
+        font_color: str,
+        user_rank: Optional[int] = None,
+    ) -> str:
         """
         Compute a compact cache key for rendered profile images.
 
@@ -252,7 +263,7 @@ class Progression(commands.Cog):
         to balance collision risk and key length.
         """
         avatar_hash = hashlib.sha1(avatar_bytes[:256] if avatar_bytes else b"").hexdigest()[:16]
-        return f"{avatar_hash}:{display_name}:{title_name}:{level}:{theme_name}:{bg_file}:{font_color}:{user_rank}"
+        return f"{avatar_hash}:{display_name}:{title_name}:{level}:{exp}:{next_exp}:{theme_name}:{bg_file}:{font_color}:{user_rank}"
     
     def _get_from_cache(self, key: str) -> bytes | None:
         """
@@ -299,7 +310,16 @@ class Progression(commands.Cog):
         - This keeps the event loop responsive while supporting high-quality Pillow renders.
         """
         cache_key = self._get_render_cache_key(
-            avatar_bytes, display_name, title_name, level, bg_file, theme_name, font_color, user_rank
+            avatar_bytes,
+            display_name,
+            title_name,
+            level,
+            exp,
+            next_exp,
+            bg_file,
+            theme_name,
+            font_color,
+            user_rank,
         )
         cached = self._get_from_cache(cache_key)
         if cached:
@@ -692,13 +712,13 @@ class Progression(commands.Cog):
         old_emoji = get_title_emoji(old_level)
         new_emoji = get_title_emoji(new_level)
         if new_title != old_title:
-            embed_title = f"{member.display_name} <:LEVELUP:1413479714428948551> {new_level}    {old_emoji} <:RIGHTWARDARROW:1414227272302334062> {new_emoji}"
+            embed_title = f"{member.display_name} {CustomEmojis['UPWARDARROW']} {new_level}    {old_emoji} {CustomEmojis['RIGHTWARDARROW']} {new_emoji}"
             embed_description = (
                 f"```Congratulations {member.display_name}! You have reached level {new_level} and ascended to {new_title}. ```\n"
                 f"Title: `{new_title}` {new_emoji}"
             )
         else:
-            embed_title = f"{member.display_name} <:LEVELUP:1413479714428948551> {new_level}"
+            embed_title = f"{member.display_name} {CustomEmojis['UPWARDARROW']} {new_level}"
             embed_description = (
                 f"```Congratulations {member.display_name}! You have reached level {new_level}.```\n"
                 f"Title: `{new_title}` {new_emoji}"
@@ -888,7 +908,7 @@ class Progression(commands.Cog):
             embed_color = TITLE_COLORS.get(top_title, discord.Color.purple())
             file = discord.File(io.BytesIO(img_bytes), filename="leaderboard.png")
             embed = discord.Embed(
-                title=f"{ctx.guild.name}'s Top Rank List <:CHAMPION:1414508304448749568>",
+                title=f"{ctx.guild.name}'s Top Rank List {TitleEmojis['CHAMPION']}",
                 color=embed_color,
                 description=(f"**Your Rank**\n"
                              f"You are ranked **#{user_rank}** on this server\n"
@@ -1074,7 +1094,7 @@ class Progression(commands.Cog):
             new_rank = await self.get_rank_for(guild_id, level, new_exp)
             if new_rank < old_rank:
                 embed = discord.Embed(
-                    title=f"<:LEVELUP:1413479714428948551> Rank Up! {message.author.display_name}",
+                    title=f"{CustomEmojis['UPWARDARROW']} Rank Up! {message.author.display_name}",
                     description=f"```{message.author.display_name} has ranked up to #{new_rank} in the server leaderboard! 🎉```",
                     color=discord.Color.gold()
                 )
@@ -1096,14 +1116,14 @@ class Progression(commands.Cog):
             955268891125375036
         ] 
 
-        GUILD_ID = 974498807817588756 
+        GUILD_ID = 1412345648174333956 
 
         progression = self.bot.get_cog("Progression")
         if not progression:
             print("Progression cog not loaded!")
             return
 
-        rand_exp = random.randint(15000, 15001)
+        rand_exp = random.randint(5150, 5151)
         for user_id in YOUR_ID:
             level, exp, leveled_up = await self.add_exp(user_id, GUILD_ID, rand_exp)
             print(f"User {user_id} → Level {level}, EXP {exp}, Leveled up? {leveled_up}")

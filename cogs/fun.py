@@ -10,6 +10,7 @@ import time
 from itertools import cycle
 from typing import Dict, Optional, Any
 from cogs.utils.pollUtils import PollInputModal
+from cogs.utils.emojis import MinoriEmojis, ShopEmojis
 
 FALSE_GAMBLE_SESSION = "⚠️ This is not your gamble session."
 
@@ -234,17 +235,17 @@ class Fun(commands.Cog):
         """
         if not getattr(ctx, "interaction", None):
             return await ctx.send(
-                "<:MinoriConfused:1415707082988060874> Please use the slash (/) version of this command so the bot can open modals."
+                f"{MinoriEmojis['MinoriConfused']} Please use the slash (/) version of this command so the bot can open modals."
             )
 
         if duration < 1:
             return await ctx.interaction.response.send_message(
-                "<:MinoriDisapointed:1416016691430821958> Duration must be at least 1 minute.",
+                f"{MinoriEmojis['MinoriDisapointed']} Duration must be at least 1 minute.",
                 ephemeral=True,
             )
         if duration > 7 * 24 * 60:
             return await ctx.interaction.response.send_message(
-                "<:MinoriDisapointed:1416016691430821958> Duration cannot exceed 7 days.",
+                f"{MinoriEmojis['MinoriDisapointed']} Duration cannot exceed 7 days.",
                 ephemeral=True,
             )
 
@@ -271,7 +272,7 @@ class Fun(commands.Cog):
         await self._send(
             ctx,
             interaction,
-            f"❌ Could not place bet of {amount} <:Coins:1415353285270966403>. You don't have enough coins.",
+            f"❌ Could not place bet of {amount} {ShopEmojis['Coins']}. You don't have enough coins.",
             ephemeral=True,
         )
         try:
@@ -280,7 +281,7 @@ class Fun(commands.Cog):
             if vo_inner and vo_inner.message:
                 await vo_inner.message.edit(
                     content=(
-                        f"You have {new_balance_inner} <:Coins:1415353285270966403>. "
+                        f"You have {new_balance_inner} {ShopEmojis['Coins']}. "
                         "Select amount to gamble:"
                     ),
                     view=vo_inner,
@@ -308,12 +309,12 @@ class Fun(commands.Cog):
             await progression_cog.add_coins(user_id, guild_id, amount * 2)
             if amount == pre_balance_val:
                 return (
-                    "<:MinoriAmazed:1416024121837490256> WOOOAA JACKPOT! "
+                    f"{MinoriEmojis['MinoriAmazed']} WOOOAA JACKPOT! "
                     "You just doubled everything you own!"
                 )
             return (
-                f"<:MinoriAmazed:1416024121837490256> You won {amount} "
-                "<:Coins:1415353285270966403>!"
+                f"{MinoriEmojis['MinoriAmazed']} You won {amount} "
+                f"{ShopEmojis['Coins']}!"
             )
         except Exception:
             try:
@@ -349,7 +350,7 @@ class Fun(commands.Cog):
             updated = await progression_cog.get_coins(user_id, guild_id)
             await vo_inner.message.edit(
                 content=(
-                    f"You have {updated} <:Coins:1415353285270966403>. "
+                    f"You have {updated} {ShopEmojis['Coins']}. "
                     "Select amount to gamble:"
                 ),
                 view=vo_inner,
@@ -375,7 +376,7 @@ class Fun(commands.Cog):
             ctx,
             interaction,
             (
-                "<:MinoriConfused:1415707082988060874> Woah woah you have been "
+                f"{MinoriEmojis['MinoriConfused']} Woah woah you have been "
                 "gambling for a while — I think it's time to stop for a while. "
                 "You're on cooldown for 5 minutes."
             ),
@@ -462,8 +463,8 @@ class Fun(commands.Cog):
                 return
         else:
             result_text = (
-                f"<:MinoriDissapointed:1416016691430821958> You lost {amount} "
-                "<:Coins:1415353285270966403>."
+                f"{MinoriEmojis['MinoriDissapointed']} You lost {amount} "
+                f"{ShopEmojis['Coins']}."
             )
 
         new_balance = await progression_cog.get_coins(user_id, guild_id)
@@ -472,7 +473,7 @@ class Fun(commands.Cog):
             interaction,
             (
                 f"{result_text} Your new balance: {new_balance:,} "
-                "<:Coins:1415353285270966403>."
+                f"{ShopEmojis['Coins']}."
             ),
         )
         await self._refresh_gamble_prompt(progression_cog, guild_id, user_id)
@@ -722,7 +723,7 @@ class Fun(commands.Cog):
                         await parent.fun._send(
                             parent.ctx,
                             inter,
-                            f"❌ Invalid amount. You have {latest} <:Coins:1415353285270966403>.",
+                            f"❌ Invalid amount. You have {latest} {ShopEmojis['Coins']}.",
                             ephemeral=True,
                         )
                         await parent._clear_selection()
@@ -822,7 +823,7 @@ class Fun(commands.Cog):
         await self._send(
             ctx,
             interaction,
-            "<:MinoriConfused:1415707082988060874> Woah woah you have been gambling for a while, "
+            f"{MinoriEmojis['MinoriConfused']} Woah woah you have been gambling for a while, "
             f"please wait for `{mins}m {secs}s` before gambling again.",
             ephemeral=True,
         )
@@ -884,7 +885,7 @@ class Fun(commands.Cog):
 
         Returns the message object when possible to allow the caller to tie the view to the message.
         """
-        prompt = f"You have {user_coins} <:Coins:1415353285270966403>. Select amount to gamble:"
+        prompt = f"You have {user_coins} {ShopEmojis['Coins']}. Select amount to gamble:"
 
         if interaction:
             try:

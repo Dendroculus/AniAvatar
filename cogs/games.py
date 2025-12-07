@@ -9,6 +9,7 @@ from itertools import cycle
 
 from cogs.utils.anime_api import fetch_random_character, build_character_select_options
 from cogs.utils.game_text import random_win_message, random_lose_message, compute_rewards, award_rewards
+from cogs.utils.emojis import CustomEmojis
 
 """
 games.py
@@ -213,7 +214,7 @@ class Games(commands.Cog):
             except asyncio.TimeoutError:
                 select.disabled = True
                 await message.edit(view=view)
-                await ctx.send(f"<:TIME:1415961777912545341> Time's up! The correct answer was `{question['answer']}`.")
+                await ctx.send(f"{CustomEmojis['TIME']} Time's up! The correct answer was `{question['answer']}`.")
 
         await ctx.send(f"🏁 Quiz finished! You scored **{score}/{num_questions}**.")
 

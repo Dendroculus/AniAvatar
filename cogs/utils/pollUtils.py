@@ -8,6 +8,8 @@ from discord import ui
 from discord.ext import commands
 import os
 
+from cogs.utils.emojis import MinoriEmojis, CustomEmojis
+
 """
 pollUtils.py
 
@@ -358,17 +360,17 @@ class PollView(discord.ui.View):
             if max_votes > 0:
                 if len(winners) == 1:
                     winner_text = (
-                        f"\n\n<:MinoriPray:1418919979272896634> Polling for `{self.question}` ended. "
+                        f"\n\n{MinoriEmojis['MinoriPray']} Polling for `{self.question}` ended. "
                         f"The highest vote goes to **{winners[0]}** with {max_votes} vote{'s' if max_votes!=1 else ''}."
                     )
                 else:
                     winner_text = (
-                        f"\n\n<:MinoriPray:1418919979272896634> Polling for `{self.question}` ended. "
+                        f"\n\n{MinoriEmojis['MinoriPray']} Polling for `{self.question}` ended. "
                         f"It's a tie between {', '.join(winners)} — each with {max_votes} votes."
                     )
             else:
                 winner_text = (
-                    f"\n\n<:MinoriWink:1414899695209418762> Polling for `{self.question}` ended. "
+                    f"\n\n{MinoriEmojis['MinoriWink']} Polling for `{self.question}` ended. "
                     "No votes were cast."
                 )
         return results, winners, winner_text
@@ -466,7 +468,7 @@ class PollView(discord.ui.View):
             except aiosqlite.Error as e:
                 print(f"[Poll DB Save Error on vote] {e}")
 
-        await self.update_poll(interaction, f"<:VERIFIED:1418921885692989532> You voted for **{choice_label}**")
+        await self.update_poll(interaction, f"{CustomEmojis['VERIFIED']} You voted for **{choice_label}**")
 
     async def add_option(self, interaction: discord.Interaction):
         """
@@ -618,7 +620,7 @@ class PollView(discord.ui.View):
         colors = ["🟦", "🟥", "🟩", "🟨", "🟪", "🟧", "🟫"]
 
         embed = discord.Embed(
-            title=f"<:CHART:1418908749749420085>  {self.question}",
+            title=f"{CustomEmojis['CHART']}  {self.question}",
             color=discord.Color.blurple()
         )
 
@@ -628,7 +630,7 @@ class PollView(discord.ui.View):
             filled = int(percent / 100 * bar_len) if bar_len > 0 else 0
             empty = max(0, bar_len - filled)
             color = colors[i % len(colors)]
-            bar = color * filled + "<:Gray_Large_Square:1418999479557685380>" * empty
+            bar = color * filled + f"{CustomEmojis['Gray_Large_Square']}" * empty
 
             name = opt
             embed.add_field(
@@ -640,21 +642,20 @@ class PollView(discord.ui.View):
         if closed:
             if self.end_time:
                 status = (
-                    f"<:Locked:1419005340812316893> Poll closed <t:{int(self.end_time.timestamp())}:R>\n"
-                    f"<:SecretBox:1418986878949916722> Votes are anonymous\n"
+                    f"{CustomEmojis['Locked']} Poll closed <t:{int(self.end_time.timestamp())}:R>\n"
+                    f"{CustomEmojis['SecretBox']} Votes are anonymous\n"
                     f"With total of `{total_votes} votes`" 
                 )
             else:
-                status = f"<:Locked:1419005340812316893> Poll closed\n<:SecretBox:1418986878949916722> Votes are anonymous\n{total_votes} votes"
+                status = f"{CustomEmojis['Locked']} Poll closed\n{CustomEmojis['SecretBox']} Votes are anonymous\n{total_votes} votes"
         elif self.end_time:
             status = (
-                f"<:TIME:1415961777912545341> Poll closes <t:{int(self.end_time.timestamp())}:R>\n"
-                f"<:SecretBox:1418986878949916722> Votes are anonymous\n"
+                f"{CustomEmojis['TIME']} Poll closes <t:{int(self.end_time.timestamp())}:R>\n"
+                f"{CustomEmojis['SecretBox']} Votes are anonymous\n"
                 f"Total Votes: `{total_votes}` votes"
             )
         else:
-            status = f"<:SecretBox:1418986878949916722> Votes are anonymous\n{total_votes} votes"
-
+            status = f"{CustomEmojis['SecretBox']} Votes are anonymous\n{total_votes} votes"
         embed.add_field(name="\u200b", value=status, inline=False)
         return embed
 
@@ -706,7 +707,7 @@ class AddOptionModal(ui.Modal, title="Add Poll Options"):
         for opt in new_opts:
             if opt.lower() in normalized_existing:
                 return await interaction.response.send_message(
-                    "<:MinoriConfused:1415707082988060874> You can't add duplicate options.",
+                    f"{MinoriEmojis['MinoriConfused']} You can't add duplicate options.",
                     ephemeral=True
                 )
         MAX_OPTIONS = 14 
@@ -744,7 +745,7 @@ class AddOptionModal(ui.Modal, title="Add Poll Options"):
             print(f"[Poll DB Save Error on add_option] {e}")
 
         await interaction.response.send_message(
-            f"<:VERIFIED:1418921885692989532> Added {len(new_opts)} option(s). Total options: {len(self.poll_view.options)}",
+            f"{CustomEmojis['VERIFIED']} Added {len(new_opts)} option(s). Total options: {len(self.poll_view.options)}",
             ephemeral=True
         )
         
@@ -786,7 +787,7 @@ class PollInputModal(ui.Modal, title="Create Poll"):
         normalized = [o.strip().lower() for o in opts]
         if len(set(normalized)) != len(normalized):
             return await interaction.response.send_message(
-                "<:MinoriConfused:1415707082988060874> You cant make same options",
+                f"{MinoriEmojis['MinoriConfused']} You cant make same options",
                 ephemeral=True
             )
         try:
@@ -807,9 +808,9 @@ class PollInputModal(ui.Modal, title="Create Poll"):
             )
 
             try:
-                await interaction.response.send_message("<:VERIFIED:1418921885692989532> Poll successfully created!", ephemeral=True)
+                await interaction.response.send_message(f"{CustomEmojis['VERIFIED']} Poll successfully created!", ephemeral=True)
             except discord.errors.InteractionResponded:
-                await interaction.followup.send("<:VERIFIED:1418921885692989532> Poll successfully created!", ephemeral=True)
+                await interaction.followup.send(f"{CustomEmojis['VERIFIED']} Poll successfully created!", ephemeral=True)
         except aiosqlite.Error as e:
             print(f"[Poll Create Error] {e}")
             try:

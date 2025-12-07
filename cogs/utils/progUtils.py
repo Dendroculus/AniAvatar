@@ -10,6 +10,7 @@ import re
 import unicodedata
 import aiosqlite
 from typing import Optional
+from .emojis import TitleEmojis
 
 """
 PERSONAL NOTE : 
@@ -252,22 +253,23 @@ def get_title_emoji(level: int):
     """
     Return a compact emoji token representing the title tier for UI text fallback.
     """
-    if level < 5: return "<:NOVICE:1414508405002862663>"
-    elif level < 10: return "<:WARRIOR:1414508311650242661>"
-    elif level < 15: return "<:ELITE:1414508395301699724>"
-    elif level < 20: return "<:CHAMPION:1414508304448749568>"
-    elif level < 25: return "<:HERO:1414508388812853258>"
-    elif level < 30: return "<:LEGEND:1414508296269856768>"
-    elif level < 35: return "<:MYTHIC:1414508380172587099>"
-    elif level < 40: return "<:ASCENDANT:1414508291341684776>"
-    elif level < 50: return "<:IMMORTAL:1414508281543524454>"
-    elif level < 60: return "<:CELESTIAL:1414508342520320070>"
-    elif level < 70: return "<:TRANSCENDENT:1414508273767288832>"
-    elif level < 80: return "<:AETHERBORN:1414508333951483904>"
-    elif level < 90: return "<:COSMIC:1414508264695005184>"
-    elif level < 100: return "<:DIVINE:1414508323763388446>"
-    elif level < 125: return "<:ETERNAL:1414508351676481536>"
-    else: return "<:ENLIGHTENED:1414508255744360510>"
+    # copilot help me change all into using TitleEmojis dict
+    if level < 5: return TitleEmojis["NOVICE"]
+    elif level < 10: return TitleEmojis["WARRIOR"]
+    elif level < 15: return TitleEmojis["ELITE"]
+    elif level < 20: return TitleEmojis["CHAMPION"]
+    elif level < 25: return TitleEmojis["HERO"]
+    elif level < 30: return TitleEmojis["LEGEND"]
+    elif level < 35: return TitleEmojis["MYTHIC"]
+    elif level < 40: return TitleEmojis["ASCENDANT"]
+    elif level < 50: return TitleEmojis["IMMORTAL"]
+    elif level < 60: return TitleEmojis["CELESTIAL"]
+    elif level < 70: return TitleEmojis["TRANSCENDENT"]
+    elif level < 80: return TitleEmojis["AETHERBORN"]
+    elif level < 90: return TitleEmojis["COSMIC"]
+    elif level < 100: return TitleEmojis["DIVINE"]
+    elif level < 125: return TitleEmojis["ETERNAL"]
+    else: return TitleEmojis["ENLIGHTENED"]
 
 
 async def get_user_rank(user_id: int, guild_id: int, max_level: int):
