@@ -543,19 +543,18 @@ class Progression(commands.Cog):
         This function uses the db_lock to protect writes and returns an integer.
         """
         await self._ensure_pool()
-        async with self.db_lock:
-            async with self.pool.acquire() as conn:
-                row = await conn.fetchrow(
-                    "SELECT coins FROM user_coins WHERE user_id = $1 AND guild_id = $2",
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT coins FROM user_coins WHERE user_id = $1 AND guild_id = $2",
+                user_id, guild_id
+            )
+            if not row:
+                await conn.execute(
+                    "INSERT INTO user_coins (user_id, guild_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
                     user_id, guild_id
                 )
-                if not row:
-                    await conn.execute(
-                        "INSERT INTO user_coins (user_id, guild_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
-                        user_id, guild_id
-                    )
-                    return 0
-                return int(row["coins"])
+                return 0
+            return int(row["coins"])
 
     async def add_coins(self, user_id: int, guild_id: int, amount: int):
         """
@@ -568,25 +567,23 @@ class Progression(commands.Cog):
             return
         amount = int(amount)
         await self._ensure_pool()
-        async with self.db_lock:
-            async with self.pool.acquire() as conn:
-                await conn.execute(SQL_INSERT_OR_IGNORE_USER_COINS_ZERO, user_id, guild_id)
-                await conn.execute(
-                    """
-                    INSERT INTO user_coins (user_id, guild_id, coins) VALUES ($1, $2, $3)
-                    ON CONFLICT(user_id, guild_id) DO UPDATE SET coins = user_coins.coins + EXCLUDED.coins
-                    """,
-                    user_id, guild_id, amount
-                )
+        async with self.pool.acquire() as conn:
+            await conn.execute(SQL_INSERT_OR_IGNORE_USER_COINS_ZERO, user_id, guild_id)
+            await conn.execute(
+                """
+                INSERT INTO user_coins (user_id, guild_id, coins) VALUES ($1, $2, $3)
+                ON CONFLICT(user_id, guild_id) DO UPDATE SET coins = user_coins.coins + EXCLUDED.coins
+                """,
+                user_id, guild_id, amount
+            )
 
     async def ensure_user_row(self, user_id: int, guild_id: int):
         """
         Ensure a user_coins row exists for the given user; useful for test/setup flows.
         """
         await self._ensure_pool()
-        async with self.db_lock:
-            async with self.pool.acquire() as conn:
-                await conn.execute(SQL_INSERT_OR_IGNORE_USER_COINS_ZERO, user_id, guild_id)
+        async with self.pool.acquire() as conn:
+            await conn.execute(SQL_INSERT_OR_IGNORE_USER_COINS_ZERO, user_id, guild_id)
 
     async def remove_coins(self, user_id: int, guild_id: int, amount: int) -> bool:
         """
@@ -598,19 +595,18 @@ class Progression(commands.Cog):
         if amount <= 0:
             return False
         await self._ensure_pool()
-        async with self.db_lock:
-            async with self.pool.acquire() as conn:
-                await conn.execute(SQL_INSERT_OR_IGNORE_USER_COINS_ZERO, user_id, guild_id)
-                result = await conn.execute(
-                    "UPDATE user_coins SET coins = coins - $1 WHERE user_id = $2 AND guild_id = $3 AND coins >= $1",
-                    amount, user_id, guild_id
-                )
-                # result is like "UPDATE 1"
-                try:
-                    updated = int(result.split()[-1])
-                except Exception:
-                    updated = 0
-                return updated > 0
+        async with self.pool.acquire() as conn:
+            await conn.execute(SQL_INSERT_OR_IGNORE_USER_COINS_ZERO, user_id, guild_id)
+            result = await conn.execute(
+                "UPDATE user_coins SET coins = coins - $1 WHERE user_id = $2 AND guild_id = $3 AND coins >= $1",
+                amount, user_id, guild_id
+            )
+            # result is like "UPDATE 1"
+            try:
+                updated = int(result.split()[-1])
+            except Exception:
+                updated = 0
+            return updated > 0
 
     async def reserve_coins(self, user_id: int, guild_id: int, amount: int) -> bool:
         """
@@ -628,38 +624,36 @@ class Progression(commands.Cog):
         Returns a tuple (theme_name, bg_file, font_color).
         """
         await self._ensure_pool()
-        async with self.db_lock:
-            async with self.pool.acquire() as conn:
-                row = await conn.fetchrow(
-                    "SELECT theme_name, bg_file, font_color FROM profile_theme WHERE user_id = $1",
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT theme_name, bg_file, font_color FROM profile_theme WHERE user_id = $1",
+                user_id
+            )
+            if not row:
+                await conn.execute(
+                    "INSERT INTO profile_theme (user_id) VALUES ($1) ON CONFLICT DO NOTHING",
                     user_id
                 )
-                if not row:
-                    await conn.execute(
-                        "INSERT INTO profile_theme (user_id) VALUES ($1) ON CONFLICT DO NOTHING",
-                        user_id
-                    )
-                    return "galaxy", "GALAXY.PNG", "white"
-                return (row["theme_name"], row["bg_file"], row["font_color"])
+                return "galaxy", "GALAXY.PNG", "white"
+            return (row["theme_name"], row["bg_file"], row["font_color"])
 
     async def set_user_theme(self, user_id: int, theme_name: str, bg_file: Optional[str], font_color: str = "white"):
         """
         Persist the user's theme selection into profile_theme.
         """
         await self._ensure_pool()
-        async with self.db_lock:
-            async with self.pool.acquire() as conn:
-                await conn.execute(
-                    """
-                    INSERT INTO profile_theme (user_id, theme_name, bg_file, font_color)
-                    VALUES ($1, $2, $3, $4)
-                    ON CONFLICT (user_id) DO UPDATE
-                    SET theme_name = EXCLUDED.theme_name,
-                        bg_file = EXCLUDED.bg_file,
-                        font_color = EXCLUDED.font_color
-                    """,
-                    user_id, theme_name, bg_file, font_color
-                )
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO profile_theme (user_id, theme_name, bg_file, font_color)
+                VALUES ($1, $2, $3, $4)
+                ON CONFLICT (user_id) DO UPDATE
+                SET theme_name = EXCLUDED.theme_name,
+                    bg_file = EXCLUDED.bg_file,
+                    font_color = EXCLUDED.font_color
+                """,
+                user_id, theme_name, bg_file, font_color
+            )
 
     def truncate(self, text: str, max_len: int):
         """
@@ -674,19 +668,18 @@ class Progression(commands.Cog):
         Return (exp, level) for a user, creating a default row if necessary.
         """
         await self._ensure_pool()
-        async with self.db_lock:
-            async with self.pool.acquire() as conn:
-                row = await conn.fetchrow(
-                    "SELECT exp, level FROM users WHERE user_id = $1 AND guild_id = $2",
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT exp, level FROM users WHERE user_id = $1 AND guild_id = $2",
+                user_id, guild_id
+            )
+            if row is None:
+                await conn.execute(
+                    "INSERT INTO users (user_id, guild_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
                     user_id, guild_id
                 )
-                if row is None:
-                    await conn.execute(
-                        "INSERT INTO users (user_id, guild_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
-                        user_id, guild_id
-                    )
-                    return 0, 1
-                return (row["exp"], row["level"])
+                return 0, 1
+            return (row["exp"], row["level"])
 
     async def add_exp(self, user_id: int, guild_id: int, amount: int):
         """
@@ -695,67 +688,65 @@ class Progression(commands.Cog):
         Returns a tuple (new_level, new_exp, leveled_up_bool).
         """
         await self._ensure_pool()
-        async with self.db_lock:
-            async with self.pool.acquire() as conn:
-                row = await conn.fetchrow(
-                    "SELECT exp, level FROM users WHERE user_id = $1 AND guild_id = $2",
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT exp, level FROM users WHERE user_id = $1 AND guild_id = $2",
+                user_id, guild_id
+            )
+            if row is None:
+                await conn.execute(
+                    "INSERT INTO users (user_id, guild_id, exp, level) VALUES ($1, $2, 0, 1) ON CONFLICT DO NOTHING",
                     user_id, guild_id
                 )
-                if row is None:
-                    await conn.execute(
-                        "INSERT INTO users (user_id, guild_id, exp, level) VALUES ($1, $2, 0, 1) ON CONFLICT DO NOTHING",
-                        user_id, guild_id
-                    )
-                    exp = 0
-                    level = 1
+                exp = 0
+                level = 1
+            else:
+                exp, level = row["exp"], row["level"]
+
+            new_exp = exp + amount
+            leveled_up = False
+
+            while level < self.MAX_LEVEL:
+                next_exp = 50 * level + 20 * level**2
+                if new_exp >= next_exp:
+                    new_exp -= next_exp
+                    level += 1
+                    leveled_up = True
                 else:
-                    exp, level = row["exp"], row["level"]
+                    break
 
-                new_exp = exp + amount
-                leveled_up = False
+            if level >= self.MAX_LEVEL:
+                level = self.MAX_LEVEL
+                new_exp = 0
 
-                while level < self.MAX_LEVEL:
-                    next_exp = 50 * level + 20 * level**2
-                    if new_exp >= next_exp:
-                        new_exp -= next_exp
-                        level += 1
-                        leveled_up = True
-                    else:
-                        break
-
-                if level >= self.MAX_LEVEL:
-                    level = self.MAX_LEVEL
-                    new_exp = 0
-
-                await conn.execute(
-                    "UPDATE users SET exp = $1, level = $2 WHERE user_id = $3 AND guild_id = $4",
-                    new_exp, level, user_id, guild_id
-                )
-                return level, new_exp, leveled_up
+            await conn.execute(
+                "UPDATE users SET exp = $1, level = $2 WHERE user_id = $3 AND guild_id = $4",
+                new_exp, level, user_id, guild_id
+            )
+            return level, new_exp, leveled_up
 
     async def get_rank(self, user_id: int, guild_id: int):
         """
         Compute the 1-based rank of a user within a guild ordered by level desc, exp desc.
         """
         await self._ensure_pool()
-        async with self.db_lock:
-            async with self.pool.acquire() as conn:
-                row = await conn.fetchrow(
-                    """
-                    SELECT COUNT(*) + 1 AS rnk
-                    FROM users
-                    WHERE guild_id = $1
-                      AND (
-                        level > (SELECT level FROM users WHERE user_id = $2 AND guild_id = $1)
-                        OR (
-                          level = (SELECT level FROM users WHERE user_id = $2 AND guild_id = $1)
-                          AND exp > (SELECT exp FROM users WHERE user_id = $2 AND guild_id = $1)
-                        )
-                      )
-                    """,
-                    guild_id, user_id
-                )
-                return int(row["rnk"]) if row and row["rnk"] is not None else 1
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT COUNT(*) + 1 AS rnk
+                FROM users
+                WHERE guild_id = $1
+                    AND (
+                    level > (SELECT level FROM users WHERE user_id = $2 AND guild_id = $1)
+                    OR (
+                        level = (SELECT level FROM users WHERE user_id = $2 AND guild_id = $1)
+                        AND exp > (SELECT exp FROM users WHERE user_id = $2 AND guild_id = $1)
+                    )
+                    )
+                """,
+                guild_id, user_id
+            )
+            return int(row["rnk"]) if row and row["rnk"] is not None else 1
 
     async def get_rank_for(self, guild_id: int, level: int, exp: int):
         """
@@ -763,13 +754,12 @@ class Progression(commands.Cog):
         Useful for announcements comparing old/new ranks on level-up.
         """
         await self._ensure_pool()
-        async with self.db_lock:
-            async with self.pool.acquire() as conn:
-                row = await conn.fetchrow(
-                    "SELECT COUNT(*) + 1 AS rnk FROM users WHERE guild_id = $1 AND (level > $2 OR (level = $2 AND exp > $3))",
-                    guild_id, level, exp
-                )
-                return int(row["rnk"]) if row and row["rnk"] is not None else 1
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT COUNT(*) + 1 AS rnk FROM users WHERE guild_id = $1 AND (level > $2 OR (level = $2 AND exp > $3))",
+                guild_id, level, exp
+            )
+            return int(row["rnk"]) if row and row["rnk"] is not None else 1
 
     async def announce_level_up(self, guild_id: int, user_id: int, new_level: int, old_level: int, channel: discord.abc.Messageable):
         """
@@ -821,9 +811,8 @@ class Progression(commands.Cog):
         This keeps the users table compact and avoids retaining stale data for left guilds.
         """
         await self._ensure_pool()
-        async with self.db_lock:
-            async with self.pool.acquire() as conn:
-                await conn.execute("DELETE FROM users WHERE guild_id = $1", guild.id)
+        async with self.pool.acquire() as conn:
+            await conn.execute("DELETE FROM users WHERE guild_id = $1", guild.id)
         print(f"[Progression] Cleaned up DB for guild {guild.id} ({guild.name})")
 
     @commands.hybrid_command(name="profile", description="Check your level, EXP, and title")
@@ -898,20 +887,20 @@ class Progression(commands.Cog):
         async def query_rows():
             try:
                 await self._ensure_pool()
-                async with self.db_lock:
-                    async with self.pool.acquire() as conn:
-                        rows = await conn.fetch(
-                            """
-                            SELECT user_id, level, exp
-                            FROM users
-                            WHERE guild_id = $1
-                              AND ((exp > 0 AND level >= 1) OR level = $2)
-                            ORDER BY level DESC, exp DESC
-                            LIMIT 10
-                            """,
-                            ctx.guild.id, self.MAX_LEVEL
-                        )
-                        return [(r["user_id"], r["level"], r["exp"]) for r in rows]
+                async with self.pool.acquire() as conn:
+                    rows = await conn.fetch(
+                        """
+                        SELECT user_id, level, exp
+                        FROM users
+                        WHERE guild_id = $1
+                            AND ((exp > 0 AND level >= 1) OR level = $2)
+                        ORDER BY level DESC, exp DESC
+                        LIMIT 10
+                        """,
+                        ctx.guild.id, self.MAX_LEVEL
+                    )
+                    return [(r["user_id"], r["level"], r["exp"]) for r in rows]
+                
             except Exception as e:
                 print("[leaderboard] DB query failed:", e)
                 return None
