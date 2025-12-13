@@ -10,7 +10,7 @@ import re
 import unicodedata
 import asyncpg
 import asyncio
-from typing import Optional
+from typing import Optional, Dict
 from .emojis import TitleEmojis
 
 """
@@ -31,7 +31,7 @@ LVL_Y = -4             # move LVL text value column up/down neg is up otherwise
 # - protective error handling for degraded environments (missing fonts, avatars, or files),
 # - small helpers for sanitizing and measuring Unicode-aware text (including CJK handling).
 #
-# Operational notes (useful for maintainers):
+# Operational NOTE (useful for maintainers):
 # - Most functions are intentionally defensive: they accept malformed persisted values
 #   and return sane defaults rather than raising; this keeps the bot resilient during startup.
 # - Where possible callers should pass shared resources (fonts, sessions) to avoid high
@@ -39,8 +39,10 @@ LVL_Y = -4             # move LVL text value column up/down neg is up otherwise
 # - The ImageRenderer is not thread-safe; it is intended to be used from the bot's asyncio
 #   event loop. If rendering must be performed concurrently consider serializing access
 #   or creating separate renderer instances per worker.
+# - Production hint: if multiple cogs need PostgreSQL access, prefer sharing a single
+#   asyncpg pool in the bot process. The helpers below accept a per-module pool but can
+#   be adapted to reuse a global pool to reduce connection churn.
 
-#  Exceptions 
 
 class AvatarError(Exception):
     """Base exception for avatar-related issues."""
@@ -93,7 +95,7 @@ class LeaderboardLayout:
     - NAME_MAX_CHARS is a conservative truncation threshold used before measuring text width.
     """
 
-# ==================== Constants ====================
+#  Constants 
 
 TITLE_COLORS = {
     "Novice": discord.Color. light_gray(),
@@ -116,18 +118,37 @@ TITLE_COLORS = {
 
 DB_PATH = os.path.join(ROOT_PATH, "data", "minori.db")
 
-# -------------------- Postgres pool helpers (for rank query) -------------------- #
+#  Postgres pool helpers (for rank query)  
 _POOL: Optional[asyncpg.Pool] = None
-_DB_LOCK = asyncio.Lock()  # kept for API symmetry; not heavily used here
 
-async def init_db_pool(dsn: Optional[str] = None, *, min_size: int = 1, max_size: int = 10) -> None:
-    """Lazily initialize asyncpg pool from DATABASE_URL (or provided dsn)."""
+async def init_db_pool(
+    dsn: Optional[str] = None,
+    *,
+    min_size: int = 1,
+    max_size: int = 10,
+    statement_timeout_ms: Optional[int] = 2000
+) -> None:
+    """
+    Lazily initialize asyncpg pool from DATABASE_URL (or provided dsn).
+
+    Production note: statement_timeout_ms applies a server-side timeout to each
+    statement to prevent slow queries from piling up; tune or disable (None)
+    based on your workload and DB settings.
+    """
     global _POOL
     if _POOL is None:
         dsn = dsn or os.getenv("DATABASE_URL")
         if not dsn:
             raise RuntimeError("DATABASE_URL is not set")
-        _POOL = await asyncpg.create_pool(dsn=dsn, min_size=min_size, max_size=max_size)
+        server_settings: Dict[str, str] = {}
+        if statement_timeout_ms is not None:
+            server_settings["statement_timeout"] = str(statement_timeout_ms)
+        _POOL = await asyncpg.create_pool(
+            dsn=dsn,
+            min_size=min_size,
+            max_size=max_size,
+            server_settings=server_settings or None,
+        )
 
 async def close_db_pool() -> None:
     """Close the asyncpg pool."""
@@ -142,7 +163,7 @@ async def get_pool() -> asyncpg.Pool:
     assert _POOL is not None
     return _POOL
 
-# ==================== Stateless Utility Functions ====================
+#  Stateless Utility Functions 
 
 _INVISIBLE_RE = re.compile(r'[\u200D\uFE0F\u200E\u200F\u2060-\u2064\uFEFF]', flags=re.UNICODE)
 _CTRL_RE = re.compile(r'[\x00-\x1F\x7F]', flags=re.UNICODE)
@@ -163,7 +184,7 @@ def format_number(num: int) -> str:
     if num < 1_000:
         return str(num)
     elif num < 1_000_000:
-        return f"{num / 1_000:.2f}K". rstrip("0").rstrip(".")
+        return f"{num / 1_000:.2f}K".rstrip("0").rstrip(".")
     elif num < 1_000_000_000:
         return f"{num / 1_000_000:.2f}M".rstrip("0").rstrip(".")
     else:
