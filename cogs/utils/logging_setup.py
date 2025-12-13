@@ -28,6 +28,8 @@ Important operational notes:
       with non-serializable objects converted via repr() to avoid serialization failures.
     - The default UTC timestamping for JSON logs facilitates correlation across systems
       running in different time zones.
+    - The setup reduces verbosity for noisy third-party libraries by setting WARNING
+      for `asyncpg`, `aiohttp`, and `discord` (adjustable if you need more detailed DB logs).
 """
 
 DEFAULT_LOG_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "..", "logs")
@@ -211,7 +213,7 @@ def setup_logging(
       of adding duplicate handlers. This design avoids double-logging when code calls this
       function multiple times (useful in unit tests or interactive sessions).
     - The function reduces verbosity for noisy third-party libraries by setting WARNING
-      for `aiosqlite`, `aiohttp`, and `discord`.
+      for `asyncpg`, `aiohttp`, and `discord`.
     """
     log_dir = log_dir or DEFAULT_LOG_DIR
     os.makedirs(log_dir, exist_ok=True)
@@ -267,6 +269,6 @@ def setup_logging(
             h.setLevel(level)
 
     # Reduce excessive log noise from common libraries unless the operator overrides them.
-    logging.getLogger("aiosqlite").setLevel(logging.WARNING)
+    logging.getLogger("asyncpg").setLevel(logging.WARNING)
     logging.getLogger("aiohttp").setLevel(logging.WARNING)
     logging.getLogger("discord").setLevel(logging.WARNING)

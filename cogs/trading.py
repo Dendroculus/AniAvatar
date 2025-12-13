@@ -32,10 +32,10 @@ Contents:
 
 Notes:
 - This module expects a Progression cog to be present with:
-  - conn: an async DB connection supporting execute / fetchone / fetchall.
+  - pool: asyncpg pool
   - db_lock: an asyncio lock to serialize DB writes.
   - get_user, add_exp, get_coins, remove_coins, announce_level_up, MAX_LEVEL attributes/methods.
-- All behavioral code is left unchanged; only docstrings/comments were added.
+- All behavioral code is left unchanged; only the storage layer now uses asyncpg/PostgreSQL.
 """
 
 COG_PATH = os.path.dirname(os.path.abspath(__file__))
@@ -51,13 +51,13 @@ EXP_EMOJI = f"{CustomEmojis['EXP']}"
 
 POTION_ITEMS = (SMALL_EXP_POTION, MEDIUM_EXP_POTION, LARGE_EXP_POTION, LEVEL_SKIP_TOKEN)
 
-SQL_USER_INV_SELECT = "SELECT item_name, quantity FROM user_inventory WHERE user_id = ? AND guild_id = ?"
+SQL_USER_INV_SELECT = "SELECT item_name, quantity FROM user_inventory WHERE user_id = $1 AND guild_id = $2"
 SQL_UPSERT_USER_INV = """
 INSERT INTO user_inventory (user_id, guild_id, item_name, quantity)
-VALUES (?, ?, ?, ?)
-ON CONFLICT(user_id, guild_id, item_name) DO UPDATE SET quantity = quantity + ?
+VALUES ($1, $2, $3, $4)
+ON CONFLICT(user_id, guild_id, item_name) DO UPDATE SET quantity = user_inventory.quantity + EXCLUDED.quantity
 """
-SQL_SELECT_PRICE_EMOJI = "SELECT price, emoji FROM shop_items WHERE name = ?"
+SQL_SELECT_PRICE_EMOJI = "SELECT price, emoji FROM shop_items WHERE name = $1"
 
 def format_coins(coins: int) -> str:
     """
@@ -185,39 +185,38 @@ class InventorySelect(discord.ui.Select):
         try:
             selected_item = self.values[0]
             await interaction.response.defer()
-            conn = self.cog.progression_cog.conn
+            pool = self.cog.progression_cog.pool
             lock = self.cog.progression_cog.db_lock
 
-            async with lock:
-                async with conn.execute(SQL_SELECT_PRICE_EMOJI, (selected_item,)) as cur:
-                    row = await cur.fetchone()
-                selected_emoji = row[1] if row and row[1] else "📦"
+            async with lock, pool.acquire() as conn:
+                row = await conn.fetchrow(SQL_SELECT_PRICE_EMOJI, selected_item)
+                selected_emoji = row["emoji"] if row and row["emoji"] else "📦"
 
-                async with conn.execute(
-                    "SELECT quantity FROM user_inventory WHERE user_id = ? AND guild_id = ? AND item_name = ?",
-                    (self.user_id, self.guild_id, selected_item)
-                ) as cur:
-                    row = await cur.fetchone()
-                if not row or row[0] <= 0:
+                row_qty = await conn.fetchrow(
+                    "SELECT quantity FROM user_inventory WHERE user_id = $1 AND guild_id = $2 AND item_name = $3",
+                    self.user_id, self.guild_id, selected_item
+                )
+                if not row_qty or row_qty["quantity"] <= 0:
                     await interaction.followup.send("❌ You don't own this item anymore.", ephemeral=True)
                     return
 
                 if selected_item in POTION_ITEMS:
-                    async with conn.execute("SELECT level FROM users WHERE user_id = ? AND guild_id = ?", (self.user_id, self.guild_id)) as cur:
-                        row_lvl = await cur.fetchone()
-                    if row_lvl and row_lvl[0] >= self.cog.progression_cog.MAX_LEVEL:
+                    row_lvl = await conn.fetchrow(
+                        "SELECT level FROM users WHERE user_id = $1 AND guild_id = $2",
+                        self.user_id, self.guild_id
+                    )
+                    if row_lvl and row_lvl["level"] >= self.cog.progression_cog.MAX_LEVEL:
                         await interaction.followup.send(f"{MinoriEmojis['MinoriWink']} You’ve already reached the max level! You can’t use {EXP_EMOJI} items anymore.", ephemeral=True)
                         return
 
                 await conn.execute(
-                    "UPDATE user_inventory SET quantity = quantity - 1 WHERE user_id = ? AND guild_id = ? AND item_name = ?",
-                    (self.user_id, self.guild_id, selected_item)
+                    "UPDATE user_inventory SET quantity = quantity - 1 WHERE user_id = $1 AND guild_id = $2 AND item_name = $3",
+                    self.user_id, self.guild_id, selected_item
                 )
                 await conn.execute(
-                    "DELETE FROM user_inventory WHERE user_id = ? AND guild_id = ? AND item_name = ? AND quantity <= 0",
-                    (self.user_id, self.guild_id, selected_item)
+                    "DELETE FROM user_inventory WHERE user_id = $1 AND guild_id = $2 AND item_name = $3 AND quantity <= 0",
+                    self.user_id, self.guild_id, selected_item
                 )
-                await conn.commit()
 
             feedback_msg = f"You used {selected_emoji} **{selected_item}**!"
 
@@ -233,27 +232,25 @@ class InventorySelect(discord.ui.Select):
                 rewards = await self.cog.apply_mystery_box(self.user_id, self.guild_id)
                 if rewards:
                     reward_lines = []
-                    lock = self.cog.progression_cog.db_lock
-                    async with lock:
-                        async with conn.execute("SELECT name, emoji FROM shop_items") as cur:
-                            emap = dict(await cur.fetchall())
+                    # fetch emojis mapping
+                    async with self.cog.progression_cog.pool.acquire() as conn:
+                        emap_rows = await conn.fetch("SELECT name, emoji FROM shop_items")
+                        emap = {r["name"]: r["emoji"] for r in emap_rows}
                     for item, qty in rewards:
                         emoji = emap.get(item, "📦")
                         reward_lines.append(f"{qty}x {emoji} {item}")
                     feedback_msg = f"{ShopEmojis['MysteryBox']} You opened a {MYSTERY_BOX_NAME} and got:\n" + "\n".join(reward_lines)
 
-            lock = self.cog.progression_cog.db_lock
-            async with lock:
-                async with conn.execute(SQL_USER_INV_SELECT, (self.user_id, self.guild_id)) as cur:
-                    raw_items = await cur.fetchall()
+            # reload inventory
+            async with self.cog.progression_cog.db_lock, self.cog.progression_cog.pool.acquire() as conn:
+                raw_items = await conn.fetch(SQL_USER_INV_SELECT, self.user_id, self.guild_id)
 
                 items = []
                 for name, qty in raw_items:
                     if qty <= 0:
                         continue
-                    async with conn.execute("SELECT emoji FROM shop_items WHERE name = ?", (name,)) as cur:
-                        erow = await cur.fetchone()
-                    emoji = erow[0] if erow else "📦"
+                    erow = await conn.fetchrow("SELECT emoji FROM shop_items WHERE name = $1", name)
+                    emoji = erow["emoji"] if erow else "📦"
                     items.append((name, qty, emoji))
 
             if not items:
@@ -275,7 +272,7 @@ class InventorySelect(discord.ui.Select):
 
         finally:
             async def release_lock():
-                await asyncio.sleep(2)  
+                await asyncio.sleep(2)
                 self.cog.user_locks[self.user_id] = False
             self._release_lock_task = asyncio.create_task(release_lock())
 
@@ -362,7 +359,6 @@ class ShopSelect(discord.ui.Select):
         if hasattr(self.parent_view, "reset_timer"):
             self.parent_view.reset_timer()
 
-        # Prevent concurrent clicks for more robustness
         if getattr(self.parent_view, "processing", False):
             await interaction.response.send_message("A purchase is already being processed. Please wait.", ephemeral=True)
             return
@@ -378,14 +374,13 @@ class ShopSelect(discord.ui.Select):
         try:
             selected_item = self.values[0]
 
-            conn = self.progression_cog.conn
-            async with conn.execute(SQL_SELECT_PRICE_EMOJI, (selected_item,)) as cur:
-                row = await cur.fetchone()
+            async with self.progression_cog.pool.acquire() as conn:
+                row = await conn.fetchrow(SQL_SELECT_PRICE_EMOJI, selected_item)
 
             if not row:
                 await interaction.followup.send("❌ This item no longer exists in the shop.", ephemeral=True)
                 return
-            price, selected_emoji = row
+            price, selected_emoji = row["price"], row["emoji"]
 
             NOT_ENOUGH_COINS_MSG = "❌ You don't have enough coins, nothing purchased."
             coins = await self.progression_cog.get_coins(self.user_id, self.guild_id)
@@ -398,21 +393,19 @@ class ShopSelect(discord.ui.Select):
                 await interaction.followup.send(NOT_ENOUGH_COINS_MSG, ephemeral=True)
                 return
 
-            lock = self.progression_cog.db_lock
-            async with lock:
+            async with self.progression_cog.db_lock, self.progression_cog.pool.acquire() as conn:
                 await conn.execute(
                     """
                     INSERT INTO user_inventory (user_id, guild_id, item_name, quantity)
-                    VALUES (?, ?, ?, 1)
-                    ON CONFLICT(user_id, guild_id, item_name) DO UPDATE SET quantity = quantity + 1
+                    VALUES ($1, $2, $3, 1)
+                    ON CONFLICT(user_id, guild_id, item_name) DO UPDATE SET quantity = user_inventory.quantity + 1
                     """,
-                    (self.user_id, self.guild_id, selected_item),
+                    self.user_id, self.guild_id, selected_item
                 )
-                await conn.commit()
 
             new_balance = await self.progression_cog.get_coins(self.user_id, self.guild_id)
-            async with conn.execute("SELECT name, price, emoji FROM shop_items") as cur:
-                items = await cur.fetchall()
+            async with self.progression_cog.pool.acquire() as conn:
+                items = await conn.fetch("SELECT name, price, emoji FROM shop_items")
 
             embed = discord.Embed(
                 title="🛒 Minori Bargains",
@@ -422,7 +415,8 @@ class ShopSelect(discord.ui.Select):
             embed.set_thumbnail(url=SHOP_ICON_URL)
 
             new_options = []
-            for name, item_price, item_emoji in items:
+            for r in items:
+                name, item_price, item_emoji = r["name"], r["price"], r["emoji"]
                 embed.add_field(name=f"{item_emoji} {name}", value=f"{item_price} coins", inline=False)
                 new_options.append(
                     discord.SelectOption(
@@ -442,12 +436,10 @@ class ShopSelect(discord.ui.Select):
             await interaction.followup.send(f"You bought **1x {selected_item}** {selected_emoji}!", ephemeral=True)
 
         finally:
-            # Re-enable
             self.disabled = False
             self.parent_view.processing = False
             if msg_to_edit:
                 await msg_to_edit.edit(view=self.parent_view)
-
 
 class ShopView(discord.ui.View):
     """
@@ -542,40 +534,42 @@ class Trading(commands.Cog):
             print("[Shop] Progression cog not loaded! Coins won't work properly.")
             return
 
-        conn = self.progression_cog.conn
-        await conn.execute("""
-            CREATE TABLE IF NOT EXISTS shop_items (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT UNIQUE,
-                type TEXT,
-                price INTEGER,
-                emoji TEXT
-            )
-        """)
-        await conn.execute("""
-            CREATE TABLE IF NOT EXISTS user_inventory (
-                user_id INTEGER,
-                guild_id INTEGER,
-                item_name TEXT,
-                quantity INTEGER,
-                PRIMARY KEY(user_id, guild_id, item_name)
-            )
-        """)
-        await conn.commit()
+        # ensure pool exists
+        if self.progression_cog.pool is None:
+            await self.progression_cog._ensure_pool()
 
-        default_items = [
-            (SMALL_EXP_POTION, "consumable", 125, f"{ShopEmojis['SmallExpBoostPotion']}"),
-            (MEDIUM_EXP_POTION, "consumable", 250, f"{ShopEmojis['MediumExpBoostPotion']}"),
-            (LARGE_EXP_POTION, "consumable", 500, f"{ShopEmojis['LargeExpBoostPotion']}"),
-            (LEVEL_SKIP_TOKEN, "consumable", 1500, f"{ShopEmojis['LevelSkipToken']}"),
-            (MYSTERY_BOX_NAME, "consumable", 3000, f"{ShopEmojis['MysteryBox']}"),
-        ]
-        for name, type_, price, emoji in default_items:
-            await conn.execute(
-                "INSERT OR IGNORE INTO shop_items (name, type, price, emoji) VALUES (?, ?, ?, ?)",
-                (name, type_, price, emoji)
-            )
-        await conn.commit()
+        async with self.progression_cog.pool.acquire() as conn:
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS shop_items (
+                    id BIGSERIAL PRIMARY KEY,
+                    name TEXT UNIQUE,
+                    type TEXT,
+                    price BIGINT,
+                    emoji TEXT
+                )
+            """)
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS user_inventory (
+                    user_id BIGINT,
+                    guild_id BIGINT,
+                    item_name TEXT,
+                    quantity BIGINT,
+                    PRIMARY KEY(user_id, guild_id, item_name)
+                )
+            """)
+
+            default_items = [
+                (SMALL_EXP_POTION, "consumable", 125, f"{ShopEmojis['SmallExpBoostPotion']}"),
+                (MEDIUM_EXP_POTION, "consumable", 250, f"{ShopEmojis['MediumExpBoostPotion']}"),
+                (LARGE_EXP_POTION, "consumable", 500, f"{ShopEmojis['LargeExpBoostPotion']}"),
+                (LEVEL_SKIP_TOKEN, "consumable", 1500, f"{ShopEmojis['LevelSkipToken']}"),
+                (MYSTERY_BOX_NAME, "consumable", 3000, f"{ShopEmojis['MysteryBox']}"),
+            ]
+            for name, type_, price, emoji in default_items:
+                await conn.execute(
+                    "INSERT INTO shop_items (name, type, price, emoji) VALUES ($1, $2, $3, $4) ON CONFLICT (name) DO NOTHING",
+                    name, type_, price, emoji
+                )
 
     async def apply_potion_effect(self, user_id: int, guild_id: int, item_name: str, channel: discord.TextChannel = None):
         """
@@ -611,14 +605,14 @@ class Trading(commands.Cog):
             return 0, ""
 
         old_level = level
-        new_level, _ , leveled_up = await self.progression_cog.add_exp(user_id, guild_id, gain)
+        new_level, _, leveled_up = await self.progression_cog.add_exp(user_id, guild_id, gain)
 
         extra_msg = ""
         if leveled_up and channel:
             await self.progression_cog.announce_level_up(guild_id, user_id, new_level, old_level, channel)
 
         return gain, extra_msg
-    
+
     async def apply_mystery_box(self, user_id: int, guild_id: int):
         """
         Open a Mystery Box and randomly award items to the user, writing to DB.
@@ -626,44 +620,27 @@ class Trading(commands.Cog):
         Returns:
             List of (item_name, amount) awarded to the user.
         """
-        conn = self.progression_cog.conn
-        lock = self.progression_cog.db_lock
         rewards = []
-
-        async with lock:
+        async with self.progression_cog.db_lock, self.progression_cog.pool.acquire() as conn:
             if random.random() < 0.15:
                 amount = random.randint(1, 3)
-                await conn.execute(
-                    SQL_UPSERT_USER_INV,
-                    (user_id, guild_id, LEVEL_SKIP_TOKEN, amount, amount)
-                )
+                await conn.execute(SQL_UPSERT_USER_INV, user_id, guild_id, LEVEL_SKIP_TOKEN, amount)
                 rewards.append((LEVEL_SKIP_TOKEN, amount))
 
             if random.random() < 0.20:
                 amount = random.randint(1, 3)
-                await conn.execute(
-                    SQL_UPSERT_USER_INV,
-                    (user_id, guild_id, LARGE_EXP_POTION, amount, amount)
-                )
+                await conn.execute(SQL_UPSERT_USER_INV, user_id, guild_id, LARGE_EXP_POTION, amount)
                 rewards.append((LARGE_EXP_POTION, amount))
 
             if random.random() < 0.50:
                 amount = random.randint(1, 3)
-                await conn.execute(
-                    SQL_UPSERT_USER_INV,
-                    (user_id, guild_id, MEDIUM_EXP_POTION, amount, amount)
-                )
+                await conn.execute(SQL_UPSERT_USER_INV, user_id, guild_id, MEDIUM_EXP_POTION, amount)
                 rewards.append((MEDIUM_EXP_POTION, amount))
 
-            await conn.execute(
-                SQL_UPSERT_USER_INV,
-                (user_id, guild_id, SMALL_EXP_POTION, 3, 3)
-            )
+            await conn.execute(SQL_UPSERT_USER_INV, user_id, guild_id, SMALL_EXP_POTION, 3)
             rewards.append((SMALL_EXP_POTION, 3))
 
-            await conn.commit()
         return rewards
-
 
     @commands.hybrid_command(name="shop", description="View the shop and buy items!")
     @commands.guild_only()
@@ -683,9 +660,8 @@ class Trading(commands.Cog):
             await ctx.send("⚠️ You already have a shop open! Close it first.", ephemeral=True)
             return
 
-        conn = self.progression_cog.conn
-        async with conn.execute("SELECT name, price, emoji FROM shop_items") as cur:
-            items = await cur.fetchall()
+        async with self.progression_cog.pool.acquire() as conn:
+            items = await conn.fetch("SELECT name, price, emoji FROM shop_items")
         if not items:
             await ctx.send("Shop is empty.")
             return
@@ -697,25 +673,24 @@ class Trading(commands.Cog):
             color=discord.Color.dark_purple()
         )
         embed.set_thumbnail(url=SHOP_ICON_URL)
-        for name, price, emoji in items:
-            embed.add_field(name=f"{emoji} {name}", value=f"{price} coins", inline=False)
+        for r in items:
+            embed.add_field(name=f"{r['emoji']} {r['name']}", value=f"{r['price']} coins", inline=False)
 
         options = [
-            discord.SelectOption(label=name,
-                                description=f"Buy {name} for {price} coins",
-                                emoji=emoji,
-                                value=name)
-            for name, price, emoji in items
+            discord.SelectOption(label=r["name"],
+                                description=f"Buy {r['name']} for {r['price']} coins",
+                                emoji=r["emoji"],
+                                value=r["name"])
+            for r in items
         ]
 
         view = ShopView(self.progression_cog, user_id, guild_id, options, parent_cog=self, timeout=180)
         msg = await ctx.send(embed=embed, view=view)
 
         view.message = msg
-        view.select.message = msg  
+        view.select.message = msg
         self.open_shops.setdefault(guild_id, {})[user_id] = view
 
-        
     @commands.hybrid_command(name="inventory", description="Check your inventory and items")
     @commands.guild_only()
     async def inventory(self, ctx):
@@ -732,19 +707,18 @@ class Trading(commands.Cog):
         if self.open_inventories.get(guild_id, {}).get(user_id):
             await ctx.send("⚠️ You already have an inventory open! Close it first.", ephemeral=True)
             return
-    
-        conn = self.progression_cog.conn
-        async with conn.execute(SQL_USER_INV_SELECT, (user_id, guild_id)) as cur:
-            raw_items = await cur.fetchall()
+
+        async with self.progression_cog.pool.acquire() as conn:
+            raw_items = await conn.fetch(SQL_USER_INV_SELECT, user_id, guild_id)
 
         items = []
-        for name, qty in raw_items:
-            if qty <= 0:
-                continue
-            async with conn.execute("SELECT emoji FROM shop_items WHERE name = ?", (name,)) as cur:
-                row = await cur.fetchone()
-            emoji = row[0] if row else "📦"
-            items.append((name, qty, emoji))
+        async with self.progression_cog.pool.acquire() as conn:
+            for name, qty in raw_items:
+                if qty <= 0:
+                    continue
+                erow = await conn.fetchrow("SELECT emoji FROM shop_items WHERE name = $1", name)
+                emoji = erow["emoji"] if erow else "📦"
+                items.append((name, qty, emoji))
 
         if not items:
             await ctx.send("Your inventory is empty.")
@@ -760,9 +734,9 @@ class Trading(commands.Cog):
 
         view = InventoryView(self, user_id, guild_id, items)
         msg = await ctx.send(embed=embed, view=view)
-        view.message = msg 
+        view.message = msg
         self.open_inventories.setdefault(guild_id, {})[user_id] = msg
-        
+
     @commands.hybrid_command(name="donate", description="Give an item to another user")
     @commands.guild_only()
     async def donate(self, ctx, member: discord.Member):
@@ -774,16 +748,16 @@ class Trading(commands.Cog):
         if member.bot:
             await ctx.send(f"{MinoriEmojis['MinoriConfused']} You cannot donate to bots.")
             return
-        
+
         donor_id = ctx.author.id
         receiver_id = member.id
-        
+
         if donor_id == receiver_id:
             await ctx.send(f"{MinoriEmojis['MinoriConfused']} You cannot donate to yourself.")
             return
-        
+
         guild_id = ctx.guild.id
-        conn = self.progression_cog.conn
+        conn_pool = self.progression_cog.pool
 
         now = datetime.now(timezone.utc)
         if donor_id in self.donate_cooldowns and now < self.donate_cooldowns[donor_id]:
@@ -791,16 +765,17 @@ class Trading(commands.Cog):
             await ctx.send(f"{CustomEmojis['TIME']} You can donate again in {str(remaining).split('.')[0]}")
             return
 
-        async with conn.execute(SQL_USER_INV_SELECT, (donor_id, guild_id)) as cur:
-            items = [(name, qty) for name, qty in await cur.fetchall() if qty > 0]
+        async with conn_pool.acquire() as conn:
+            raw_inv = await conn.fetch(SQL_USER_INV_SELECT, donor_id, guild_id)
+            items = [(r["item_name"], r["quantity"]) for r in raw_inv if r["quantity"] > 0]
         if not items:
             await ctx.send("🧯 Your inventory is empty, cannot donate.")
             return
 
-        async with conn.execute("SELECT name, emoji FROM shop_items") as cur:
-            emoji_map = dict(await cur.fetchall())
+        async with conn_pool.acquire() as conn:
+            emap_rows = await conn.fetch("SELECT name, emoji FROM shop_items")
+            emoji_map = {r["name"]: r["emoji"] for r in emap_rows}
 
-        
         caps = {
             MYSTERY_BOX_NAME: 1,
             LEVEL_SKIP_TOKEN: 1,
@@ -817,7 +792,7 @@ class Trading(commands.Cog):
                 value=name
             ) for name, qty in items
         ]
-        
+
         class DonateView(discord.ui.View):
             def __init__(self, author_id, *args, **kwargs):
                 super().__init__(*args, **kwargs)
@@ -830,7 +805,6 @@ class Trading(commands.Cog):
                     )
                     return False
                 return True
-
 
         class DonateAmountModal(discord.ui.Modal):
             def __init__(self, item_name, max_amount=None):
@@ -880,23 +854,32 @@ class Trading(commands.Cog):
 
         async def finalize_donate(item_name, amount, interaction):
             lock = self.progression_cog.db_lock
-            async with lock:
-                async with conn.execute("SELECT quantity FROM user_inventory WHERE user_id = ? AND guild_id = ? AND item_name = ?", (donor_id, guild_id, item_name)) as cur:
-                    row = await cur.fetchone()
-                if not row or row[0] < amount:
+            async with lock, conn_pool.acquire() as conn:
+                row = await conn.fetchrow(
+                    "SELECT quantity FROM user_inventory WHERE user_id = $1 AND guild_id = $2 AND item_name = $3",
+                    donor_id, guild_id, item_name
+                )
+                if not row or row["quantity"] < amount:
                     await interaction.response.send_message("❌ You don't have enough of this item.", ephemeral=True)
                     return
 
-                await conn.execute("UPDATE user_inventory SET quantity = quantity - ? WHERE user_id = ? AND guild_id = ? AND item_name = ?",
-                        (amount, donor_id, guild_id, item_name))
-                await conn.execute("DELETE FROM user_inventory WHERE user_id = ? AND guild_id = ? AND item_name = ? AND quantity <= 0",
-                        (donor_id, guild_id, item_name))
+                await conn.execute(
+                    "UPDATE user_inventory SET quantity = quantity - $1 WHERE user_id = $2 AND guild_id = $3 AND item_name = $4",
+                    amount, donor_id, guild_id, item_name
+                )
+                await conn.execute(
+                    "DELETE FROM user_inventory WHERE user_id = $1 AND guild_id = $2 AND item_name = $3 AND quantity <= 0",
+                    donor_id, guild_id, item_name
+                )
 
-                await conn.execute("""INSERT INTO user_inventory (user_id, guild_id, item_name, quantity)
-                            VALUES (?, ?, ?, ?)
-                            ON CONFLICT(user_id, guild_id, item_name) DO UPDATE SET quantity = quantity + ?""",
-                        (receiver_id, guild_id, item_name, amount, amount))
-                await conn.commit()
+                await conn.execute(
+                    """
+                    INSERT INTO user_inventory (user_id, guild_id, item_name, quantity)
+                    VALUES ($1, $2, $3, $4)
+                    ON CONFLICT(user_id, guild_id, item_name) DO UPDATE SET quantity = user_inventory.quantity + EXCLUDED.quantity
+                    """,
+                    receiver_id, guild_id, item_name, amount
+                )
 
             self.donate_cooldowns[donor_id] = datetime.now(timezone.utc) + timedelta(hours=2)
 
