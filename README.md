@@ -15,7 +15,6 @@ EN | [中文](docs/readmeCN.md)
 
 **AniAvatar** (appearing on Discord as **Minori**) is a feature-rich bot built with Python and `discord.py`. It automates a wide range of anime-related tasks, including searching for information, fetching profile pictures, hosting trivia games, and managing a server-wide leveling and economy system.
 
----
 
 ## ✨ Features
 
@@ -61,7 +60,6 @@ EN | [中文](docs/readmeCN.md)
   <img src="docs/screenshots/help_command.png" width="600">
 </details>
 
----
 
 ## 🤖 Commands
 
@@ -86,7 +84,6 @@ EN | [中文](docs/readmeCN.md)
 | `/help` | General | Shows this list of all available commands. |
 | `/ping` | General | Checks the bot's latency to Discord's servers. |
 
----
 
 ## 🚀 Getting Started (Self-Hosting)
 
@@ -96,29 +93,44 @@ To run your own instance of Minori, follow these steps.
 - Python 3.11+
 - Git
 - A Discord Bot Token from the [Discord Developer Portal](https://discord.com/developers/applications).
+- PostgreSQL (production) or local Postgres (for development). See notes below for Docker quick-start.
 
 ### 2. Installation
 ```bash
 # Clone the repository
-git clone [https://github.com/Dendroculus/AniAvatar.git](https://github.com/Dendroculus/AniAvatar.git)
+git clone https://github.com/Dendroculus/AniAvatar.git
 
 # Navigate to the project directory
 cd AniAvatar
+
+# Create a virtual environment (recommended)
+python -m venv .venv
+.venv\Scripts\activate   # Windows
+source .venv/bin/activate  # macOS / Linux
 
 # Install the required dependencies
 pip install -r requirements.txt
 ```
 
 ### 3. Configuration
+
 This bot requires several API keys and custom emojis to function correctly.
 
 #### A. Environment Setup
 In your project directory, create a `.env` file and add the following keys. This file is included in `.gitignore` to prevent you from accidentally sharing your secrets.
+
 ```env
 DISCORD_TOKEN=your_discord_token
 GOOGLE_API_KEY=your_google_api_key
 GOOGLE_CSE_ID=your_google_cse_id
+
+# Database (PostgreSQL)
+DATABASE_URL=postgresql://<user>:<encoded_password>@<host>:5432/<database>
 ```
+
+Notes on DATABASE_URL:
+- Example: postgresql://postgres:secret%4023@localhost:5432/MinoriDB
+- Percent-encode special characters in the password (use Python's urllib.parse.quote_plus or other URL-encoding tools).
 
 #### B. Google Custom Search API
 The `/animepfp` command requires a Google API Key and a Custom Search Engine ID.
@@ -142,27 +154,64 @@ The `/animepfp` command requires a Google API Key and a Custom Search Engine ID.
 The bot uses custom emojis for its UI.
 1.  Upload all emojis from the `/assets/other essentials emojis/` directory to a Discord server where your bot is present.
 2.  Enable Developer Mode in Discord, right-click each emoji, and copy its ID.
-3.  You must update the emoji IDs in the code (primarily in `games.py` and `progression.py`) to match the IDs of your newly uploaded emojis.
+3.  Update the emoji IDs in the code (primarily in `games.py`, `progression.py`, and `cogs/utils/emojis.py`) to match the uploaded emoji IDs.
 
-### 4. Run the Bot
+### 4. Database (Postgres) & Migration from SQLite
+
+This project originally used SQLite for local storage. The bot now uses PostgreSQL (asyncpg) in production/development. If you have an existing SQLite DB (data/minori.db) and want to migrate:
+
+A. Quick local Postgres (Docker)
+```bash
+# Run a local Postgres container
+docker run --name ani-pg -e POSTGRES_PASSWORD=postgres -e POSTGRES_USER=postgres -e POSTGRES_DB=MinoriDB -p 5432:5432 -d postgres
+
+# Example DATABASE_URL for local Docker:
+# postgresql://postgres:postgres@127.0.0.1:5432/MinoriDB
+```
+
+B. Migration script (included)
+A migration helper script migrate_sqlite_to_postgres.py is included to convert your SQLite file to Postgres schema + rows.
+
+Recommended flow:
+
+1. Stop the bot (ensure no writes to the SQLite DB)
+2. Backup your SQLite DB:
+```cmd
+copy data\minori.db data\minori.db.bak
+```
+3. Checkpoint WAL (if present) to ensure consistency:
+```cmd
+python -c "import sqlite3; c=sqlite3.connect('data\\minori.db'); c.execute('pragma wal_checkpoint(FULL)'); c.close(); print('checkpoint done')"
+```
+4. Dry-run to preview DDL (no data copied):
+```cmd
+python migrate_sqlite_to_postgres.py --sqlite-file data\minori.db --database-url "%DATABASE_URL%" --dry-run
+```
+5. Run the real migration (copies data):
+```cmd
+python migrate_sqlite_to_postgres.py --sqlite-file data\minori.db --database-url "%DATABASE_URL%"
+```
+6. Optional: convert columns to more specific types (BIGINT, INTEGER, JSONB) and add indexes — instructions and SQL are available in the docs or migration script comments.
+
+C. If you don't need to migrate (fresh install)
+- Create the Postgres database and user, set DATABASE_URL, and the bot's cog initialization will create required tables automatically (init code uses CREATE TABLE IF NOT EXISTS).
+
+### 5. Run the Bot
 Once configured, you can start the bot with:
 ```bash
 python main.py
 ```
 
----
 
 ## 🛠 Built With
 - **Framework & Libraries**: Python 3.11+, [discord.py](https://pypi.org/project/discord.py/), [aiohttp](https://docs.aiohttp.org/), [Pillow (PIL)](https://pillow.readthedocs.io/en/stable/)
 - **APIs**: [AniList API (GraphQL)](https://anilist.co/graphiql), [Google Custom Search API](https://developers.google.com/custom-search)
-- **Database**: SQLite for local storage of profiles, stats, and leveling data.
+- **Database**: PostgreSQL (asyncpg). A lightweight migration helper is provided to import legacy SQLite data.
 
----
 
 ## 📜 License
 This project is licensed under the **MIT License**. See the [LICENSE](LICENSE) file for details.
 
----
 
 ## 🙌 Acknowledgements
 - Thanks to [Noto Fonts](https://github.com/notofonts/noto-cjk/releases) for providing CJK font support for the profile cards.
