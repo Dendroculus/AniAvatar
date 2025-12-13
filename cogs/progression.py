@@ -31,7 +31,6 @@ Purpose:
 
 Design notes and important operational guidance:
 - Concurrency:
-  - Database access is serialized by `self.db_lock` to avoid concurrent writes from
     multiple coroutines (within a single process).
   - Image rendering is offloaded to threads and controlled by a semaphore (`_render_semaphore`)
     to limit concurrency and avoid saturating CPU or memory with large Pillow tasks.
@@ -251,7 +250,6 @@ class Progression(commands.Cog):
         self.bot = bot
         self.cooldowns = {}
         self.pool: asyncpg.Pool | None = None
-        self.db_lock = asyncio.Lock()
 
         cpu_count = os.cpu_count() or 2
         max_renders = max(2, cpu_count - 1)
@@ -540,7 +538,6 @@ class Progression(commands.Cog):
         """
         Return the coin balance for a user in a guild, creating the row if missing.
 
-        This function uses the db_lock to protect writes and returns an integer.
         """
         await self._ensure_pool()
         async with self.pool.acquire() as conn:
@@ -560,8 +557,7 @@ class Progression(commands.Cog):
         """
         Add `amount` coins to a user's balance; creates the row if necessary.
 
-        Uses an INSERT OR UPDATE pattern to avoid race conditions and keeps the write
-        inside the db_lock.
+        Uses an INSERT OR UPDATE pattern to avoid race conditions 
         """
         if amount == 0:
             return
