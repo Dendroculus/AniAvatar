@@ -17,82 +17,129 @@ Purpose
 -------
 Persistence and UI helpers for the bot's polling subsystem.
 
-This module encapsulates:
-- A small asyncpg-based persistence layer for polls (init, save, load, purge).
-- A migration-safe initialization routine that will create the required polls table
-  and attempt best-effort column migrations.
-- Helper functions to save active polls and finalize/record results.
-- PollView — an interactive discord.ui.View that represents a poll in memory and
-  synchronizes state to the DB as users vote or the poll is updated.
+This module contains:
+- a small asyncpg-backed persistence layer for polls (init_db_pool, init_db,
+  save_active_poll, record_poll_result, load_active_polls, purge_finished_polls).
+- a PollView / Modal-based UI used to create and run polls inside Discord.
+- runtime safety: per-connection statement timeouts are applied to protect the
+  connection pool from long-running queries.
 
 Design & Operational Notes
+--------------------------
+1) Concurrency model
+   - This runtime intentionally does NOT serialize database writes using a
+     Python-level asyncio.Lock. Rely on PostgreSQL for concurrency control and
+     use of INSERT ... ON CONFLICT for atomic upserts. Removing the lock
+     improves throughput when many users vote concurrently.
 
-- Database pool:
-  - A module-level asyncpg Pool is lazily created with init_db_pool() from the
-    DATABASE_URL environment variable (or an explicit DSN passed to init_db_pool).
-  - The pool is cached in _POOL and closed by close_db_pool().
-  - _DB_LOCK (asyncio.Lock) serializes schema changes and writes that must not run
-    concurrently (e.g., migrations and normalization).
+2) Storage format
+   - JSON data (options, votes, winners, counts) is stored in JSONB columns.
+     JSONB is compact, indexable, and allows querying inside JSON structures.
+   - end_time is stored as a DOUBLE PRECISION UNIX epoch timestamp (seconds).
+   - created_at remains a TIMESTAMPTZ with DEFAULT CURRENT_TIMESTAMP.
 
-- Storage format:
-  - options, votes, winners, counts are stored as TEXT in the DB (JSON-serialized).
-    This keeps the schema portable and backward-compatible with the existing
-    SQLite layout. Consumer code should json.loads or json.dumps when reading or
-    writing these fields. The init_db function normalizes NULL options/votes to
-    canonical JSON shapes (empty list / empty dict).
-  - Timestamps:
-    - end_time is stored as a DOUBLE PRECISION (UNIX epoch seconds) to preserve
-      cross-language portability. Consumers may convert to datetime via datetime.fromtimestamp(..., timezone.utc).
-    - created_at is TIMESTAMPTZ with a default of CURRENT_TIMESTAMP.
+3) Statement timeouts
+   - All connections used by this module call _set_stmt_timeout(conn) to set a
+     local statement_timeout. This avoids a single stuck query tying up the
+     pool.
 
-- Resiliency:
-  - Most DB operations are best-effort: failures are printed but do not raise to
-    prevent bot startup from failing. You can change this policy to raise
-    exceptions if you prefer hard failures.
+4) Migration practices (VERY IMPORTANT)
+   - The runtime init_db() creates the table if missing but does NOT attempt
+     intrusive, blind ALTER TABLE migrations. Migrations should be executed once
+     in a controlled manner (manual SQL or a migration tool).
+   - Recommended one-time migration steps (run in psql or your migration system):
+       -- sanitize common NULL/empty issues
+       UPDATE polls SET options = '[]'  WHERE options IS NULL OR options = '';
+       UPDATE polls SET votes   = '{}'  WHERE votes   IS NULL OR votes   = '';
+       UPDATE polls SET counts  = '{}'  WHERE counts  IS NULL OR counts  = '';
+       UPDATE polls SET winners = 'null' WHERE winners IS NULL OR winners = '';
+
+       -- convert columns to jsonb (run one at a time)
+       ALTER TABLE polls ALTER COLUMN options TYPE jsonb USING COALESCE(options, '[]')::jsonb;
+       ALTER TABLE polls ALTER COLUMN votes   TYPE jsonb USING COALESCE(votes, '{}')::jsonb;
+       ALTER TABLE polls ALTER COLUMN counts  TYPE jsonb USING COALESCE(counts, '{}')::jsonb;
+       ALTER TABLE polls ALTER COLUMN winners TYPE jsonb USING COALESCE(winners, 'null')::jsonb;
+
+       -- optionally set defaults
+       ALTER TABLE polls ALTER COLUMN options SET DEFAULT '[]'::jsonb;
+       ALTER TABLE polls ALTER COLUMN votes   SET DEFAULT '{}'::jsonb;
+
+       -- verify:
+       SELECT column_name, data_type, udt_name
+       FROM information_schema.columns
+       WHERE table_name = 'polls' AND column_name IN ('options','votes','counts','winners');
+
+       Expect udt_name = 'jsonb'.
+
+   - After completing the migration and verification, you can safely keep this
+     runtime code (which assumes JSONB columns). If you prefer automatic runtime
+     migrations, implement a conditional migration that inspects information_schema
+     and only performs ALTERs when necessary (do not swallow exceptions silently).
+
+5) Passing JSON to asyncpg
+   - This module currently serializes Python structures using json.dumps before
+     passing them to asyncpg. asyncpg will accept Python dict/list objects and
+     marshal them to JSONB automatically; passing Python objects avoids the
+     extra Python-side serialization step. Both approaches are valid; the
+     current code keeps explicit dumps for clarity.
+
+6) Query/index recommendations
+   - If you plan to query inside the votes/winners/counts JSONB (e.g., find
+     polls where a user appears in votes), add appropriate indexes (GIN).
+     Example:
+       CREATE INDEX CONCURRENTLY IF NOT EXISTS polls_votes_gin_idx ON polls USING gin (votes jsonb_path_ops);
+   - Design the votes JSON shape deliberately: mapping option -> array_of_ints
+     (user IDs as integers) will make containment queries and indexing easier.
+
+7) Operational checklist before deploying to production
+   - Backup the DB (pg_dump).
+   - Run the migration steps above (if converting from TEXT to JSONB).
+   - Verify column types and data correctness.
+   - Run the bot in a staging environment and test high-throughput voting.
+   - Monitor the DB for long-running queries and tune STMT_TIMEOUT_MS if needed.
+
+8) Safety & maintainability
+   - Keep the per-connection statement_timeout pattern for all DB calls.
+   - Do NOT reintroduce a global Python-level lock; it will reduce concurrency.
+   - Keep migrations out of hot runtime paths or make them conditional and
+     well-logged.
 
 Usage
 -----
-- On bot startup:
+On bot startup:
     await pollUtils.init_db_pool()      # or call with explicit DSN
-    await pollUtils.init_db()          # creates/migrates polls table and normalizes rows
+    await pollUtils.init_db()          # creates polls table if missing (ensure migrations pre-run)
     active = await pollUtils.load_active_polls()  # reload active polls into memory if needed
 
-- When shutting down:
+On shutdown:
     await pollUtils.close_db_pool()
 
-- Creating a poll (example in a command):
-    view = PollInputModal(ctx, timeout_seconds=3600)
-    await ctx.interaction.response.send_modal(view)
-    # The modal handlers create PollView, send message, and call save_active_poll().
-
-- The PollView stores votes in-memory as {option_text: set(user_id, ...)} and
-  writes serialized state to the DB after votes and changes.
-
-Schema (created by init_db)
-
+Schema (expected after migration)
+---------------------------------
 CREATE TABLE polls (
     message_id BIGINT PRIMARY KEY,
     guild_id   BIGINT,
     channel_id BIGINT,
     author_id  BIGINT,
     question   TEXT,
-    options    TEXT,
-    votes      TEXT,
+    options    JSONB DEFAULT '[]'::jsonb,
+    votes      JSONB DEFAULT '{}'::jsonb,
     end_time   DOUBLE PRECISION,
     ended      BOOLEAN DEFAULT FALSE,
-    winners    TEXT,
-    counts     TEXT,
+    winners    JSONB,
+    counts     JSONB,
     total_votes INTEGER,
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 )
 """
 
 _POOL: Optional[asyncpg.Pool] = None
-_DB_LOCK = asyncio.Lock()
 MODAL_PLACEHOLDER = "Leave empty if not needed"
+STMT_TIMEOUT_MS = 2000  # safety valve for long-running queries
 
 
 #  DB Pool Helpers  #
+
 
 async def init_db_pool(dsn: Optional[str] = None, *, min_size: int = 1, max_size: int = 10) -> None:
     """
@@ -100,11 +147,10 @@ async def init_db_pool(dsn: Optional[str] = None, *, min_size: int = 1, max_size
 
     Parameters
     ----------
-    dsn:
-        Optional database DSN. If omitted the function reads DATABASE_URL from
-        environment variables.
-    min_size, max_size:
-        Pool sizing parameters passed to asyncpg.create_pool.
+    dsn: Optional[str]
+        Database DSN - if omitted the function reads DATABASE_URL from the env.
+    min_size, max_size: int
+        Connection pool sizing parameters.
 
     Raises
     ------
@@ -123,7 +169,7 @@ async def close_db_pool() -> None:
     """
     Close and clear the cached connection pool.
 
-    Safe to call multiple times (no-op if the pool is already closed).
+    Safe to call multiple times (no-op if already closed).
     """
     global _POOL
     if _POOL is not None:
@@ -142,64 +188,53 @@ async def get_pool() -> asyncpg.Pool:
     return _POOL
 
 
+async def _set_stmt_timeout(conn: asyncpg.Connection, ms: int = STMT_TIMEOUT_MS):
+    """
+    Apply a per-connection statement timeout to avoid runaway queries.
+
+    This issues: SET LOCAL statement_timeout = <ms>
+    which only affects the current transaction/connection scope.
+    """
+    try:
+        await conn.execute(f"SET LOCAL statement_timeout = {ms}")
+    except Exception:
+        # Best-effort: don't fail the caller if the server disallows this setting.
+        pass
+
 
 async def init_db():
     """
-    Initialize or migrate the polls table.
+    Initialize the polls table if it doesn't exist.
 
-    Responsibilities:
-    - Create the polls table if it doesn't exist.
-    - Perform best-effort migrations (add missing columns).
-    - Normalize NULL options/votes to canonical JSON shapes (options -> '[]', votes -> '{}').
-
-    Concurrency:
-    - Uses _DB_LOCK to serialize DDL and normalization operations to prevent
-      interleaving with concurrent writes.
+    Notes
+    -----
+    - This function will create the polls table with JSONB columns. If you are
+      upgrading an existing DB that currently stores JSON as TEXT you MUST run
+      the one-time manual migration steps documented in the module docstring.
+    - This runtime function intentionally does not attempt blind ALTER TABLE
+      migrations; those are a one-time operational task.
     """
     pool = await get_pool()
-    async with _DB_LOCK:
-        async with pool.acquire() as conn:
-            await conn.execute("""
-                CREATE TABLE IF NOT EXISTS polls (
-                    message_id BIGINT PRIMARY KEY,
-                    guild_id   BIGINT,
-                    channel_id BIGINT,
-                    author_id  BIGINT,
-                    question   TEXT,
-                    options    TEXT,
-                    votes      TEXT,
-                    end_time   DOUBLE PRECISION,
-                    ended      BOOLEAN DEFAULT FALSE,
-                    winners    TEXT,
-                    counts     TEXT,
-                    total_votes INTEGER,
-                    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
+    async with pool.acquire() as conn:
+        await _set_stmt_timeout(conn)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS polls (
+                message_id BIGINT PRIMARY KEY,
+                guild_id   BIGINT,
+                channel_id BIGINT,
+                author_id  BIGINT,
+                question   TEXT,
+                options    JSONB DEFAULT '[]'::jsonb,
+                votes      JSONB DEFAULT '{}'::jsonb,
+                end_time   DOUBLE PRECISION,
+                ended      BOOLEAN DEFAULT FALSE,
+                winners    JSONB,
+                counts     JSONB,
+                total_votes INTEGER,
+                created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
 
-            # Check for missing columns (best-effort migration)
-            cols = await conn.fetch("""
-                SELECT column_name FROM information_schema.columns
-                WHERE table_name = 'polls'
-            """)
-            col_names = {c["column_name"] for c in cols}
-            if "author_id" not in col_names:
-                try:
-                    await conn.execute("ALTER TABLE polls ADD COLUMN author_id BIGINT")
-                except Exception:
-                    # Non-fatal if migration fails; we continue with normalization
-                    pass
-
-            # Normalize NULLs to canonical JSON shapes to simplify downstream logic
-            try:
-                await conn.execute("UPDATE polls SET options='[]' WHERE options IS NULL")
-                await conn.execute("UPDATE polls SET votes='{}' WHERE votes IS NULL")
-            except Exception:
-                # Best-effort only
-                pass
-
-
-#  CRUD Helpers  #
 
 def _json_dumps(value: Any) -> str:
     """Serialize Python objects to JSON text (ensure_ascii disabled for clarity)."""
@@ -215,7 +250,7 @@ async def save_active_poll(message_id, guild_id, channel_id, author_id, question
     Parameters
     ----------
     message_id:
-        Discord message id (int or discord.Message.id) that identifies the poll message.
+        Discord message id (int) that identifies the poll message.
     guild_id, channel_id, author_id:
         Discord snowflakes for guild/channel/author.
     question:
@@ -230,34 +265,34 @@ async def save_active_poll(message_id, guild_id, channel_id, author_id, question
         as an epoch float (seconds) or NULL if not provided.
     """
     pool = await get_pool()
-    async with _DB_LOCK:
-        async with pool.acquire() as conn:
-            await conn.execute(
-                """
-                INSERT INTO polls (
-                    message_id, guild_id, channel_id, author_id,
-                    question, options, votes, end_time, ended
-                )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, FALSE)
-                ON CONFLICT (message_id) DO UPDATE SET
-                    guild_id   = EXCLUDED.guild_id,
-                    channel_id = EXCLUDED.channel_id,
-                    author_id  = EXCLUDED.author_id,
-                    question   = EXCLUDED.question,
-                    options    = EXCLUDED.options,
-                    votes      = EXCLUDED.votes,
-                    end_time   = EXCLUDED.end_time,
-                    ended      = FALSE
-                """,
-                message_id,
-                guild_id,
-                channel_id,
-                author_id,
-                question,
-                _json_dumps(options),
-                _json_dumps({k: list(v) for k, v in votes.items()}),
-                end_time.timestamp() if end_time else None,
+    async with pool.acquire() as conn:
+        await _set_stmt_timeout(conn)
+        await conn.execute(
+            """
+            INSERT INTO polls (
+                message_id, guild_id, channel_id, author_id,
+                question, options, votes, end_time, ended
             )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, FALSE)
+            ON CONFLICT (message_id) DO UPDATE SET
+                guild_id   = EXCLUDED.guild_id,
+                channel_id = EXCLUDED.channel_id,
+                author_id  = EXCLUDED.author_id,
+                question   = EXCLUDED.question,
+                options    = EXCLUDED.options,
+                votes      = EXCLUDED.votes,
+                end_time   = EXCLUDED.end_time,
+                ended      = FALSE
+            """,
+            message_id,
+            guild_id,
+            channel_id,
+            author_id,
+            question,
+            _json_dumps(options),
+            _json_dumps({k: list(v) for k, v in votes.items()}),
+            end_time.timestamp() if end_time else None,
+        )
 
 
 async def record_poll_result(message_id, winners, counts, total_votes):
@@ -266,8 +301,8 @@ async def record_poll_result(message_id, winners, counts, total_votes):
 
     Parameters
     ----------
-    message_id:
-        Discord message id (poll identifier).
+    message_id: int
+        Poll identifier (Discord message id).
     winners:
         Python object (list or dict) representing winners; will be JSON-serialized.
     counts:
@@ -276,33 +311,36 @@ async def record_poll_result(message_id, winners, counts, total_votes):
         Integer total vote count.
     """
     pool = await get_pool()
-    async with _DB_LOCK:
-        async with pool.acquire() as conn:
-            await conn.execute(
-                """
-                UPDATE polls
-                   SET winners = $1,
-                       counts = $2,
-                       total_votes = $3,
-                       ended = TRUE
-                 WHERE message_id = $4
-                """,
-                _json_dumps(winners),
-                _json_dumps(counts),
-                total_votes,
-                message_id,
-            )
+    async with pool.acquire() as conn:
+        await _set_stmt_timeout(conn)
+        await conn.execute(
+            """
+            UPDATE polls
+               SET winners = $1,
+                   counts = $2,
+                   total_votes = $3,
+                   ended = TRUE
+             WHERE message_id = $4
+            """,
+            _json_dumps(winners),
+            _json_dumps(counts),
+            total_votes,
+            message_id,
+        )
 
 
 async def load_active_polls():
     """
     Return a list of polls that are still active (ended = FALSE).
 
-    Each returned item is a dict mapping column name -> stored value. Note:
-    - options and votes are returned as stored (JSON strings); callers should
-      json.loads and validate the types before using them.
-    - end_time is returned as stored (epoch float) and should be converted by
-      callers to a datetime if needed.
+    Returns
+    -------
+    List[dict]
+        Each dict maps column name -> stored value. Note:
+        - options and votes are returned as the DB types (jsonb) mapped to Python
+          objects by asyncpg (usually dict/list). Consumers should validate
+          shapes before use. If you prefer raw JSON text, call json.dumps/json.loads.
+        - end_time is returned as a float (epoch seconds) if present.
     """
     pool = await get_pool()
     query = """
@@ -320,6 +358,7 @@ async def load_active_polls():
         WHERE ended = FALSE
     """
     async with pool.acquire() as conn:
+        await _set_stmt_timeout(conn)
         rows = await conn.fetch(query)
         return [dict(r) for r in rows]
 
@@ -328,15 +367,16 @@ async def purge_finished_polls():
     """
     Delete polls that have ended (ended = TRUE).
 
-    This is useful for periodic cleanup jobs to keep the active polls table small.
+    Useful for periodic cleanup jobs to keep the active polls table small.
     """
     pool = await get_pool()
-    async with _DB_LOCK:
-        async with pool.acquire() as conn:
-            await conn.execute("DELETE FROM polls WHERE ended = TRUE")
+    async with pool.acquire() as conn:
+        await _set_stmt_timeout(conn)
+        await conn.execute("DELETE FROM polls WHERE ended = TRUE")
 
 
 #  Poll UI  #
+
 
 class PollView(discord.ui.View):
     """
@@ -350,24 +390,14 @@ class PollView(discord.ui.View):
     - Supports an optional timeout: if timeout is provided the view will auto-end
       the poll and persist the final results when the timer expires.
 
-    Attributes
-    ----------
-    question: str
-        Poll question text.
-    options: List[str]
-        Option labels in order.
-    votes: Dict[str, Set[int]]
-        Mapping option -> set of voter IDs.
-    author: discord.Member
-        Creator of the poll (only author can add options and end the poll).
-    message: Optional[discord.Message]
-        The message instance representing the poll in Discord (populated after send).
-    updater_task: Optional[asyncio.Task]
-        Background task for auto-ending the poll when a timeout was set.
-    end_time: Optional[datetime]
-        The UTC timestamp when the poll should end (if timeout provided).
-    ended: bool
-        Whether the poll has been finalized.
+    Notes for maintainers
+    ---------------------
+    - Votes are kept in-memory as sets (option -> set(user_id)). When saving to
+      DB the sets are converted to lists and JSON-dumped. Consider storing the
+      Python dict/list directly to asyncpg to avoid extra serialization if you
+      want to optimize further.
+    - The view is resilient to Discord edit/send errors and tries progressive
+      fallbacks when updates fail due to embed size limits.
     """
     def __init__(self, question: str, options: List[str], author: discord.Member, timeout: Optional[int] = None):
         super().__init__(timeout=timeout)
@@ -725,9 +755,9 @@ class PollView(discord.ui.View):
 
         Parameters
         ----------
-        closed:
+        closed: bool
             If True, the embed will indicate the poll is closed.
-        bar_len:
+        bar_len: int
             Length of the textual progress bar displayed for each option.
 
         Returns
