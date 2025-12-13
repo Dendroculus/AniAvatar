@@ -32,7 +32,7 @@ Purpose:
 Design notes and important operational guidance:
 - Concurrency:
   - Database access is serialized by `self.db_lock` to avoid concurrent writes from
-    multiple coroutines.
+    multiple coroutines (within a single process).
   - Image rendering is offloaded to threads and controlled by a semaphore (`_render_semaphore`)
     to limit concurrency and avoid saturating CPU or memory with large Pillow tasks.
 - Caching:
@@ -50,6 +50,8 @@ Design notes and important operational guidance:
   - Avoid heavy synchronous work on the event loop; rendering is already offloaded but any
     additional expensive operations should follow the same pattern (to_thread + timeout).
   - The DB schema creation is idempotent; migrating columns must be performed with care.
+  - For multi-instance deployments, rely on DB constraints/transactions rather than in-process
+    locks for cross-process safety; the current locks only protect within this process.
 """
 
 PROFILE_PNG = "profile.png"
@@ -58,6 +60,24 @@ SQL_INSERT_OR_IGNORE_USER_COINS_ZERO = (
     "INSERT INTO user_coins (user_id, guild_id, coins) VALUES ($1, $2, 0) ON CONFLICT DO NOTHING"
 )
 COINS_EMOJI = f"{ShopEmojis['Coins']}"
+
+# Statement timeout (ms) applied per-connection to avoid runaway queries.
+# Tune via env if desired.
+DEFAULT_STATEMENT_TIMEOUT_MS = int(os.getenv("PG_STATEMENT_TIMEOUT_MS", "2000"))
+
+
+async def _pool_init(conn: asyncpg.Connection):
+    """
+    Apply per-connection settings (statement timeout, optional app name).
+    Keeps long/blocked queries from piling up.
+    """
+    try:
+        await conn.execute(f"SET statement_timeout TO {DEFAULT_STATEMENT_TIMEOUT_MS}")
+        await conn.execute("SET application_name TO 'minori-progression'")
+    except Exception:
+        # Best-effort; don't block pool init
+        pass
+
 
 class MainThemeSelect(discord.ui.Select):
     """
@@ -93,6 +113,7 @@ class MainThemeSelect(discord.ui.Select):
             view=SubThemeView(self.user_id, selected_theme, self.cog)
         )
 
+
 class MainThemeView(discord.ui.View):
     """
     Wrapper view that adds a MainThemeSelect for a specific user.
@@ -103,6 +124,7 @@ class MainThemeView(discord.ui.View):
         super().__init__()
         self.cog = cog
         self.add_item(MainThemeSelect(user_id, cog))
+
 
 class SubThemeSelect(discord.ui.Select):
     """
@@ -196,6 +218,7 @@ class SubThemeSelect(discord.ui.Select):
                 file=file
             )
 
+
 class SubThemeView(discord.ui.View):
     """
     Simple wrapper view that holds a SubThemeSelect for the chosen theme.
@@ -204,6 +227,7 @@ class SubThemeView(discord.ui.View):
         super().__init__()
         self.cog = cog
         self.add_item(SubThemeSelect(user_id, theme, cog))
+
 
 class Progression(commands.Cog):
     """
@@ -244,7 +268,106 @@ class Progression(commands.Cog):
             dsn = os.getenv("DATABASE_URL")
             if not dsn:
                 raise RuntimeError("DATABASE_URL is not set")
-            self.pool = await asyncpg.create_pool(dsn=dsn, min_size=1, max_size=10)
+            # command_timeout applies to pool operations; per-connection statement_timeout set in _pool_init.
+            self.pool = await asyncpg.create_pool(
+                dsn=dsn,
+                min_size=1,
+                max_size=10,
+                timeout=5.0,
+                command_timeout=5.0,
+                init=_pool_init,
+            )
+
+    async def _create_indexes(self, conn: asyncpg.Connection):
+        """
+        Create helpful indexes for hot paths (idempotent).
+        """
+        try:
+            await conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_users_guild_level_exp ON users (guild_id, level DESC, exp DESC)"
+            )
+        except Exception as e:
+            print(f"[Progression] Index creation warning: {e}")
+
+    async def cog_load(self):
+        """
+        Initialize persistent database tables when the cog is loaded.
+
+        This method creates users, profile_theme, and user_coins tables if they do not exist.
+        It's idempotent and safe to run on every cog reload.
+        """
+        await self._ensure_pool()
+        async with self.pool.acquire() as conn:
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS users (
+                    user_id BIGINT,
+                    guild_id BIGINT,
+                    exp BIGINT NOT NULL DEFAULT 0,
+                    level INTEGER NOT NULL DEFAULT 1,
+                    PRIMARY KEY (user_id, guild_id)
+                )
+            """)
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS profile_theme (
+                    user_id BIGINT PRIMARY KEY,
+                    theme_name TEXT DEFAULT 'default',
+                    bg_file TEXT DEFAULT 'NULL',
+                    font_color TEXT DEFAULT 'white'
+                )
+            """)
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS user_coins (
+                    user_id BIGINT,
+                    guild_id BIGINT,
+                    coins BIGINT DEFAULT 0,
+                    PRIMARY KEY(user_id, guild_id)
+                )
+            """)
+            await self._create_indexes(conn)
+
+    async def cog_unload(self):
+        """
+        Close the database connection when the cog is unloaded; swallow errors to avoid
+        disrupting bot shutdown.
+        """
+        try:
+            if self.pool:
+                await self.pool.close()
+        except Exception:
+            pass
+
+    async def safe_send(self, ctx, *args, **kwargs):
+        """
+        Send a message using either interaction response/followup semantics or ctx.send.
+
+        This helper centralizes the logic for hybrid commands and reduces duplicated
+        try/except blocks in command implementations.
+        """
+        interaction = getattr(ctx, "interaction", None)
+        if interaction is not None:
+            try:
+                if not interaction.response.is_done():
+                    return await interaction.response.send_message(*args, **kwargs)
+                return await interaction.followup.send(*args, **kwargs)
+            except discord.errors.NotFound:
+                return await ctx.channel.send(*args, **kwargs)
+            except discord.errors.InteractionResponded:
+                return await interaction.followup.send(*args, **kwargs)
+        else:
+            return await ctx.send(*args, **kwargs)
+
+    async def _fetch_avatar_bytes(self, member_or_user, size=128, timeout=3.0):
+        """
+        Fetch avatar bytes with a short timeout.
+
+        Returns b"" on failure and logs the error. This protects rendering code from
+        indefinite waits when fetching remote avatars.
+        """
+        try:
+            return await asyncio.wait_for(member_or_user.display_avatar.with_size(size).read(), timeout=timeout)
+        except Exception as e:
+            print(f"[avatar_fetch] failed for {getattr(member_or_user,'id',None)}: {e}")
+            return b""
 
     def _get_render_cache_key(
         self,
@@ -364,85 +487,6 @@ class Progression(commands.Cog):
                 print(f"[Progression] Render error for {display_name}: {e}")
                 traceback.print_exc()
                 return None
-
-    async def cog_load(self):
-        """
-        Initialize persistent database tables when the cog is loaded.
-
-        This method creates users, profile_theme, and user_coins tables if they do not exist.
-        It's idempotent and safe to run on every cog reload.
-        """
-        await self._ensure_pool()
-        async with self.pool.acquire() as conn:
-            await conn.execute("""
-                CREATE TABLE IF NOT EXISTS users (
-                    user_id BIGINT,
-                    guild_id BIGINT,
-                    exp BIGINT NOT NULL DEFAULT 0,
-                    level INTEGER NOT NULL DEFAULT 1,
-                    PRIMARY KEY (user_id, guild_id)
-                )
-            """)
-            await conn.execute("""
-                CREATE TABLE IF NOT EXISTS profile_theme (
-                    user_id BIGINT PRIMARY KEY,
-                    theme_name TEXT DEFAULT 'default',
-                    bg_file TEXT DEFAULT 'NULL',
-                    font_color TEXT DEFAULT 'white'
-                )
-            """)
-            await conn.execute("""
-                CREATE TABLE IF NOT EXISTS user_coins (
-                    user_id BIGINT,
-                    guild_id BIGINT,
-                    coins BIGINT DEFAULT 0,
-                    PRIMARY KEY(user_id, guild_id)
-                )
-            """)
-
-    async def cog_unload(self):
-        """
-        Close the database connection when the cog is unloaded; swallow errors to avoid
-        disrupting bot shutdown.
-        """
-        try:
-            if self.pool:
-                await self.pool.close()
-        except Exception:
-            pass
-
-    async def safe_send(self, ctx, *args, **kwargs):
-        """
-        Send a message using either interaction response/followup semantics or ctx.send.
-
-        This helper centralizes the logic for hybrid commands and reduces duplicated
-        try/except blocks in command implementations.
-        """
-        interaction = getattr(ctx, "interaction", None)
-        if interaction is not None:
-            try:
-                if not interaction.response.is_done():
-                    return await interaction.response.send_message(*args, **kwargs)
-                return await interaction.followup.send(*args, **kwargs)
-            except discord.errors.NotFound:
-                return await ctx.channel.send(*args, **kwargs)
-            except discord.errors.InteractionResponded:
-                return await interaction.followup.send(*args, **kwargs)
-        else:
-            return await ctx.send(*args, **kwargs)
-
-    async def _fetch_avatar_bytes(self, member_or_user, size=128, timeout=3.0):
-        """
-        Fetch avatar bytes with a short timeout.
-
-        Returns b"" on failure and logs the error. This protects rendering code from
-        indefinite waits when fetching remote avatars.
-        """
-        try:
-            return await asyncio.wait_for(member_or_user.display_avatar.with_size(size).read(), timeout=timeout)
-        except Exception as e:
-            print(f"[avatar_fetch] failed for {getattr(member_or_user,'id',None)}: {e}")
-            return b""
 
     async def _build_rows_data(self, ctx, rows, avatar_size=128, avatar_timeout=3.0):
         """
@@ -1140,32 +1184,32 @@ class Progression(commands.Cog):
     # async def on_ready(self):
     #     """
     #     Development helper that seeds EXP/coins for a predefined list of users on startup.
-
+    #
     #     NOTE: This block is explicitly intended for testing and should be removed in
     #     production deployments or gated behind configuration.
     #     """
     #     print(f"{self.bot.user} is ready!")
-
+    #
     #     YOUR_ID = [
     #         955268891125375036
     #     ]
-
+    #
     #     GUILD_ID = 1412345648174333956
-
+    #
     #     progression = self.bot.get_cog("Progression")
     #     if not progression:
     #         print("Progression cog not loaded!")
     #         return
-
+    #
     #     rand_exp = random.randint(5150, 5151)
     #     for user_id in YOUR_ID:
     #         level, exp, leveled_up = await self.add_exp(user_id, GUILD_ID, rand_exp)
     #         print(f"User {user_id} → Level {level}, EXP {exp}, Leveled up? {leveled_up}")
-
+    #
     #         await progression.add_coins(user_id, GUILD_ID, 9999)
     #         coins = await progression.get_coins(user_id, GUILD_ID)
     #         print(f"User {user_id} → Coins: {coins}")
-
+    #
     #     first_user = YOUR_ID[0]
     #     print(f"🎉 First user {first_user} now has Level {level}, EXP {exp}, Coins {coins}. Leveled up? {leveled_up}")
 

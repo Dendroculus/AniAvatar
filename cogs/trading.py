@@ -36,6 +36,11 @@ Notes:
   - db_lock: an asyncio lock to serialize DB writes.
   - get_user, add_exp, get_coins, remove_coins, announce_level_up, MAX_LEVEL attributes/methods.
 - All behavioral code is left unchanged; only the storage layer now uses asyncpg/PostgreSQL.
+- Production hardening additions:
+  - Statement timeout applied per-connection to avoid runaway queries.
+  - Index creation for hot paths on user_inventory.
+  - Lightweight maintenance loop to purge empty inventory rows.
+  - Guild cleanup on guild removal for inventory rows.
 """
 
 COG_PATH = os.path.dirname(os.path.abspath(__file__))
@@ -58,6 +63,7 @@ VALUES ($1, $2, $3, $4)
 ON CONFLICT(user_id, guild_id, item_name) DO UPDATE SET quantity = user_inventory.quantity + EXCLUDED.quantity
 """
 SQL_SELECT_PRICE_EMOJI = "SELECT price, emoji FROM shop_items WHERE name = $1"
+
 
 def format_coins(coins: int) -> str:
     """
@@ -82,6 +88,7 @@ def format_coins(coins: int) -> str:
         return f"{coins / 1_000_000:.2f}M".rstrip("0").rstrip(".")
     else:
         return f"{coins / 1_000_000_000:.2f}B".rstrip("0").rstrip(".")
+
 
 class CloseButton(discord.ui.Button):
     """
@@ -121,6 +128,7 @@ class CloseButton(discord.ui.Button):
             t.cancel()
 
         await interaction.response.edit_message(content=self.close_text, embed=None, view=None)
+
 
 class InventorySelect(discord.ui.Select):
     """
@@ -189,6 +197,7 @@ class InventorySelect(discord.ui.Select):
             lock = self.cog.progression_cog.db_lock
 
             async with lock, pool.acquire() as conn:
+                await self.cog._set_stmt_timeout(conn)
                 row = await conn.fetchrow(SQL_SELECT_PRICE_EMOJI, selected_item)
                 selected_emoji = row["emoji"] if row and row["emoji"] else "📦"
 
@@ -234,6 +243,7 @@ class InventorySelect(discord.ui.Select):
                     reward_lines = []
                     # fetch emojis mapping
                     async with self.cog.progression_cog.pool.acquire() as conn:
+                        await self.cog._set_stmt_timeout(conn)
                         emap_rows = await conn.fetch("SELECT name, emoji FROM shop_items")
                         emap = {r["name"]: r["emoji"] for r in emap_rows}
                     for item, qty in rewards:
@@ -243,6 +253,7 @@ class InventorySelect(discord.ui.Select):
 
             # reload inventory
             async with self.cog.progression_cog.db_lock, self.cog.progression_cog.pool.acquire() as conn:
+                await self.cog._set_stmt_timeout(conn)
                 raw_items = await conn.fetch(SQL_USER_INV_SELECT, self.user_id, self.guild_id)
 
                 items = []
@@ -275,6 +286,7 @@ class InventorySelect(discord.ui.Select):
                 await asyncio.sleep(2)
                 self.cog.user_locks[self.user_id] = False
             self._release_lock_task = asyncio.create_task(release_lock())
+
 
 class InventoryView(discord.ui.View):
     """
@@ -333,6 +345,7 @@ class InventoryView(discord.ui.View):
         """
         self.start_timeout()
 
+
 class ShopSelect(discord.ui.Select):
     """
     A Select UI component used in the shop view that lets a user buy one of the available items.
@@ -375,6 +388,7 @@ class ShopSelect(discord.ui.Select):
             selected_item = self.values[0]
 
             async with self.progression_cog.pool.acquire() as conn:
+                await self.parent_view.parent_cog._set_stmt_timeout(conn)
                 row = await conn.fetchrow(SQL_SELECT_PRICE_EMOJI, selected_item)
 
             if not row:
@@ -394,6 +408,7 @@ class ShopSelect(discord.ui.Select):
                 return
 
             async with self.progression_cog.db_lock, self.progression_cog.pool.acquire() as conn:
+                await self.parent_view.parent_cog._set_stmt_timeout(conn)
                 await conn.execute(
                     """
                     INSERT INTO user_inventory (user_id, guild_id, item_name, quantity)
@@ -405,6 +420,7 @@ class ShopSelect(discord.ui.Select):
 
             new_balance = await self.progression_cog.get_coins(self.user_id, self.guild_id)
             async with self.progression_cog.pool.acquire() as conn:
+                await self.parent_view.parent_cog._set_stmt_timeout(conn)
                 items = await conn.fetch("SELECT name, price, emoji FROM shop_items")
 
             embed = discord.Embed(
@@ -440,6 +456,7 @@ class ShopSelect(discord.ui.Select):
             self.parent_view.processing = False
             if msg_to_edit:
                 await msg_to_edit.edit(view=self.parent_view)
+
 
 class ShopView(discord.ui.View):
     """
@@ -515,7 +532,14 @@ class Trading(commands.Cog):
     - user_locks: used to rate-limit or serialize per-user item actions.
     - donate_cooldowns: map donor_id -> datetime when they can next donate.
     - open_inventories / open_shops: map guild_id -> map[user_id -> view/message] to prevent duplicates.
+    - Additional production helpers:
+      - Statement timeout to guard queries.
+      - Background maintenance for data hygiene.
+      - Index creation for hot paths.
     """
+    STMT_TIMEOUT_MS = 2000
+    MAINTENANCE_INTERVAL = 6 * 60 * 60  # 6 hours
+
     def __init__(self, bot):
         self.bot = bot
         self.progression_cog = None
@@ -523,6 +547,36 @@ class Trading(commands.Cog):
         self.donate_cooldowns = {}
         self.open_inventories = {}
         self.open_shops = {} 
+        self._maintenance_task = None
+
+    async def _set_stmt_timeout(self, conn):
+        """Apply a per-connection statement timeout to avoid runaway queries."""
+        try:
+            await conn.execute(f"SET LOCAL statement_timeout = {self.STMT_TIMEOUT_MS}")
+        except Exception:
+            pass
+
+    async def _ensure_indexes(self, conn):
+        """Create helpful indexes for frequent lookups (idempotent)."""
+        try:
+            await conn.execute("CREATE INDEX IF NOT EXISTS user_inventory_guild_user_idx ON user_inventory (guild_id, user_id)")
+            await conn.execute("CREATE INDEX IF NOT EXISTS user_inventory_guild_item_idx ON user_inventory (guild_id, item_name)")
+        except Exception as e:
+            print(f"[Shop] Index creation skipped/failed: {e}")
+
+    async def _start_maintenance_loop(self):
+        async def _loop():
+            await self.bot.wait_until_ready()
+            while not self.bot.is_closed():
+                try:
+                    if self.progression_cog and self.progression_cog.pool:
+                        async with self.progression_cog.pool.acquire() as conn:
+                            await self._set_stmt_timeout(conn)
+                            await conn.execute("DELETE FROM user_inventory WHERE quantity <= 0")
+                except Exception as e:
+                    print(f"[Shop] maintenance loop error: {e}")
+                await asyncio.sleep(self.MAINTENANCE_INTERVAL)
+        self._maintenance_task = asyncio.create_task(_loop())
 
     async def cog_load(self):
         """
@@ -539,6 +593,7 @@ class Trading(commands.Cog):
             await self.progression_cog._ensure_pool()
 
         async with self.progression_cog.pool.acquire() as conn:
+            await self._set_stmt_timeout(conn)
             await conn.execute("""
                 CREATE TABLE IF NOT EXISTS shop_items (
                     id BIGSERIAL PRIMARY KEY,
@@ -570,6 +625,20 @@ class Trading(commands.Cog):
                     "INSERT INTO shop_items (name, type, price, emoji) VALUES ($1, $2, $3, $4) ON CONFLICT (name) DO NOTHING",
                     name, type_, price, emoji
                 )
+
+            await self._ensure_indexes(conn)
+
+        # Start maintenance loop
+        await self._start_maintenance_loop()
+
+    async def cog_unload(self):
+        if self._maintenance_task:
+            self._maintenance_task.cancel()
+        if self.progression_cog and self.progression_cog.pool:
+            try:
+                await self.progression_cog.pool.close()
+            except Exception:
+                pass
 
     async def apply_potion_effect(self, user_id: int, guild_id: int, item_name: str, channel: discord.TextChannel = None):
         """
@@ -622,6 +691,7 @@ class Trading(commands.Cog):
         """
         rewards = []
         async with self.progression_cog.db_lock, self.progression_cog.pool.acquire() as conn:
+            await self._set_stmt_timeout(conn)
             if random.random() < 0.15:
                 amount = random.randint(1, 3)
                 await conn.execute(SQL_UPSERT_USER_INV, user_id, guild_id, LEVEL_SKIP_TOKEN, amount)
@@ -661,6 +731,7 @@ class Trading(commands.Cog):
             return
 
         async with self.progression_cog.pool.acquire() as conn:
+            await self._set_stmt_timeout(conn)
             items = await conn.fetch("SELECT name, price, emoji FROM shop_items")
         if not items:
             await ctx.send("Shop is empty.")
@@ -709,10 +780,12 @@ class Trading(commands.Cog):
             return
 
         async with self.progression_cog.pool.acquire() as conn:
+            await self._set_stmt_timeout(conn)
             raw_items = await conn.fetch(SQL_USER_INV_SELECT, user_id, guild_id)
 
         items = []
         async with self.progression_cog.pool.acquire() as conn:
+            await self._set_stmt_timeout(conn)
             for name, qty in raw_items:
                 if qty <= 0:
                     continue
@@ -766,6 +839,7 @@ class Trading(commands.Cog):
             return
 
         async with conn_pool.acquire() as conn:
+            await self._set_stmt_timeout(conn)
             raw_inv = await conn.fetch(SQL_USER_INV_SELECT, donor_id, guild_id)
             items = [(r["item_name"], r["quantity"]) for r in raw_inv if r["quantity"] > 0]
         if not items:
@@ -773,6 +847,7 @@ class Trading(commands.Cog):
             return
 
         async with conn_pool.acquire() as conn:
+            await self._set_stmt_timeout(conn)
             emap_rows = await conn.fetch("SELECT name, emoji FROM shop_items")
             emoji_map = {r["name"]: r["emoji"] for r in emap_rows}
 
@@ -855,6 +930,7 @@ class Trading(commands.Cog):
         async def finalize_donate(item_name, amount, interaction):
             lock = self.progression_cog.db_lock
             async with lock, conn_pool.acquire() as conn:
+                await self._set_stmt_timeout(conn)
                 row = await conn.fetchrow(
                     "SELECT quantity FROM user_inventory WHERE user_id = $1 AND guild_id = $2 AND item_name = $3",
                     donor_id, guild_id, item_name
@@ -893,6 +969,19 @@ class Trading(commands.Cog):
         view = DonateView(ctx.author.id, timeout=180)
         view.add_item(DonateSelect())
         await ctx.send(f"Select an item to donate to {member.display_name}:", view=view)
+
+    @commands.Cog.listener()
+    async def on_guild_remove(self, guild: discord.Guild):
+        """
+        Cleanup handler that removes inventory rows for a guild when the bot leaves it.
+        """
+        if not self.progression_cog or not self.progression_cog.pool:
+            return
+        async with self.progression_cog.db_lock, self.progression_cog.pool.acquire() as conn:
+            await self._set_stmt_timeout(conn)
+            await conn.execute("DELETE FROM user_inventory WHERE guild_id = $1", guild.id)
+        print(f"[Shop] Cleaned up inventory DB for guild {guild.id} ({guild.name})")
+
 
 async def setup(bot):
     await bot.add_cog(Trading(bot))

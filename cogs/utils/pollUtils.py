@@ -4,7 +4,7 @@ import discord
 import json
 import os
 from datetime import datetime, timedelta, timezone
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from discord import ui
 from discord.ext import commands
 
@@ -26,7 +26,7 @@ This module encapsulates:
   synchronizes state to the DB as users vote or the poll is updated.
 
 Design & Operational Notes
---------------------------
+
 - Database pool:
   - A module-level asyncpg Pool is lazily created with init_db_pool() from the
     DATABASE_URL environment variable (or an explicit DSN passed to init_db_pool).
@@ -69,7 +69,7 @@ Usage
   writes serialized state to the DB after votes and changes.
 
 Schema (created by init_db)
----------------------------
+
 CREATE TABLE polls (
     message_id BIGINT PRIMARY KEY,
     guild_id   BIGINT,
@@ -142,7 +142,6 @@ async def get_pool() -> asyncpg.Pool:
     return _POOL
 
 
-#  Schema Init/Migrate  #
 
 async def init_db():
     """
@@ -202,6 +201,11 @@ async def init_db():
 
 #  CRUD Helpers  #
 
+def _json_dumps(value: Any) -> str:
+    """Serialize Python objects to JSON text (ensure_ascii disabled for clarity)."""
+    return json.dumps(value, ensure_ascii=False)
+
+
 async def save_active_poll(message_id, guild_id, channel_id, author_id, question, options, votes, end_time):
     """
     Insert or update an active poll row into the database.
@@ -250,8 +254,8 @@ async def save_active_poll(message_id, guild_id, channel_id, author_id, question
                 channel_id,
                 author_id,
                 question,
-                json.dumps(options),
-                json.dumps({k: list(v) for k, v in votes.items()}),
+                _json_dumps(options),
+                _json_dumps({k: list(v) for k, v in votes.items()}),
                 end_time.timestamp() if end_time else None,
             )
 
@@ -283,8 +287,8 @@ async def record_poll_result(message_id, winners, counts, total_votes):
                        ended = TRUE
                  WHERE message_id = $4
                 """,
-                json.dumps(winners),
-                json.dumps(counts),
+                _json_dumps(winners),
+                _json_dumps(counts),
                 total_votes,
                 message_id,
             )
