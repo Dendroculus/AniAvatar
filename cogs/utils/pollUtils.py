@@ -1,12 +1,12 @@
-import aiosqlite
 import asyncio
+import asyncpg
 import discord
 import json
-from datetime import datetime, timedelta, timezone 
+import os
+from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 from discord import ui
 from discord.ext import commands
-import os
 
 from cogs.utils.emojis import MinoriEmojis, CustomEmojis
 
@@ -15,18 +15,17 @@ pollUtils.py
 
 Purpose:
 - Persistence and UI helpers for the bot's polling subsystem.
-- Responsibilities include creating and migrating the polls SQLite schema,
+- Responsibilities include creating and migrating the polls PostgreSQL schema,
   saving/restoring active polls, recording finalized results, and providing
   a reusable PollView UI (with modals) for creating and interacting with polls.
 
 Important implementation notes:
 - Database connection management:
-  - get_db() lazily initializes a single aiosqlite.Connection and sets pragmatic
-    PRAGMAs for WAL journaling and relaxed synchronous mode for performance.
+  - A module-level asyncpg Pool is lazily initialized from DATABASE_URL.
   - A module-level _DB_LOCK is used to serialize schema changes and writes to avoid
-    concurrent DDL/DML corruption across asyncio tasks.
+    concurrent DDL/DML race conditions across asyncio tasks.
 - Persistence format:
-  - `options` and `votes` are serialized as JSON in the DB. Votes are stored as
+  - `options` and `votes` are serialized as JSON strings in the DB (TEXT). Votes are stored as
     option -> list[user_id] to make the DB easily queryable and portable.
   - Consumer code must coerce and validate types when rehydrating rows.
 - UI semantics:
@@ -38,48 +37,52 @@ Important implementation notes:
     favoring best-effort restoration over hard failures during startup.
 """
 
-DB_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "..", "data", "minori.db")
-
-_DB: Optional[aiosqlite.Connection] = None
+_POOL: Optional[asyncpg.Pool] = None
 _DB_LOCK = asyncio.Lock()
 MODAL_PLACEHOLDER = "Leave empty if not needed"
 
-async def get_db() -> aiosqlite.Connection:
-    """
-    Return a shared aiosqlite.Connection, creating it if necessary.
 
-    Behavior:
-    - Ensures the parent directory for the DB file exists.
-    - Sets PRAGMAs for WAL journaling and synchronous=NORMAL for improved concurrency.
-    - The connection is cached in the module-scoped _DB variable and reused across calls.
-    """
-    global _DB
-    if _DB is None:
-        os.makedirs(os.path.dirname(DB_FILE), exist_ok=True)
-        _DB = await aiosqlite.connect(DB_FILE)
-        await _DB.execute("PRAGMA journal_mode=WAL")
-        await _DB.execute("PRAGMA synchronous=NORMAL")
-        await _DB.execute("PRAGMA foreign_keys=ON")
-        await _DB.commit()
-    return _DB
+# ----------------------------- DB Pool Helpers ----------------------------- #
 
-async def close_db():
+async def init_db_pool(dsn: Optional[str] = None, *, min_size: int = 1, max_size: int = 10) -> None:
     """
-    Close and clear the cached database connection.
+    Lazily initialize the asyncpg connection pool using DATABASE_URL (or provided dsn).
+    """
+    global _POOL
+    if _POOL is None:
+        dsn = dsn or os.getenv("DATABASE_URL")
+        if not dsn:
+            raise RuntimeError("DATABASE_URL is not set")
+        _POOL = await asyncpg.create_pool(dsn=dsn, min_size=min_size, max_size=max_size)
 
-    Intended for shutdown or test teardown. Safe to call multiple times.
+
+async def close_db_pool() -> None:
     """
-    global _DB
-    if _DB is not None:
-        await _DB.close()
-        _DB = None
+    Close and clear the cached connection pool. Safe to call multiple times.
+    """
+    global _POOL
+    if _POOL is not None:
+        await _POOL.close()
+        _POOL = None
+
+
+async def get_pool() -> asyncpg.Pool:
+    """
+    Ensure the pool exists and return it.
+    """
+    await init_db_pool()
+    assert _POOL is not None
+    return _POOL
+
+
+# ----------------------------- Schema Init/Migrate ----------------------------- #
 
 async def init_db():
     """
     Initialize or migrate the polls table.
 
     Responsibilities:
-    - Create the polls table if it doesn't exist.
+    - Create the polls table if it doesn't exist (PostgreSQL).
     - Add missing columns (backwards-compatible migration) in a best-effort way.
     - Normalize null options/votes to empty serialized structures to simplify downstream logic.
 
@@ -87,110 +90,114 @@ async def init_db():
     - Uses _DB_LOCK to ensure migration and normalization statements are not interleaved
       with concurrently executing writes.
     """
-    conn = await get_db()
+    pool = await get_pool()
     async with _DB_LOCK:
-        await conn.execute("""
-            CREATE TABLE IF NOT EXISTS polls (
-                message_id INTEGER PRIMARY KEY,
-                guild_id INTEGER,
-                channel_id INTEGER,
-                author_id INTEGER,
-                question TEXT,
-                options TEXT,
-                votes TEXT,
-                end_time REAL,
-                ended INTEGER DEFAULT 0,
-                winners TEXT,
-                counts TEXT,
-                total_votes INTEGER,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        await conn.commit()
+        async with pool.acquire() as conn:
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS polls (
+                    message_id BIGINT PRIMARY KEY,
+                    guild_id   BIGINT,
+                    channel_id BIGINT,
+                    author_id  BIGINT,
+                    question   TEXT,
+                    options    TEXT,
+                    votes      TEXT,
+                    end_time   DOUBLE PRECISION,
+                    ended      BOOLEAN DEFAULT FALSE,
+                    winners    TEXT,
+                    counts     TEXT,
+                    total_votes INTEGER,
+                    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
 
-        async with conn.execute("PRAGMA table_info(polls)") as cur:
-            cols = await cur.fetchall()
-            col_names = [c[1] for c in cols]  
+            # Check for missing columns (best-effort migration)
+            cols = await conn.fetch("""
+                SELECT column_name FROM information_schema.columns
+                WHERE table_name = 'polls'
+            """)
+            col_names = {c["column_name"] for c in cols}
             if "author_id" not in col_names:
                 try:
-                    await conn.execute("ALTER TABLE polls ADD COLUMN author_id INTEGER")
-                    await conn.commit()
-                except aiosqlite.Error:
-                    # Migration failure is non-fatal; table will remain usable in most cases.
-                    pass
+                    await conn.execute("ALTER TABLE polls ADD COLUMN author_id BIGINT")
+                except Exception:
+                    pass  # Non-fatal if migration fails
 
-        # Normalize NULLs to canonical JSON shapes so callers don't need to special-case None.
-        await conn.execute("UPDATE polls SET options='[]' WHERE options IS NULL")
-        await conn.execute("UPDATE polls SET votes='{}' WHERE votes IS NULL")
-        await conn.commit()
+            # Normalize NULLs to canonical JSON shapes
+            await conn.execute("UPDATE polls SET options='[]' WHERE options IS NULL")
+            await conn.execute("UPDATE polls SET votes='{}' WHERE votes IS NULL")
+
+
+# ----------------------------- CRUD Helpers ----------------------------- #
 
 async def save_active_poll(message_id, guild_id, channel_id, author_id, question, options, votes, end_time):
     """
     Insert or replace an active poll row into the database.
 
-    Parameters:
-    - message_id, guild_id, channel_id, author_id: identifies where the poll lives.
-    - question: poll question string.
-    - options: list[str] of option labels (serializes to JSON).
-    - votes: mapping option -> set/int-list of user ids (converted to lists for JSON).
-    - end_time: optional datetime; serialized as UNIX timestamp (float) or None.
-
-    Notes:
-    - Uses INSERT OR REPLACE so updating the persisted state after each change is simple.
-    - This function is the single source of truth for persistence when PollView changes state.
+    Uses PostgreSQL upsert (ON CONFLICT) to mirror SQLite's INSERT OR REPLACE.
     """
-    conn = await get_db()
+    pool = await get_pool()
     async with _DB_LOCK:
-        await conn.execute("""
-            INSERT OR REPLACE INTO polls 
-            (message_id, guild_id, channel_id, author_id, question, options, votes, end_time, ended)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)
-        """, (
-            message_id,
-            guild_id,
-            channel_id,
-            author_id,
-            question,
-            json.dumps(options),
-            json.dumps({k: list(v) for k, v in votes.items()}),
-            end_time.timestamp() if end_time else None
-        ))
-        await conn.commit()
+        async with pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO polls (
+                    message_id, guild_id, channel_id, author_id,
+                    question, options, votes, end_time, ended
+                )
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, FALSE)
+                ON CONFLICT (message_id) DO UPDATE SET
+                    guild_id   = EXCLUDED.guild_id,
+                    channel_id = EXCLUDED.channel_id,
+                    author_id  = EXCLUDED.author_id,
+                    question   = EXCLUDED.question,
+                    options    = EXCLUDED.options,
+                    votes      = EXCLUDED.votes,
+                    end_time   = EXCLUDED.end_time,
+                    ended      = FALSE
+                """,
+                message_id,
+                guild_id,
+                channel_id,
+                author_id,
+                question,
+                json.dumps(options),
+                json.dumps({k: list(v) for k, v in votes.items()}),
+                end_time.timestamp() if end_time else None,
+            )
+
 
 async def record_poll_result(message_id, winners, counts, total_votes):
     """
     Mark a poll as ended and record winners/counts.
-
-    Parameters:
-    - message_id: primary key identifying the poll row.
-    - winners: list[str] of winning options (supports ties).
-    - counts: mapping option -> int counts.
-    - total_votes: integer total.
-
-    The function marks ended=1 to exclude the poll from future active poll loads.
     """
-    conn = await get_db()
+    pool = await get_pool()
     async with _DB_LOCK:
-        await conn.execute("""
-            UPDATE polls
-            SET winners=?, counts=?, total_votes=?, ended=1
-            WHERE message_id=?
-        """, (
-            json.dumps(winners),
-            json.dumps(counts),
-            total_votes,
-            message_id
-        ))
-        await conn.commit()
+        async with pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE polls
+                   SET winners = $1,
+                       counts = $2,
+                       total_votes = $3,
+                       ended = TRUE
+                 WHERE message_id = $4
+                """,
+                json.dumps(winners),
+                json.dumps(counts),
+                total_votes,
+                message_id,
+            )
+
 
 async def load_active_polls():
     """
-    Return a list of dict rows representing polls where ended = 0.
+    Return a list of dict rows representing polls where ended = FALSE.
 
     Each returned dict maps column name -> value, and `options`/`votes` remain in their
     stored serialized forms (consumers should parse/validate them).
     """
-    conn = await get_db()
+    pool = await get_pool()
     query = """
         SELECT
             message_id,
@@ -203,42 +210,28 @@ async def load_active_polls():
             end_time,
             ended
         FROM polls
-        WHERE ended = 0
+        WHERE ended = FALSE
     """
-    async with conn.execute(query) as cursor:
-        rows = await cursor.fetchall()
-        cols = ["message_id","guild_id","channel_id","author_id","question","options","votes","end_time","ended"]
-        return [dict(zip(cols, row)) for row in rows]
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(query)
+        return [dict(r) for r in rows]
+
 
 async def purge_finished_polls():
     """
-    Remove rows that have ended=1 from the database.
-
-    This is a retention operation typically run after rehydration to keep the table small.
+    Remove rows that have ended=TRUE from the database.
     """
-    conn = await get_db()
+    pool = await get_pool()
     async with _DB_LOCK:
-        await conn.execute("DELETE FROM polls WHERE ended=1")
-        await conn.commit()
+        async with pool.acquire() as conn:
+            await conn.execute("DELETE FROM polls WHERE ended = TRUE")
+
+
+# ----------------------------- Poll UI ----------------------------- #
 
 class PollView(discord.ui.View):
     """
     Interactive in-memory view representing a poll.
-
-    State:
-    - question: poll question text.
-    - options: ordered list of option strings.
-    - votes: mapping option -> set(user_id) for O(1) membership checks.
-    - author: discord.Member who created the poll; used for permission checks.
-    - message: discord.Message associated with the poll (may be None until sent).
-    - updater_task: optional background task that auto-ends the poll when the timeout elapses.
-
-    Behavior:
-    - Provides UI handlers for voting, removing votes, adding options (creator-only),
-      and ending the poll early (creator-only).
-    - Persists changes to the DB after state-modifying interactions so polls can be
-      restored after a restart.
-    - When a poll times out, on_timeout computes results, persists them, and finalizes the view.
     """
     def __init__(self, question: str, options: List[str], author: discord.Member, timeout: Optional[int] = None):
         super().__init__(timeout=timeout)
@@ -277,11 +270,6 @@ class PollView(discord.ui.View):
             self.updater_task = loop.create_task(self._auto_end())
 
     async def _auto_end(self):
-        """
-        Background task that sleeps until the poll's end_time and then triggers on_timeout.
-
-        The task is cancellable when the poll ends early or when the view is being cleaned up.
-        """
         if self.ended or not self.end_time:
             return
 
@@ -293,13 +281,6 @@ class PollView(discord.ui.View):
             await self.on_timeout()
 
     async def _ensure_poll_active(self, interaction: discord.Interaction) -> bool:
-        """
-        Guard used at the start of interaction handlers.
-
-        Returns False and attempts to inform the user if:
-        - The poll has already been marked ended.
-        - The end_time has passed (in which case it cancels updater_task and finalizes the poll).
-        """
         if self.ended:
             try:
                 await interaction.response.send_message("⚠️ Poll already closed.", ephemeral=True)
@@ -327,11 +308,6 @@ class PollView(discord.ui.View):
         return True
 
     def _cancel_updater_if_needed(self):
-        """
-        Cancel the background updater_task if it is different from the current asyncio task.
-
-        This prevents cancelling the currently running task if on_timeout is invoked from it.
-        """
         try:
             current = asyncio.current_task()
         except Exception:
@@ -343,14 +319,6 @@ class PollView(discord.ui.View):
                 pass
 
     def _compute_results(self):
-        """
-        Compute numeric results and human-readable winner_text.
-
-        Returns:
-        - results: mapping option -> count
-        - winners: list of options with the top count (supports ties)
-        - winner_text: text fragment suitable for sending to the channel summarizing the outcome
-        """
         results = {opt: len(users) for opt, users in self.votes.items()}
         winners = []
         winner_text = ""
@@ -376,11 +344,6 @@ class PollView(discord.ui.View):
         return results, winners, winner_text
 
     async def _persist_results(self, results, winners):
-        """
-        Persist the finalized results to the database.
-
-        Writes are best-effort; failures are printed for operator inspection.
-        """
         try:
             await record_poll_result(
                 message_id=self.message.id if self.message else None,
@@ -388,15 +351,10 @@ class PollView(discord.ui.View):
                 counts=results,
                 total_votes=sum(results.values())
             )
-        except aiosqlite.Error as e:
+        except Exception as e:
             print(f"[Poll DB Save Error] {e}")
 
     async def _finalize_view(self, winner_text: str):
-        """
-        Remove interactive components and edit the message to display the final embed.
-
-        Also sends a separate channel message containing winner_text to highlight the outcome.
-        """
         self.clear_items()
         if self.message:
             final_embed = self.make_poll_embed(closed=True)
@@ -411,14 +369,6 @@ class PollView(discord.ui.View):
                     print(f"[on_timeout] failed sending winner_text: {e}")
 
     async def on_timeout(self):
-        """
-        Centralized finalization logic invoked when the poll expires or is ended manually.
-
-        Steps:
-        - Mark view as ended and cancel background updater.
-        - Compute results and persist them.
-        - Finalize UI state and broadcast summary text if available.
-        """
         if self.ended:
             return
         self.ended = True
@@ -428,14 +378,6 @@ class PollView(discord.ui.View):
         await self._finalize_view(winner_text)
 
     async def select_callback(self, interaction: discord.Interaction):
-        """
-        Handle a vote selection from a user.
-
-        Behavior:
-        - Validates the poll is active and the selected index is within range.
-        - Ensures single-choice semantics by removing the user's id from other options.
-        - Persists the updated vote mapping to the DB and updates the message embed.
-        """
         if not await self._ensure_poll_active(interaction):
             return
 
@@ -459,25 +401,18 @@ class PollView(discord.ui.View):
                     message_id=self.message.id,
                     guild_id=self.message.guild.id,
                     channel_id=self.message.channel.id,
-                    author_id=self.author.id,  
+                    author_id=self.author.id,
                     question=self.question,
                     options=self.options,
                     votes=self.votes,
                     end_time=self.end_time
                 )
-            except aiosqlite.Error as e:
+            except Exception as e:
                 print(f"[Poll DB Save Error on vote] {e}")
 
         await self.update_poll(interaction, f"{CustomEmojis['VERIFIED']} You voted for **{choice_label}**")
 
     async def add_option(self, interaction: discord.Interaction):
-        """
-        Open a modal allowing the poll creator to add up to 5 new options (per modal submission).
-
-        Access control:
-        - Only the original poll creator (self.author) may add options.
-        - New options are normalized against existing ones (case-insensitive) to prevent duplicates.
-        """
         if not await self._ensure_poll_active(interaction):
             return
 
@@ -488,11 +423,6 @@ class PollView(discord.ui.View):
         await interaction.response.send_modal(modal)
 
     async def remove_vote(self, interaction: discord.Interaction):
-        """
-        Remove the invoking user's vote (if any) and persist the change.
-
-        Provides user feedback indicating success or that no vote was present.
-        """
         if not await self._ensure_poll_active(interaction):
             return
 
@@ -509,25 +439,19 @@ class PollView(discord.ui.View):
                         message_id=self.message.id,
                         guild_id=self.message.guild.id,
                         channel_id=self.message.channel.id,
-                        author_id=self.author.id,         
+                        author_id=self.author.id,
                         question=self.question,
                         options=self.options,
                         votes=self.votes,
                         end_time=self.end_time
                     )
-                except aiosqlite.Error as e:
+                except Exception as e:
                     print(f"[Poll DB Save Error on remove] {e}")
             await self.update_poll(interaction, "❌ Your vote was removed.")
         else:
             await interaction.response.send_message("⚠️ You haven't voted yet.", ephemeral=True)
 
     async def end_poll(self, interaction: discord.Interaction):
-        """
-        Allow the poll creator to end the poll immediately.
-
-        - Verifies the user is the author.
-        - Cancels any updater task and defers the interaction before calling on_timeout.
-        """
         if interaction.user.id != self.author.id:
             return await interaction.response.send_message("⚠️ Only the poll creator can end this poll.", ephemeral=True)
 
@@ -538,16 +462,6 @@ class PollView(discord.ui.View):
         await self.on_timeout()
 
     async def update_poll(self, interaction: discord.Interaction, ephemeral_msg: str):
-        """
-        Recompute the poll embed and attempt to edit the message to show updated state.
-
-        Recovery strategy for common failure modes:
-        - If embedding fails due to size, progressively shorten the bar length and retry.
-        - If editing fails, try to refetch the message and re-edit; if that also fails,
-          send a new message and update self.message to point to it.
-        - If final message update cannot be delivered, failures are printed but the method
-          still attempts to reply ephemerally to the invoking interaction.
-        """
         embed = self.make_poll_embed()
         if self.message:
             try:
@@ -608,14 +522,6 @@ class PollView(discord.ui.View):
             pass
 
     def make_poll_embed(self, closed: bool = False, bar_len: int = 10):
-        """
-        Render the poll's current state as a discord.Embed.
-
-        Display details:
-        - For each option shows a colored bar and percentage + absolute vote count.
-        - If closed=True the embed shows a locked status and the total votes.
-        - The bar length is configurable to handle space/size constraints when embedding.
-        """
         total_votes = sum(len(v) for v in self.votes.values())
         colors = ["🟦", "🟥", "🟩", "🟨", "🟪", "🟧", "🟫"]
 
@@ -644,7 +550,7 @@ class PollView(discord.ui.View):
                 status = (
                     f"{CustomEmojis['Locked']} Poll closed <t:{int(self.end_time.timestamp())}:R>\n"
                     f"{CustomEmojis['SecretBox']} Votes are anonymous\n"
-                    f"With total of `{total_votes} votes`" 
+                    f"With total of `{total_votes} votes`"
                 )
             else:
                 status = f"{CustomEmojis['Locked']} Poll closed\n{CustomEmojis['SecretBox']} Votes are anonymous\n{total_votes} votes"
@@ -659,15 +565,8 @@ class PollView(discord.ui.View):
         embed.add_field(name="\u200b", value=status, inline=False)
         return embed
 
-class AddOptionModal(ui.Modal, title="Add Poll Options"):
-    """
-    Modal used by the poll creator to add up to five options in one interaction.
 
-    Behavior:
-    - The modal uses a conservative placeholder and enforces max_length on each input.
-    - After submission new options are appended to the PollView, the Select menu is updated,
-      and the updated poll is persisted to the DB.
-    """
+class AddOptionModal(ui.Modal, title="Add Poll Options"):
     opt1 = ui.TextInput(label="Option 1 (optional)", required=False, max_length=100,
                         placeholder=MODAL_PLACEHOLDER)
     opt2 = ui.TextInput(label="Option 2 (optional)", required=False, max_length=100,
@@ -685,10 +584,9 @@ class AddOptionModal(ui.Modal, title="Add Poll Options"):
         self.description = "Note: Discord only allows a maximum of 25 options per select menu."
 
     async def on_submit(self, interaction: discord.Interaction):
-        
         if not self.poll_view.message:
             return await interaction.response.send_message("⚠️ Poll message no longer exists.", ephemeral=True)
-        
+
         new_opts_raw = [
             self.opt1.value.strip(),
             self.opt2.value.strip(),
@@ -710,7 +608,7 @@ class AddOptionModal(ui.Modal, title="Add Poll Options"):
                     f"{MinoriEmojis['MinoriConfused']} You can't add duplicate options.",
                     ephemeral=True
                 )
-        MAX_OPTIONS = 14 
+        MAX_OPTIONS = 14
         if len(self.poll_view.options) + len(new_opts) > MAX_OPTIONS:
             return await interaction.response.send_message(
                 f"⚠️ You can only add up to {MAX_OPTIONS} options.", ephemeral=True
@@ -723,8 +621,8 @@ class AddOptionModal(ui.Modal, title="Add Poll Options"):
                 (i for i in self.poll_view.children if isinstance(i, discord.ui.Select)), None
             )
             if select:
-                select.options = [discord.SelectOption(label=opt, value=str(idx)) 
-                                for idx, opt in enumerate(self.poll_view.options)]
+                select.options = [discord.SelectOption(label=opt, value=str(idx))
+                                  for idx, opt in enumerate(self.poll_view.options)]
                 select.placeholder = "Select one answer (scroll for more)" if len(self.poll_view.options) > 10 else "Select one answer"
 
         embed = self.poll_view.make_poll_embed()
@@ -735,29 +633,22 @@ class AddOptionModal(ui.Modal, title="Add Poll Options"):
                 message_id=self.poll_view.message.id,
                 guild_id=self.poll_view.message.guild.id,
                 channel_id=self.poll_view.message.channel.id,
-                author_id=self.poll_view.author.id,          # <-- required now
+                author_id=self.poll_view.author.id,
                 question=self.poll_view.question,
                 options=self.poll_view.options,
                 votes=self.poll_view.votes,
                 end_time=self.poll_view.end_time
             )
-        except aiosqlite.Error as e:
+        except Exception as e:
             print(f"[Poll DB Save Error on add_option] {e}")
 
         await interaction.response.send_message(
             f"{CustomEmojis['VERIFIED']} Added {len(new_opts)} option(s). Total options: {len(self.poll_view.options)}",
             ephemeral=True
         )
-        
-class PollInputModal(ui.Modal, title="Create Poll"):
-    """
-    Modal for initial poll creation.
 
-    Fields:
-    - question: required short question string.
-    - opt1/opt2 required, opt3/opt4 optional.
-    - On submit this modal creates a PollView, posts the poll message, and persists the row.
-    """
+
+class PollInputModal(ui.Modal, title="Create Poll"):
     question = ui.TextInput(label="Question", placeholder="What's the poll about?", required=True, max_length=200)
     opt1 = ui.TextInput(label="Option 1 (required)", placeholder="First option (required)", required=True, max_length=100)
     opt2 = ui.TextInput(label="Option 2 (required)", placeholder="Second option (required)", required=True, max_length=100)
@@ -768,7 +659,7 @@ class PollInputModal(ui.Modal, title="Create Poll"):
         super().__init__()
         self.ctx = ctx
         self.timeout_seconds = timeout_seconds
-        
+
     async def on_submit(self, interaction: discord.Interaction):
         raw_opts = [
             self.opt1.value.strip(),
@@ -800,7 +691,7 @@ class PollInputModal(ui.Modal, title="Create Poll"):
                 message_id=msg.id,
                 guild_id=interaction.guild.id,
                 channel_id=interaction.channel.id,
-                author_id=interaction.user.id,             
+                author_id=interaction.user.id,
                 question=self.question.value,
                 options=opts,
                 votes=view.votes,
@@ -811,7 +702,7 @@ class PollInputModal(ui.Modal, title="Create Poll"):
                 await interaction.response.send_message(f"{CustomEmojis['VERIFIED']} Poll successfully created!", ephemeral=True)
             except discord.errors.InteractionResponded:
                 await interaction.followup.send(f"{CustomEmojis['VERIFIED']} Poll successfully created!", ephemeral=True)
-        except aiosqlite.Error as e:
+        except Exception as e:
             print(f"[Poll Create Error] {e}")
             try:
                 await interaction.response.send_message(f"⚠️ Failed to create poll: {e}", ephemeral=True)

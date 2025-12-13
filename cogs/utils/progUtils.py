@@ -8,7 +8,8 @@ import random
 import colorsys
 import re
 import unicodedata
-import aiosqlite
+import asyncpg
+import asyncio
 from typing import Optional
 from .emojis import TitleEmojis
 
@@ -115,6 +116,31 @@ TITLE_COLORS = {
 
 DB_PATH = os.path.join(ROOT_PATH, "data", "minori.db")
 
+# -------------------- Postgres pool helpers (for rank query) -------------------- #
+_POOL: Optional[asyncpg.Pool] = None
+_DB_LOCK = asyncio.Lock()  # kept for API symmetry; not heavily used here
+
+async def init_db_pool(dsn: Optional[str] = None, *, min_size: int = 1, max_size: int = 10) -> None:
+    """Lazily initialize asyncpg pool from DATABASE_URL (or provided dsn)."""
+    global _POOL
+    if _POOL is None:
+        dsn = dsn or os.getenv("DATABASE_URL")
+        if not dsn:
+            raise RuntimeError("DATABASE_URL is not set")
+        _POOL = await asyncpg.create_pool(dsn=dsn, min_size=min_size, max_size=max_size)
+
+async def close_db_pool() -> None:
+    """Close the asyncpg pool."""
+    global _POOL
+    if _POOL is not None:
+        await _POOL.close()
+        _POOL = None
+
+async def get_pool() -> asyncpg.Pool:
+    """Return the pool, creating it if needed."""
+    await init_db_pool()
+    assert _POOL is not None
+    return _POOL
 
 # ==================== Stateless Utility Functions ====================
 
@@ -276,24 +302,24 @@ async def get_user_rank(user_id: int, guild_id: int, max_level: int):
     """
     Query the users table for ordering by level/exp and return the 1-based rank for user_id.
 
-    Returns None when the user is not present in the ordering. This function opens a
-    short-lived aiosqlite connection (context-managed) which is appropriate for occasional use.
+    Returns None when the user is not present in the ordering. This function uses a
+    pooled asyncpg connection (short-lived acquisition) appropriate for occasional use.
     """
-    async with aiosqlite.connect(DB_PATH) as conn:
-        async with conn.execute(
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
             """
             SELECT user_id
             FROM users
-            WHERE guild_id = ?
-            AND ((exp > 0 AND level >= 1) OR level = ?)
+            WHERE guild_id = $1
+              AND ((exp > 0 AND level >= 1) OR level = $2)
             ORDER BY level DESC, exp DESC
             """,
-            (guild_id, max_level)
-        ) as cursor:
-            rows = await cursor.fetchall()
-
+            guild_id,
+            max_level
+        )
     for i, row in enumerate(rows, start=1):
-        if row[0] == user_id:
+        if row["user_id"] == user_id:
             return i
     return None
 
