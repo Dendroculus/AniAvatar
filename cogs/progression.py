@@ -679,47 +679,72 @@ class Progression(commands.Cog):
 
     async def add_exp(self, user_id: int, guild_id: int, amount: int):
         """
-        Add EXP to a user and handle level-ups in a loop.
-
-        Returns a tuple (new_level, new_exp, leveled_up_bool).
+        Add EXP safely using a short transaction and row-level locking.
+        Prevents lost updates when multiple events for the same user run concurrently.
+        Returns (new_level, new_exp, leveled_up).
         """
         await self._ensure_pool()
         async with self.pool.acquire() as conn:
-            row = await conn.fetchrow(
-                "SELECT exp, level FROM users WHERE user_id = $1 AND guild_id = $2",
-                user_id, guild_id
-            )
-            if row is None:
-                await conn.execute(
-                    "INSERT INTO users (user_id, guild_id, exp, level) VALUES ($1, $2, 0, 1) ON CONFLICT DO NOTHING",
-                    user_id, guild_id
+            async with conn.transaction():
+                # Lock the row to serialize concurrent updates for this user/guild.
+                row = await conn.fetchrow(
+                    """
+                    SELECT exp, level
+                    FROM users
+                    WHERE user_id = $1 AND guild_id = $2
+                    FOR UPDATE
+                    """,
+                    user_id, guild_id,
                 )
-                exp = 0
-                level = 1
-            else:
+
+                if row is None:
+                    # Insert a default row atomically; repeat the lock read to keep logic unified.
+                    await conn.execute(
+                        """
+                        INSERT INTO users (user_id, guild_id, exp, level)
+                        VALUES ($1, $2, 0, 1)
+                        ON CONFLICT DO NOTHING
+                        """,
+                        user_id, guild_id,
+                    )
+                    # Lock the freshly inserted row (or the existing one if created elsewhere)
+                    row = await conn.fetchrow(
+                        """
+                        SELECT exp, level
+                        FROM users
+                        WHERE user_id = $1 AND guild_id = $2
+                        FOR UPDATE
+                        """,
+                        user_id, guild_id,
+                    )
+
                 exp, level = row["exp"], row["level"]
+                new_exp = exp + amount
+                leveled_up = False
 
-            new_exp = exp + amount
-            leveled_up = False
+                while level < self.MAX_LEVEL:
+                    next_exp = 50 * level + 20 * level**2
+                    if new_exp >= next_exp:
+                        new_exp -= next_exp
+                        level += 1
+                        leveled_up = True
+                    else:
+                        break
 
-            while level < self.MAX_LEVEL:
-                next_exp = 50 * level + 20 * level**2
-                if new_exp >= next_exp:
-                    new_exp -= next_exp
-                    level += 1
-                    leveled_up = True
-                else:
-                    break
+                if level >= self.MAX_LEVEL:
+                    level = self.MAX_LEVEL
+                    new_exp = 0
 
-            if level >= self.MAX_LEVEL:
-                level = self.MAX_LEVEL
-                new_exp = 0
+                await conn.execute(
+                    """
+                    UPDATE users
+                    SET exp = $1, level = $2
+                    WHERE user_id = $3 AND guild_id = $4
+                    """,
+                    new_exp, level, user_id, guild_id,
+                )
 
-            await conn.execute(
-                "UPDATE users SET exp = $1, level = $2 WHERE user_id = $3 AND guild_id = $4",
-                new_exp, level, user_id, guild_id
-            )
-            return level, new_exp, leveled_up
+                return level, new_exp, leveled_up
 
     async def get_rank(self, user_id: int, guild_id: int):
         """
