@@ -1,4 +1,4 @@
-EN | [English](../README.md)
+CN | [English](../README.md)
 
 <h1 align="center">AniAvatar Discord 机器人 (Minori)</h1>
 
