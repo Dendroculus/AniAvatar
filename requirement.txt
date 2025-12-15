@@ -4,3 +4,4 @@ pillow
 python-dotenv
 asyncpg
 asyncio
+cachetools
