@@ -243,7 +243,7 @@ class Roles(commands.Cog):
             except Exception as e:
                 print(f"[Roles] Error during guild sync {guild.id}: {e}")
 
-        print("[Roles] Fail-safe role sync tick complete.")
+        print("[Roles] Fail-safe role sync tick complete.\n")
 
     @sync_roles_loop.before_loop
     async def before_sync_roles(self):

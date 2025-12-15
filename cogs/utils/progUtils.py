@@ -9,8 +9,8 @@ import colorsys
 import re
 import unicodedata
 import asyncpg
-import asyncio
-from typing import Optional, Dict
+import time
+from typing import Optional, Dict, Tuple
 from .emojis import TitleEmojis
 
 """
@@ -391,6 +391,39 @@ class ImageRenderer:
         self._icon_cache = {}
         self._font_cache = {}
         self._cache_size = cache_size
+        # Lightweight TTL cache keyed by caller-provided identifiers (e.g., guild_id)
+        self._leaderboard_cache: Dict[str, Tuple[float, bytes]] = {}
+
+    #  Cache helpers (leaderboard) 
+
+    def _get_cached_leaderboard(self, cache_key: Optional[str], ttl_seconds: int) -> Optional[bytes]:
+        """
+        Return cached leaderboard bytes when present and fresh.
+        """
+        if not cache_key or ttl_seconds <= 0:
+            return None
+        entry = self._leaderboard_cache.get(cache_key)
+        if not entry:
+            return None
+        ts, payload = entry
+        if (time.monotonic() - ts) <= ttl_seconds:
+            return payload
+        # Expired: evict to keep memory bounded
+        self._leaderboard_cache.pop(cache_key, None)
+        return None
+
+    def _set_cached_leaderboard(self, cache_key: Optional[str], payload: bytes) -> None:
+        """
+        Store rendered leaderboard bytes using a simple TTL-aware dictionary.
+        """
+        if not cache_key:
+            return
+        self._leaderboard_cache[cache_key] = (time.monotonic(), payload)
+        # Soft cap cleanup
+        if len(self._leaderboard_cache) > self._cache_size:
+            # Remove the oldest entry
+            oldest_key = min(self._leaderboard_cache.items(), key=lambda kv: kv[1][0])[0]
+            self._leaderboard_cache.pop(oldest_key, None)
 
     #  Main Image Renderer Class 
 
@@ -468,75 +501,103 @@ class ImageRenderer:
         return (r, g, b, alpha)
 
     def _random_gradient(self, size, direction=None, colors=None, noise=False, seed=None):
+        """
+        Generates a gradient using Bicubic resizing (C engine)
+        instead of Python loops. Instant generation.
+        """
         if seed is not None:
-            random. seed(seed)
+            random.seed(seed)
+        
         w, h = size
         if direction is None:
             direction = random.choice(['vertical', 'horizontal', 'diagonal'])
+            
         if not colors:
+            # Generate random colors
             if random.random() < 0.3:
                 colors = [self._random_color(), self._random_color(), self._random_color()]
             else:
                 colors = [self._random_color(), self._random_color()]
+        
+        # Ensure colors are tuples
         colors = [tuple(c if len(c) == 4 else (c[0], c[1], c[2], 255)) for c in colors]
-        img = Image.new("RGBA", (w, h))
-        pix = img.load()
 
-        if len(colors) == 2:
-            c0, c1 = colors
-            for y in range(h):
-                for x in range(w):
-                    if direction == 'vertical':
-                        t = y / max(h-1,1)
-                    elif direction == 'horizontal':
-                        t = x / max(w-1,1)
-                    else:
-                        t = (x + y) / max(w + h - 2, 1)
-                    pix[x, y] = self._interpolate_color(c0, c1, t)
-        else:
-            c0, c1, c2 = colors
-            for y in range(h):
-                for x in range(w):
-                    if direction == 'vertical':
-                        t = y / max(h-1,1)
-                    elif direction == 'horizontal':
-                        t = x / max(w-1,1)
-                    else:
-                        t = (x + y) / max(w + h - 2, 1)
-                    if t <= 0.5:
-                        pix[x, y] = self._interpolate_color(c0, c1, t / 0.5)
-                    else:
-                        pix[x, y] = self._interpolate_color(c1, c2, (t-0.5)/0.5)
+        # 1. Create a tiny source image (2x2 pixels) to represent the gradient points
+        # This bypasses the need to loop over 800x600 pixels in Python
+        small_w, small_h = (2, 2)
+        tiny_img = Image.new("RGBA", (small_w, small_h))
+        
+        # 2. Place colors at corners based on direction
+        c0 = colors[0]
+        c1 = colors[1]
+        c2 = colors[2] if len(colors) > 2 else c1
 
+        # We set pixels on a tiny grid and let PIL interpolate the rest
+        if direction == 'vertical':
+            tiny_img.putpixel((0, 0), c0)
+            tiny_img.putpixel((1, 0), c0)
+            tiny_img.putpixel((0, 1), c1)
+            tiny_img.putpixel((1, 1), c1)
+        elif direction == 'horizontal':
+            tiny_img.putpixel((0, 0), c0)
+            tiny_img.putpixel((0, 1), c0)
+            tiny_img.putpixel((1, 0), c1)
+            tiny_img.putpixel((1, 1), c1)
+        else: # diagonal
+            tiny_img.putpixel((0, 0), c0)
+            tiny_img.putpixel((1, 1), c1)
+            tiny_img.putpixel((0, 1), self._interpolate_color(c0, c1, 0.5))
+            tiny_img.putpixel((1, 0), self._interpolate_color(c0, c1, 0.5))
+
+        # 3. Resize to full size using Bicubic (High quality, native C speed)
+        img = tiny_img.resize((w, h), resample=Image.Resampling.BICUBIC)
+
+        # 4. Add noise (Optimized: generate noise on small image then resize)
         if noise:
-            noise_img = Image.new("RGBA", (w,h))
-            npx = noise_img.load()
-            for y in range(h):
-                for x in range(w):
-                    alpha = int(random.uniform(6,18))
-                    npx[x,y] = (0,0,0,alpha)
+            # Generate noise on a smaller scale to save processing, then scale up
+            noise_w, noise_h = w // 4, h // 4
+            noise_img = Image.effect_noise((noise_w, noise_h), sigma=10).convert("RGBA")
+            noise_img.putalpha(20) # Low opacity
+            noise_img = noise_img.resize((w, h), Image.Resampling.NEAREST)
             img = Image.alpha_composite(img, noise_img)
+            
         return img
 
     def _make_linear_gradient(self, size, colors, direction="horizontal"):
+        """
+        Build a smooth linear gradient using Pillow's native resampling to avoid
+        Python-level per-pixel loops. A small ramp is generated once and then
+        scaled with BICUBIC interpolation to the requested size.
+        """
         w, h = size
-        grad = Image.new("RGBA", (w,h))
-        draw = ImageDraw.Draw(grad)
-        if direction=="horizontal":
-            for x in range(w):
-                t = x / max(w-1,1)
-                r = int(colors[0][0]*(1-t) + colors[1][0]*t)
-                g = int(colors[0][1]*(1-t) + colors[1][1]*t)
-                b = int(colors[0][2]*(1-t) + colors[1][2]*t)
-                draw.line([(x,0),(x,h)], fill=(r,g,b,255))
+        if not colors or len(colors) < 2:
+            colors = [(0, 0, 0, 255), (255, 255, 255, 255)]
+        c1, c2 = colors[0], colors[1]
+        ramp_len = 256  # small, fixed ramp keeps CPU work minimal
+        if direction == "horizontal":
+            ramp = Image.new("RGBA", (ramp_len, 1))
+            rp = ramp.load()
+            for x in range(ramp_len):
+                t = x / (ramp_len - 1)
+                rp[x, 0] = (
+                    int(c1[0] * (1 - t) + c2[0] * t),
+                    int(c1[1] * (1 - t) + c2[1] * t),
+                    int(c1[2] * (1 - t) + c2[2] * t),
+                    255,
+                )
+            return ramp.resize((w, h), resample=Image.Resampling.BICUBIC)
         else:
-            for y in range(h):
-                t = y / max(h-1,1)
-                r = int(colors[0][0]*(1-t) + colors[1][0]*t)
-                g = int(colors[0][1]*(1-t) + colors[1][1]*t)
-                b = int(colors[0][2]*(1-t) + colors[1][2]*t)
-                draw.line([(0,y),(w,y)], fill=(r,g,b,255))
-        return grad
+            ramp = Image.new("RGBA", (1, ramp_len))
+            rp = ramp.load()
+            for y in range(ramp_len):
+                t = y / (ramp_len - 1)
+                rp[0, y] = (
+                    int(c1[0] * (1 - t) + c2[0] * t),
+                    int(c1[1] * (1 - t) + c2[1] * t),
+                    int(c1[2] * (1 - t) + c2[2] * t),
+                    255,
+                )
+            return ramp.resize((w, h), resample=Image.Resampling.BICUBIC)
 
     #  Text Drawing Utilities 
 
@@ -1223,7 +1284,9 @@ class ImageRenderer:
         gradient_noise=True,
         gradient_seed=None,
         debug_save_path: str = None,
-        rank_offset: int = LeaderboardLayout.RANK_OFFSET_DEFAULT
+        rank_offset: int = LeaderboardLayout.RANK_OFFSET_DEFAULT,
+        cache_key: Optional[str] = None,
+        cache_ttl: int = 120
     ) -> bytes:
         """
         Create a full leaderboard image from a sequence of row dictionaries.
@@ -1232,8 +1295,16 @@ class ImageRenderer:
         - name, avatar_bytes, rank, level, exp, next_exp, title
         The function composes each row and returns PNG bytes. On error a small red
         4x4 fallback PNG blob is returned so callers can detect rendering failure.
+
+        Caching:
+        - When cache_key is provided (e.g., guild_id) and cache_ttl > 0, a fresh image
+          is reused for that key within the TTL window to avoid redundant rendering.
         """
         try:
+            cached = self._get_cached_leaderboard(cache_key, cache_ttl)
+            if cached is not None:
+                return cached
+
             fonts = fonts or FONTS
             rows = list(rows or [])
             n = len(rows)
@@ -1280,7 +1351,10 @@ class ImageRenderer:
                         fh. write(out.getvalue())
                 except Exception:
                     pass
-            return out.getvalue()
+
+            payload = out.getvalue()
+            self._set_cached_leaderboard(cache_key, payload)
+            return payload
 
         except Exception:
             traceback.print_exc()
