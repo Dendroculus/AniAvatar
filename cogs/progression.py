@@ -22,6 +22,9 @@ from cogs.utils.constants import BG_PATH, EMOJI_PATH, FONTS, TITLE_EMOJI_FILES
 from cogs.trading import format_coins
 from cogs.utils.emojis import CustomEmojis, MinoriEmojis, TitleEmojis, ShopEmojis
 
+
+# TODO : USE REDIS FOR CACHING RENDERED IMAGES IN MULTI-INSTANCE DEPLOYMENTS
+
 """
 progression.py
 
