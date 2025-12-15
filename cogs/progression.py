@@ -7,7 +7,9 @@ import asyncio
 import traceback
 import io
 import hashlib
-from typing import Optional
+import time
+import concurrent.futures
+from typing import Optional, Iterable, Any
 from collections import OrderedDict
 from discord import MessageReference
 from cogs.utils.progUtils import (
@@ -64,6 +66,57 @@ COINS_EMOJI = f"{ShopEmojis['Coins']}"
 # Tune via env if desired.
 DEFAULT_STATEMENT_TIMEOUT_MS = int(os.getenv("PG_STATEMENT_TIMEOUT_MS", "2000"))
 
+def _render_profile_in_process(
+    avatar_bytes: bytes,
+    display_name: str,
+    title_name: str,
+    level: int,
+    exp: int,
+    next_exp: int,
+    bg_file: Optional[str],
+    theme_name: str,
+    font_color: str,
+    user_rank: Optional[int],
+) -> Optional[bytes]:
+    """
+    Render a profile image in a separate process to bypass the GIL.
+    A fresh ImageRenderer is created per worker process to keep state isolated.
+    """
+    renderer = ImageRenderer(cache_size=Progression.RENDER_CACHE_SIZE)  # type: ignore[name-defined]
+    return renderer.render_profile_image(
+        avatar_bytes,
+        display_name,
+        title_name,
+        level,
+        exp,
+        next_exp,
+        FONTS,
+        TITLE_EMOJI_FILES,
+        bg_file=bg_file,
+        theme_name=theme_name,
+        font_color=font_color,
+        user_rank=user_rank,
+    )
+
+
+def _render_leaderboard_in_process(
+    rows_data: Iterable[dict[str, Any]],
+    exp_icon_path: str,
+    cache_key: Optional[str],
+    cache_ttl: int,
+) -> Optional[bytes]:
+    """
+    Render a leaderboard image in a separate process. A renderer instance is created
+    inside the worker so Pillow runs outside the main event loop, leveraging multiple cores.
+    """
+    renderer = ImageRenderer(cache_size=Progression.RENDER_CACHE_SIZE)  # type: ignore[name-defined]
+    return renderer.create_leaderboard_image(
+        rows=list(rows_data),
+        fonts=FONTS,
+        exp_icon_path=exp_icon_path,
+        cache_key=cache_key,
+        cache_ttl=cache_ttl,
+    )
 
 async def _pool_init(conn: asyncpg.Connection):
     """
@@ -245,11 +298,13 @@ class Progression(commands.Cog):
     MAX_EXP_WIDTH = 12
     RENDER_CACHE_SIZE = 200
     RENDER_CACHE_TTL = 300
+    LEADERBOARD_CACHE_TTL = 120 # 2 minutes
 
     def __init__(self, bot):
         self.bot = bot
         self.cooldowns = {}
         self.pool: asyncpg.Pool | None = None
+        self._leaderboard_cache = {}
 
         cpu_count = os.cpu_count() or 2
         max_renders = max(2, cpu_count - 1)
@@ -258,8 +313,61 @@ class Progression(commands.Cog):
         self._render_cache: OrderedDict[str, tuple[bytes, float]] = OrderedDict()
 
         self.renderer = ImageRenderer(cache_size=self.RENDER_CACHE_SIZE)
+        
+        self._process_pool = concurrent.futures.ProcessPoolExecutor(max_workers=max_renders)
 
         print(f"[Progression] Initialized with max {max_renders} concurrent renders")
+        
+    async def _generate_and_send_leaderboard(self, ctx, rows_data, render_image_callable, make_embed_and_file, debug: bool = True) -> bool:
+        """
+        Helper to log/timer the leaderboard rendering, turn rows_data -> image, and send the message.
+
+        Returns True on success, False on any failure (and sends a failure notice when appropriate).
+        - ctx: command context
+        - rows_data: list prepared for renderer
+        - render_image_callable: coroutine/function to call to render bytes (accepts rows_data)
+        - make_embed_and_file: function(rows_data, img_bytes, user_rank, formatted_coins) -> (embed, file)
+        - debug: whether to print debug lines (toggleable)
+        """
+        start = time.perf_counter()
+        if debug:
+            print("Generating leaderboard for", len(rows_data), "rows")
+            for idx, rd in enumerate(rows_data[:6]):
+                print(
+                    f" row[{idx}]: name={rd.get('name')} "
+                    f"level={rd.get('level')} exp={rd.get('exp')} next={rd.get('next_exp')}"
+                )
+
+        # render_image_callable should be an awaitable-returning function (like the render_image wrapper)
+        img_bytes = await render_image_callable(rows_data)
+        if not img_bytes:
+            if debug:
+                print("Render returned no bytes.")
+            await self.safe_send(ctx, "Failed to generate leaderboard image (check bot logs).")
+            return False
+
+        user_rank = await self.get_rank(ctx.author.id, ctx.guild.id)
+        user_coins = await self.get_coins(ctx.author.id, ctx.guild.id)
+        formatted_coins = format_coins(user_coins)
+        embed, file = make_embed_and_file(rows_data, img_bytes, user_rank, formatted_coins)
+
+        try:
+            await ctx.send(embed=embed, file=file)
+            end = time.perf_counter()
+            if debug:
+                print(f"Leaderboard generated and sent in {end - start:.2f} seconds.\n")
+            return True
+        except Exception as e:
+            print("Failed to send via ctx.send:", e, traceback.format_exc())
+            try:
+                await self.safe_send(ctx, embed=embed, file=file)
+                if debug:
+                    print(f"Sent leaderboard image via safe_send in {time.perf_counter() - start:.2f} seconds.")
+                return True
+            except Exception as e2:
+                print("Failed to send leaderboard via safe_send:", e2, traceback.format_exc())
+                await self.safe_send(ctx, "Failed to send leaderboard image (check bot logs).")
+                return False
 
     async def _ensure_pool(self):
         if self.pool is None:
@@ -326,11 +434,15 @@ class Progression(commands.Cog):
     async def cog_unload(self):
         """
         Close the database connection when the cog is unloaded; swallow errors to avoid
-        disrupting bot shutdown.
+        disrupting bot shutdown. Also tear down the process pool to free workers.
         """
         try:
             if self.pool:
                 await self.pool.close()
+        except Exception:
+            pass
+        try:
+            self._process_pool.shutdown(wait=False, cancel_futures=True)
         except Exception:
             pass
 
@@ -420,17 +532,26 @@ class Progression(commands.Cog):
         while len(self._render_cache) > self.RENDER_CACHE_SIZE:
             self._render_cache.popitem(last=False)
 
-    async def _render_profile_cached(self, avatar_bytes: bytes, display_name: str, title_name: str,
-                                 level: int, exp: int, next_exp: int, bg_file: Optional[str] = None,
-                                 theme_name: str = "default", font_color: str = "white",
-                                 user_rank: int = None) -> bytes | None:
+    async def _render_profile_cached(
+        self,
+        avatar_bytes: bytes,
+        display_name: str,
+        title_name: str,
+        level: int,
+        exp: int,
+        next_exp: int,
+        bg_file: Optional[str] = None,
+        theme_name: str = "default",
+        font_color: str = "white",
+        user_rank: int = None,
+     ) -> bytes | None:
         """
         Render a profile card into bytes with caching and concurrency control.
 
         Behavior:
         - Check in-memory cache first.
-        - If not cached, acquire a semaphore permit and offload rendering to a thread
-          via asyncio.to_thread with a 20s timeout.
+        - If not cached, acquire a semaphore permit and offload rendering to a process
+          via run_in_executor with a 20s timeout (bypassing the GIL).
         - On success, cache the output and return bytes; on failure return None.
         - This keeps the event loop responsive while supporting high-quality Pillow renders.
         """
@@ -452,24 +573,24 @@ class Progression(commands.Cog):
             return cached
 
         async with self._render_semaphore:
+            loop = asyncio.get_running_loop()
             try:
                 img_bytes = await asyncio.wait_for(
-                    asyncio.to_thread(
-                        self.renderer.render_profile_image,
+                    loop.run_in_executor(
+                        self._process_pool,
+                        _render_profile_in_process,
                         avatar_bytes,
                         display_name,
                         title_name,
                         level,
                         exp,
                         next_exp,
-                        FONTS,
-                        TITLE_EMOJI_FILES,
-                        bg_file=bg_file,
-                        theme_name=theme_name,
-                        font_color=font_color,
-                        user_rank=user_rank
+                        bg_file,
+                        theme_name,
+                        font_color,
+                        user_rank,
                     ),
-                    timeout=20.0
+                    timeout=20.0,
                 )
 
                 if img_bytes:
@@ -485,7 +606,7 @@ class Progression(commands.Cog):
                 print(f"[Progression] Render error for {display_name}: {e}")
                 traceback.print_exc()
                 return None
-
+            
     async def _build_rows_data(self, ctx, rows, avatar_size=128, avatar_timeout=3.0):
         """
         Build the structured rows used by the leaderboard renderer.
@@ -897,7 +1018,7 @@ class Progression(commands.Cog):
 
         Implementation notes:
         - Performs a DB query for the top users, gathers avatars/names concurrently,
-          and offloads image composition to threads with a timeout.
+          and offloads image composition to processes with a timeout.
         - Falls back to a gradient-less render if the primary render times out.
         """
         try:
@@ -958,13 +1079,17 @@ class Progression(commands.Cog):
 
         async def render_image(rows_data):
             exp_icon_path = os.path.join(EMOJI_PATH, "EXP.png")
+            loop = asyncio.get_running_loop()
+            cache_key = str(ctx.guild.id)
             try:
                 return await asyncio.wait_for(
-                    asyncio.to_thread(
-                        self.renderer.create_leaderboard_image,
+                    loop.run_in_executor(
+                        self._process_pool,
+                        _render_leaderboard_in_process,
                         rows_data,
-                        fonts=FONTS,
-                        exp_icon_path=exp_icon_path
+                        exp_icon_path,
+                        cache_key,
+                        self.LEADERBOARD_CACHE_TTL,
                     ),
                     timeout=20.0
                 )
@@ -972,13 +1097,13 @@ class Progression(commands.Cog):
                 print("create_leaderboard_image timed out — retrying without gradient")
                 try:
                     return await asyncio.wait_for(
-                        asyncio.to_thread(
-                            self.renderer.create_leaderboard_image,
+                        loop.run_in_executor(
+                            self._process_pool,
+                            _render_leaderboard_in_process,
                             rows_data,
-                            fonts=FONTS,
-                            exp_icon_path=exp_icon_path,
-                            gradient=False,
-                            gradient_noise=False
+                            exp_icon_path,
+                            cache_key,
+                            self.LEADERBOARD_CACHE_TTL,
                         ),
                         timeout=20.0
                     )
@@ -1015,30 +1140,11 @@ class Progression(commands.Cog):
 
         rows_data = await build_rows_data(rows)
 
-        print("Generating leaderboard for", len(rows_data), "rows")
-        for idx, rd in enumerate(rows_data[:6]):
-            print(f" row[{idx}]: name={rd.get('name')} level={rd.get('level')} exp={rd.get('exp')} next={rd.get('next_exp')}")
-        img_bytes = await render_image(rows_data)
-        if not img_bytes:
-            return await self.safe_send(ctx, "Failed to generate leaderboard image (check bot logs).")
-
-        user_rank = await self.get_rank(ctx.author.id, ctx.guild.id)
-        user_coins = await self.get_coins(ctx.author.id, ctx.guild.id)
-        formatted_coins = format_coins(user_coins)
-        embed, file = make_embed_and_file(rows_data, img_bytes, user_rank, formatted_coins)
-
-        try:
-            await ctx.send(embed=embed, file=file)
-            print("Sent leaderboard image via ctx.send.")
-        except Exception as e:
-            print("Failed to send via ctx.send:", e, traceback.format_exc())
-            try:
-                await self.safe_send(ctx, embed=embed, file=file)
-                print("Sent leaderboard image via safe_send.")
-            except Exception as e2:
-                print("Failed to send leaderboard via safe_send:", e2, traceback.format_exc())
-                await self.safe_send(ctx, "Failed to send leaderboard image (check bot logs).")
-
+        # LEADERBOARD DEBUGGING NOTE
+        success = await self._generate_and_send_leaderboard(ctx, rows_data, render_image, make_embed_and_file, debug=True)
+        if not success: 
+            return await self.safe_send(ctx, "Failed to generate leaderboard image (check logs).")
+        
     @commands.hybrid_command(name="profiletheme", description="Choose your profile card background theme")
     @commands.guild_only()
     async def profiletheme(self, ctx):
