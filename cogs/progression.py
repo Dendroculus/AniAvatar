@@ -9,10 +9,10 @@ import io
 import hashlib
 import time
 import concurrent.futures
-from cachetools import TTLCache
 from typing import Optional, Iterable, Any
 from collections import OrderedDict
 from discord import MessageReference
+import redis.asyncio as redis
 from cogs.utils.progUtils import (
     ImageRenderer,
     get_title,
@@ -43,8 +43,9 @@ Design notes and important operational guidance:
 - Caching:
   - Rendered profile images are cached in-memory in `_render_cache` (LRU-like OrderedDict).
     Cache entries have TTL (RENDER_CACHE_TTL) to reduce memory usage and keep visuals fresh.
-  - Cache keys include a short hash of avatar bytes and textual attributes to avoid accidental
+    Cache keys include a short hash of avatar bytes and textual attributes to avoid accidental
     collisions when images or display names change.
+  - Leaderboard images can be cached in Redis by the main bot process to avoid re-rendering.
 - Fail-safe behavior:
   - Many operations are defensive: failures in rendering or avatar fetch degrade gracefully
     (returning placeholder data or None), and are logged. This prioritizes bot availability.
@@ -67,7 +68,6 @@ SQL_INSERT_OR_IGNORE_USER_COINS_ZERO = (
 COINS_EMOJI = f"{ShopEmojis['Coins']}"
 
 # Statement timeout (ms) applied per-connection to avoid runaway queries.
-# Tune via env if desired.
 DEFAULT_STATEMENT_TIMEOUT_MS = int(os.getenv("PG_STATEMENT_TIMEOUT_MS", "2000"))
 
 def _render_profile_in_process(
@@ -113,7 +113,9 @@ def _render_leaderboard_in_process(
     Render a leaderboard image in a separate process. A renderer instance is created
     inside the worker so Pillow runs outside the main event loop, leveraging multiple cores.
     """
-    renderer = ImageRenderer(cache_size=Progression.RENDER_CACHE_SIZE)  # type: ignore[name-defined]
+    renderer = ImageRenderer(
+        cache_size=Progression.RENDER_CACHE_SIZE,  # type: ignore[name-defined]
+    )
     return renderer.create_leaderboard_image(
         rows=list(rows_data),
         fonts=FONTS,
@@ -306,7 +308,6 @@ class Progression(commands.Cog):
 
     def __init__(self, bot):
         self.bot = bot
-        self.cooldowns = TTLCache(maxsize=50_000, ttl=3600)
         self.pool: asyncpg.Pool | None = None
         self._leaderboard_cache = {}
 
@@ -316,62 +317,26 @@ class Progression(commands.Cog):
 
         self._render_cache: OrderedDict[str, tuple[bytes, float]] = OrderedDict()
 
+        self.redis_url = os.getenv("REDIS_URL")
+        self.redis: redis.Redis | None = None
+        if self.redis_url:
+            try:
+                self.redis = redis.from_url(
+                    self.redis_url,
+                    decode_responses=False,
+                    socket_timeout=3,
+                    socket_connect_timeout=3,
+                )
+            except Exception as e:
+                print(f"[Progression] Failed to connect to Redis: {e}")
+                self.redis = None
+        self._fallback_cooldowns: dict[str, float] = {}
+
         self.renderer = ImageRenderer(cache_size=self.RENDER_CACHE_SIZE)
         
         self._process_pool = concurrent.futures.ProcessPoolExecutor(max_workers=max_renders)
 
         print(f"[Progression] Initialized with max {max_renders} concurrent renders")
-        
-    async def _generate_and_send_leaderboard(self, ctx, rows_data, render_image_callable, make_embed_and_file, debug: bool = True) -> bool:
-        """
-        Helper to log/timer the leaderboard rendering, turn rows_data -> image, and send the message.
-
-        Returns True on success, False on any failure (and sends a failure notice when appropriate).
-        - ctx: command context
-        - rows_data: list prepared for renderer
-        - render_image_callable: coroutine/function to call to render bytes (accepts rows_data)
-        - make_embed_and_file: function(rows_data, img_bytes, user_rank, formatted_coins) -> (embed, file)
-        - debug: whether to print debug lines (toggleable)
-        """
-        start = time.perf_counter()
-        if debug:
-            print("Generating leaderboard for", len(rows_data), "rows")
-            for idx, rd in enumerate(rows_data[:6]):
-                print(
-                    f" row[{idx}]: name={rd.get('name')} "
-                    f"level={rd.get('level')} exp={rd.get('exp')} next={rd.get('next_exp')}"
-                )
-
-        # render_image_callable should be an awaitable-returning function (like the render_image wrapper)
-        img_bytes = await render_image_callable(rows_data)
-        if not img_bytes:
-            if debug:
-                print("Render returned no bytes.")
-            await self.safe_send(ctx, "Failed to generate leaderboard image (check bot logs).")
-            return False
-
-        user_rank = await self.get_rank(ctx.author.id, ctx.guild.id)
-        user_coins = await self.get_coins(ctx.author.id, ctx.guild.id)
-        formatted_coins = format_coins(user_coins)
-        embed, file = make_embed_and_file(rows_data, img_bytes, user_rank, formatted_coins)
-
-        try:
-            await ctx.send(embed=embed, file=file)
-            end = time.perf_counter()
-            if debug:
-                print(f"Leaderboard generated and sent in {end - start:.2f} seconds.\n")
-            return True
-        except Exception as e:
-            print("Failed to send via ctx.send:", e, traceback.format_exc())
-            try:
-                await self.safe_send(ctx, embed=embed, file=file)
-                if debug:
-                    print(f"Sent leaderboard image via safe_send in {time.perf_counter() - start:.2f} seconds.")
-                return True
-            except Exception as e2:
-                print("Failed to send leaderboard via safe_send:", e2, traceback.format_exc())
-                await self.safe_send(ctx, "Failed to send leaderboard image (check bot logs).")
-                return False
 
     async def _ensure_pool(self):
         if self.pool is None:
@@ -443,6 +408,11 @@ class Progression(commands.Cog):
         try:
             if self.pool:
                 await self.pool.close()
+        except Exception:
+            pass
+        try:
+            if self.redis:
+                await self.redis.close()
         except Exception:
             pass
         try:
@@ -1020,17 +990,28 @@ class Progression(commands.Cog):
         """
         Generate and send a leaderboard image showing the top users in a guild.
 
-        Implementation notes:
-        - Performs a DB query for the top users, gathers avatars/names concurrently,
-          and offloads image composition to processes with a timeout.
-        - Falls back to a gradient-less render if the primary render times out.
+        Flow:
+        - Debug-print major steps (without per-line elapsed times).
+        - Try Redis cache first; on hit, still build the embed and send immediately.
+        - On miss, query DB, build rows, render via worker process, send immediately,
+          then upload to Redis in the background (non-blocking).
+        - At the very end, print total elapsed seconds.
         """
+        start = time.perf_counter()
+
+        def lb_log(msg: str):
+            print(f"[Leaderboard] {msg}")
+
         try:
             await ctx.defer()
         except Exception:
             pass
 
+        cache_key = f"lb_cache:{ctx.guild.id}"
+        lb_log(f"Start for guild={ctx.guild.id}")
+
         async def query_rows():
+            lb_log(f"Query start (guild={ctx.guild.id})")
             try:
                 await self._ensure_pool()
                 async with self.pool.acquire() as conn:
@@ -1045,19 +1026,23 @@ class Progression(commands.Cog):
                         """,
                         ctx.guild.id, self.MAX_LEVEL
                     )
-                    return [(r["user_id"], r["level"], r["exp"]) for r in rows]
-                
+                    rows_list = [(r["user_id"], r["level"], r["exp"]) for r in rows]
+                    lb_log(f"Query done, rows={len(rows_list)}")
+                    return rows_list
             except Exception as e:
-                print("[leaderboard] DB query failed:", e)
+                lb_log(f"DB query failed: {e}")
                 return None
 
         async def build_rows_data(rows):
             try:
-                return await self._build_rows_data(ctx, rows, avatar_size=128, avatar_timeout=3.0)
+                lb_log(f"Build rows data start (rows={len(rows) if rows else 0})")
+                data = await self._build_rows_data(ctx, rows, avatar_size=128, avatar_timeout=3.0)
+                lb_log(f"Build rows data done (rows_data={len(data)})")
+                return data
             except Exception as e:
-                print("[leaderboard] _build_rows_data failed:", e, traceback.format_exc())
+                lb_log(f"_build_rows_data failed: {e}\n{traceback.format_exc()}")
                 data = []
-                for idx, (user_id, level, exp) in enumerate(rows, start=1):
+                for idx, (user_id, level, exp) in enumerate(rows or [], start=1):
                     try:
                         member = ctx.guild.get_member(user_id)
                         if member:
@@ -1079,12 +1064,14 @@ class Progression(commands.Cog):
                         "exp": exp or 0,
                         "next_exp": next_exp
                     })
+                lb_log(f"Build rows data fallback done (rows_data={len(data)})\n")
                 return data
 
         async def render_image(rows_data):
+            lb_log(f"Render start (rows={len(rows_data)})")
             exp_icon_path = os.path.join(EMOJI_PATH, "EXP.png")
             loop = asyncio.get_running_loop()
-            cache_key = str(ctx.guild.id)
+            cache_key_inner = str(ctx.guild.id)
             try:
                 return await asyncio.wait_for(
                     loop.run_in_executor(
@@ -1092,13 +1079,13 @@ class Progression(commands.Cog):
                         _render_leaderboard_in_process,
                         rows_data,
                         exp_icon_path,
-                        cache_key,
+                        cache_key_inner,
                         self.LEADERBOARD_CACHE_TTL,
                     ),
                     timeout=20.0
                 )
             except asyncio.TimeoutError:
-                print("create_leaderboard_image timed out — retrying without gradient")
+                lb_log("Render timed out — retrying")
                 try:
                     return await asyncio.wait_for(
                         loop.run_in_executor(
@@ -1106,18 +1093,16 @@ class Progression(commands.Cog):
                             _render_leaderboard_in_process,
                             rows_data,
                             exp_icon_path,
-                            cache_key,
+                            cache_key_inner,
                             self.LEADERBOARD_CACHE_TTL,
                         ),
                         timeout=20.0
                     )
                 except Exception as e:
-                    print("Fallback render failed:", e)
-                    print(traceback.format_exc())
+                    lb_log(f"Fallback render failed: {e}\n{traceback.format_exc()}")
                     return None
             except Exception as e:
-                print("create_leaderboard_image error:", e)
-                print(traceback.format_exc())
+                lb_log(f"Render error: {e}\n{traceback.format_exc()}")
                 return None
 
         def make_embed_and_file(rows_data, img_bytes, user_rank, user_coins):
@@ -1136,6 +1121,20 @@ class Progression(commands.Cog):
             embed.set_image(url="attachment://leaderboard.png")
             return embed, file
 
+        # 1) Check Redis cache first
+        cached_bytes = None
+        if self.redis:
+            lb_log(f"Cache check start (key={cache_key})")
+            try:
+                cached_bytes = await self.redis.get(cache_key)
+                if cached_bytes:
+                    lb_log("Cache hit")
+                else:
+                    lb_log("Cache miss")
+            except Exception as e:
+                lb_log(f"Cache read failed: {e}")
+
+        # 2) Always fetch rows for embed/color info
         rows = await query_rows()
         if rows is None:
             return await self.safe_send(ctx, "Failed to fetch leaderboard data (check logs).")
@@ -1144,11 +1143,41 @@ class Progression(commands.Cog):
 
         rows_data = await build_rows_data(rows)
 
-        # LEADERBOARD DEBUGGING NOTE
-        success = await self._generate_and_send_leaderboard(ctx, rows_data, render_image, make_embed_and_file, debug=True)
-        if not success: 
+        # 3) If cache hit, send immediately with embed
+        if cached_bytes:
+            lb_log("Sending cached image with embed")
+            user_rank = await self.get_rank(ctx.author.id, ctx.guild.id)
+            user_coins = await self.get_coins(ctx.author.id, ctx.guild.id)
+            formatted_coins = format_coins(user_coins)
+            embed, file = make_embed_and_file(rows_data, cached_bytes, user_rank, formatted_coins)
+            await self.safe_send(ctx, embed=embed, file=file)
+            lb_log(f"Completed command (total {time.perf_counter() - start:.3f}s)\n")
+            return
+
+        # 4) Render on miss
+        img_bytes = await render_image(rows_data)
+        if not img_bytes:
             return await self.safe_send(ctx, "Failed to generate leaderboard image (check logs).")
+
+        lb_log("Sending rendered image with embed\n")
+        user_rank = await self.get_rank(ctx.author.id, ctx.guild.id)
+        user_coins = await self.get_coins(ctx.author.id, ctx.guild.id)
+        formatted_coins = format_coins(user_coins)
+        embed, file = make_embed_and_file(rows_data, img_bytes, user_rank, formatted_coins)
+        await self.safe_send(ctx, embed=embed, file=file)
+
+        # 5) Fire-and-forget upload to Redis
+        if self.redis:
+            lb_log("Upload to Redis (fire-and-forget)")
+            try:
+                self.bot.loop.create_task(self.redis.set(cache_key, img_bytes, ex=120))
+            except Exception as e:
+                lb_log(f"Redis set failed: {e}")
         
+        end = time.perf_counter()
+
+        lb_log(f"Completed command (total {end - start:.3f}s)")
+            
     @commands.hybrid_command(name="profiletheme", description="Choose your profile card background theme")
     @commands.guild_only()
     async def profiletheme(self, ctx):
@@ -1273,12 +1302,26 @@ class Progression(commands.Cog):
         guild_id = message.guild.id
         user_id = message.author.id
 
-        cooldown = 5
-        last_time = self.cooldowns.get((guild_id, user_id), 0)
-        now = discord.utils.utcnow().timestamp()
-        if now - last_time < cooldown:
-            return
-        self.cooldowns[(guild_id, user_id)] = now
+        cooldown_key = f"cooldown:{guild_id}:{user_id}"
+
+        # Redis-backed cooldown (sharding-safe). Fallback to in-memory timestamp if Redis is unavailable.
+        try:
+            if self.redis:
+                allowed = await self.redis.set(cooldown_key, b"1", ex=5, nx=True)
+                if not allowed:
+                    return
+            else:
+                raise RuntimeError("Redis not configured")
+        except Exception as e:
+            if isinstance(e, RuntimeError) and str(e) == "Redis not configured":
+                pass
+            else:
+                print(f"[cooldown] Redis check failed: {e}")
+            now = discord.utils.utcnow().timestamp()
+            last = self._fallback_cooldowns.get(cooldown_key, 0)
+            if now - last < 5:
+                return
+            self._fallback_cooldowns[cooldown_key] = now
 
         exp, level = await self.get_user(user_id, guild_id)
         old_level = level
