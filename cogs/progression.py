@@ -9,6 +9,7 @@ import io
 import hashlib
 import time
 import concurrent.futures
+from cachetools import TTLCache
 from typing import Optional, Iterable, Any
 from collections import OrderedDict
 from discord import MessageReference
@@ -302,7 +303,7 @@ class Progression(commands.Cog):
 
     def __init__(self, bot):
         self.bot = bot
-        self.cooldowns = {}
+        self.cooldowns = TTLCache(maxsize=50_000, ttl=3600)
         self.pool: asyncpg.Pool | None = None
         self._leaderboard_cache = {}
 
