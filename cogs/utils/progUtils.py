@@ -1,4 +1,3 @@
-from multiprocessing import pool
 from PIL import Image, ImageDraw, ImageFont
 from cogs.utils.constants import BG_PATH, FONTS, ROOT_PATH, TITLE_EMOJI_FILES
 import traceback
@@ -8,6 +7,7 @@ import io
 import random
 import colorsys
 import re
+import asyncpg
 import unicodedata
 import time
 from typing import Optional, Dict, Tuple
@@ -274,30 +274,29 @@ def get_title_emoji(level: int):
     else: return TitleEmojis["ENLIGHTENED"]
 
 
-async def get_user_rank(user_id: int, guild_id: int, max_level: int):
-    """
-    Query the users table for ordering by level/exp and return the 1-based rank for user_id.
-
-    Returns None when the user is not present in the ordering. This function uses a
-    pooled asyncpg connection (short-lived acquisition) appropriate for occasional use.
-    """
-    async with pool.acquire() as conn:
-        rows = await conn.fetch(
-            """
-            SELECT user_id
-            FROM users
-            WHERE guild_id = $1
-              AND ((exp > 0 AND level >= 1) OR level = $2)
-            ORDER BY level DESC, exp DESC
-            """,
-            guild_id,
-            max_level
-        )
-    for i, row in enumerate(rows, start=1):
-        if row["user_id"] == user_id:
-            return i
-    return None
-
+async def get_user_rank(pool: asyncpg.Pool, user_id: int, guild_id: int, max_level: int):
+     """
+     Query the users table for ordering by level/exp and return the 1-based rank for user_id.
+ 
+     Returns None when the user is not present in the ordering. This function uses a
+     pooled asyncpg connection (short-lived acquisition) appropriate for occasional use.
+     """
+     async with pool.acquire() as conn:
+         rows = await conn.fetch(
+             """
+             SELECT user_id
+             FROM users
+             WHERE guild_id = $1
+               AND ((exp > 0 AND level >= 1) OR level = $2)
+             ORDER BY level DESC, exp DESC
+             """,
+             guild_id,
+             max_level
+         )
+     for i, row in enumerate(rows, start=1):
+         if row["user_id"] == user_id:
+             return i
+     return None
 
 def truncate_to_width(text, font, max_w, draw):
     """
