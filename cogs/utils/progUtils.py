@@ -1,3 +1,4 @@
+from multiprocessing import pool
 from PIL import Image, ImageDraw, ImageFont
 from cogs.utils.constants import BG_PATH, FONTS, ROOT_PATH, TITLE_EMOJI_FILES
 import traceback
@@ -8,7 +9,6 @@ import random
 import colorsys
 import re
 import unicodedata
-import asyncpg
 import time
 from typing import Optional, Dict, Tuple
 from .emojis import TitleEmojis
@@ -117,51 +117,6 @@ TITLE_COLORS = {
 }
 
 DB_PATH = os.path.join(ROOT_PATH, "data", "minori.db")
-
-#  Postgres pool helpers (for rank query)  
-_POOL: Optional[asyncpg.Pool] = None
-
-async def init_db_pool(
-    dsn: Optional[str] = None,
-    *,
-    min_size: int = 1,
-    max_size: int = 10,
-    statement_timeout_ms: Optional[int] = 2000
-) -> None:
-    """
-    Lazily initialize asyncpg pool from DATABASE_URL (or provided dsn).
-
-    Production note: statement_timeout_ms applies a server-side timeout to each
-    statement to prevent slow queries from piling up; tune or disable (None)
-    based on your workload and DB settings.
-    """
-    global _POOL
-    if _POOL is None:
-        dsn = dsn or os.getenv("DATABASE_URL")
-        if not dsn:
-            raise RuntimeError("DATABASE_URL is not set")
-        server_settings: Dict[str, str] = {}
-        if statement_timeout_ms is not None:
-            server_settings["statement_timeout"] = str(statement_timeout_ms)
-        _POOL = await asyncpg.create_pool(
-            dsn=dsn,
-            min_size=min_size,
-            max_size=max_size,
-            server_settings=server_settings or None,
-        )
-
-async def close_db_pool() -> None:
-    """Close the asyncpg pool."""
-    global _POOL
-    if _POOL is not None:
-        await _POOL.close()
-        _POOL = None
-
-async def get_pool() -> asyncpg.Pool:
-    """Return the pool, creating it if needed."""
-    await init_db_pool()
-    assert _POOL is not None
-    return _POOL
 
 #  Stateless Utility Functions 
 
@@ -326,7 +281,6 @@ async def get_user_rank(user_id: int, guild_id: int, max_level: int):
     Returns None when the user is not present in the ordering. This function uses a
     pooled asyncpg connection (short-lived acquisition) appropriate for occasional use.
     """
-    pool = await get_pool()
     async with pool.acquire() as conn:
         rows = await conn.fetch(
             """

@@ -27,7 +27,7 @@ setup_logging(
     text_log_file="bot.log",
     text_use_timed_rotation=True,
     json_enabled=True,
-    json_log_file="bot.jsonl",
+    json_log_file="bot.jsonl",  
 )
 
 # Configure intents: members and message_content are required by several features/cogs.
