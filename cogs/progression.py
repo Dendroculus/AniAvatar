@@ -990,12 +990,7 @@ class Progression(commands.Cog):
         """
         Generate and send a leaderboard image showing the top users in a guild.
 
-        Flow:
-        - Debug-print major steps (without per-line elapsed times).
-        - Try Redis cache first; on hit, still build the embed and send immediately.
-        - On miss, query DB, build rows, render via worker process, send immediately,
-          then upload to Redis in the background (non-blocking).
-        - At the very end, print total elapsed seconds.
+        Refactor: Only do DB query, avatar fetch, and rendering when Redis cache misses.
         """
         start = time.perf_counter()
 
@@ -1008,8 +1003,40 @@ class Progression(commands.Cog):
             pass
 
         cache_key = f"lb_cache:{ctx.guild.id}"
-        lb_log(f"Start for guild={ctx.guild.id}")
+        cached_bytes = None
 
+        # 1) Check Redis first
+        if self.redis:
+            try:
+                cached_bytes = await self.redis.get(cache_key)
+                lb_log("Cache hit" if cached_bytes else "Cache miss")
+            except Exception as e:
+                lb_log(f"Cache read failed: {e}")
+
+        # 1a) FAST CACHE EXIT PATH
+        if cached_bytes:
+            user_rank = await self.get_rank(ctx.author.id, ctx.guild.id)
+            user_coins = await self.get_coins(ctx.author.id, ctx.guild.id)
+            formatted_coins = format_coins(user_coins)
+
+            # Build a generic embed (no expensive queries)
+            file = discord.File(io.BytesIO(cached_bytes), filename="leaderboard.png")
+            embed = discord.Embed(
+                title=f"{ctx.guild.name}'s Top Rank List {TitleEmojis['CHAMPION']}",
+                color=discord.Color.purple(),
+                description=(f"**Your Rank**\n"
+                             f"You are ranked **#{user_rank}** on this server\n"
+                             f"with a total of **{formatted_coins}** {COINS_EMOJI}")
+            )
+            if ctx.guild.icon:
+                embed.set_thumbnail(url=ctx.guild.icon.url)
+            embed.set_image(url="attachment://leaderboard.png")
+
+            await self.safe_send(ctx, embed=embed, file=file)
+            lb_log(f"FAST CACHE path completed in {time.perf_counter() - start:.3f}s")
+            return
+
+        # 2) WORK PATH (only runs on cache miss)
         async def query_rows():
             lb_log(f"Query start (guild={ctx.guild.id})")
             try:
@@ -1064,7 +1091,7 @@ class Progression(commands.Cog):
                         "exp": exp or 0,
                         "next_exp": next_exp
                     })
-                lb_log(f"Build rows data fallback done (rows_data={len(data)})\n")
+                lb_log(f"Build rows data fallback done (rows_data={len(data)})")
                 return data
 
         async def render_image(rows_data):
@@ -1105,36 +1132,6 @@ class Progression(commands.Cog):
                 lb_log(f"Render error: {e}\n{traceback.format_exc()}")
                 return None
 
-        def make_embed_and_file(rows_data, img_bytes, user_rank, user_coins):
-            top_title = get_title(rows_data[0]["level"]) if rows_data else "Leaderboard"
-            embed_color = TITLE_COLORS.get(top_title, discord.Color.purple())
-            file = discord.File(io.BytesIO(img_bytes), filename="leaderboard.png")
-            embed = discord.Embed(
-                title=f"{ctx.guild.name}'s Top Rank List {TitleEmojis['CHAMPION']}",
-                color=embed_color,
-                description=(f"**Your Rank**\n"
-                             f"You are ranked **#{user_rank}** on this server\n"
-                             f"with a total of **{user_coins}** {COINS_EMOJI}")
-            )
-            if ctx.guild.icon:
-                embed.set_thumbnail(url=ctx.guild.icon.url)
-            embed.set_image(url="attachment://leaderboard.png")
-            return embed, file
-
-        # 1) Check Redis cache first
-        cached_bytes = None
-        if self.redis:
-            lb_log(f"Cache check start (key={cache_key})")
-            try:
-                cached_bytes = await self.redis.get(cache_key)
-                if cached_bytes:
-                    lb_log("Cache hit")
-                else:
-                    lb_log("Cache miss")
-            except Exception as e:
-                lb_log(f"Cache read failed: {e}")
-
-        # 2) Always fetch rows for embed/color info
         rows = await query_rows()
         if rows is None:
             return await self.safe_send(ctx, "Failed to fetch leaderboard data (check logs).")
@@ -1142,42 +1139,40 @@ class Progression(commands.Cog):
             return await self.safe_send(ctx, "No users found in the leaderboard.")
 
         rows_data = await build_rows_data(rows)
-
-        # 3) If cache hit, send immediately with embed
-        if cached_bytes:
-            lb_log("Sending cached image with embed")
-            user_rank = await self.get_rank(ctx.author.id, ctx.guild.id)
-            user_coins = await self.get_coins(ctx.author.id, ctx.guild.id)
-            formatted_coins = format_coins(user_coins)
-            embed, file = make_embed_and_file(rows_data, cached_bytes, user_rank, formatted_coins)
-            await self.safe_send(ctx, embed=embed, file=file)
-            lb_log(f"Completed command (total {time.perf_counter() - start:.3f}s)\n")
-            return
-
-        # 4) Render on miss
         img_bytes = await render_image(rows_data)
         if not img_bytes:
             return await self.safe_send(ctx, "Failed to generate leaderboard image (check logs).")
 
-        lb_log("Sending rendered image with embed\n")
         user_rank = await self.get_rank(ctx.author.id, ctx.guild.id)
         user_coins = await self.get_coins(ctx.author.id, ctx.guild.id)
         formatted_coins = format_coins(user_coins)
-        embed, file = make_embed_and_file(rows_data, img_bytes, user_rank, formatted_coins)
+
+        embed_color = TITLE_COLORS.get(get_title(rows_data[0]["level"]) if rows_data else "Leaderboard",
+                                       discord.Color.purple())
+        file = discord.File(io.BytesIO(img_bytes), filename="leaderboard.png")
+        embed = discord.Embed(
+            title=f"{ctx.guild.name}'s Top Rank List {TitleEmojis['CHAMPION']}",
+            color=embed_color,
+            description=(f"**Your Rank**\n"
+                         f"You are ranked **#{user_rank}** on this server\n"
+                         f"with a total of **{formatted_coins}** {COINS_EMOJI}")
+        )
+        if ctx.guild.icon:
+            embed.set_thumbnail(url=ctx.guild.icon.url)
+        embed.set_image(url="attachment://leaderboard.png")
+
         await self.safe_send(ctx, embed=embed, file=file)
 
-        # 5) Fire-and-forget upload to Redis
+        # Fire-and-forget Redis upload (only on miss after sending)
         if self.redis:
             lb_log("Upload to Redis (fire-and-forget)")
             try:
                 self.bot.loop.create_task(self.redis.set(cache_key, img_bytes, ex=120))
             except Exception as e:
                 lb_log(f"Redis set failed: {e}")
-        
-        end = time.perf_counter()
 
-        lb_log(f"Completed command (total {end - start:.3f}s)")
-            
+        lb_log(f"Completed command (total {time.perf_counter() - start:.3f}s)\n")
+                    
     @commands.hybrid_command(name="profiletheme", description="Choose your profile card background theme")
     @commands.guild_only()
     async def profiletheme(self, ctx):
