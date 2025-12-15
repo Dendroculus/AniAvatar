@@ -335,7 +335,7 @@ class ImageRenderer:
     def __init__(self, cache_size=200):
         """
         Initialize the ImageRenderer with empty caches.
-        
+
         Args:
             cache_size: Maximum size for caches (not strictly enforced for all caches)
         """
@@ -505,7 +505,7 @@ class ImageRenderer:
         # 3. Resize to full size using Bicubic (High quality, native C speed)
         img = tiny_img.resize((w, h), resample=Image.Resampling.BICUBIC)
 
-        # 4. Add noise (Optimized: generate noise on small image then resize)
+        # 4. Add noise (Optimized: generate noise on a smaller scale to save processing, then scale up)
         if noise:
             # Generate noise on a smaller scale to save processing, then scale up
             noise_w, noise_h = w // 4, h // 4
@@ -1298,15 +1298,16 @@ class ImageRenderer:
             out = io.BytesIO()
             im.save(out, format="PNG")
             out.seek(0)
-            if debug_save_path:
-                try:
-                    with open(debug_save_path, "wb") as fh:
-                        fh. write(out.getvalue())
-                except Exception:
-                    pass
 
             payload = out.getvalue()
             self._set_cached_leaderboard(cache_key, payload)
+            if debug_save_path:
+                try:
+                    with open(debug_save_path, "wb") as fh:
+                        fh. write(payload)
+                except Exception:
+                    pass
+
             return payload
 
         except Exception:

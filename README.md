@@ -126,6 +126,9 @@ GOOGLE_CSE_ID=your_google_cse_id
 
 # Database (PostgreSQL)
 DATABASE_URL=postgresql://<user>:<encoded_password>@<host>:5432/<database>
+
+# REDIS (FOR CACHING)
+REDIS_URL=YOUR_REDIS_URL
 ```
 
 Notes on DATABASE_URL:
