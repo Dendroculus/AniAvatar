@@ -4,7 +4,6 @@ import discord
 from discord.ext import commands
 import logging
 from cogs.utils.logging_setup import setup_logging
-from cogs.utils.keep_bot_alive import keep_alive
 
 """
 main.py
@@ -102,8 +101,6 @@ if __name__ == "__main__":
     load_dotenv()
     TOKEN = os.getenv("DISCORD_TOKEN")
     
-    # Keep the bot alive if running in an environment that may sleep
-    keep_alive()
-    
+    # Keep the bot alive if running in an environment that may sleep    
     bot = Minori()
     bot.run(TOKEN)
