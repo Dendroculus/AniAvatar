@@ -23,8 +23,18 @@ from cogs.utils.constants import BG_PATH, EMOJI_PATH, FONTS, TITLE_EMOJI_FILES
 from cogs.trading import format_coins
 from cogs.utils.emojis import CustomEmojis, MinoriEmojis, TitleEmojis, ShopEmojis
 
+_PROCESS_CONTEXT: dict[str, Any] = {}
 
-# TODO : USE REDIS FOR CACHING RENDERED IMAGES IN MULTI-INSTANCE DEPLOYMENTS
+def _initialize_worker_safe(cache_size: int):
+    """
+    Runs ONCE per ProcessPoolExecutor worker. Initializes and caches the 
+    ImageRenderer instance in the process-local _PROCESS_CONTEXT dictionary.
+    
+    Avoids using the 'global' keyword by leveraging the process-local scope 
+    of the top-level dictionary.
+    """
+    _PROCESS_CONTEXT["renderer"] = ImageRenderer(cache_size=cache_size)
+    
 
 """
 progression.py
@@ -86,7 +96,8 @@ def _render_profile_in_process(
     Render a profile image in a separate process to bypass the GIL.
     A fresh ImageRenderer is created per worker process to keep state isolated.
     """
-    renderer = ImageRenderer(cache_size=Progression.RENDER_CACHE_SIZE)  # type: ignore[name-defined]
+    renderer = _PROCESS_CONTEXT["renderer"] # Renderer is guaranteed to exist by the initializer
+    
     return renderer.render_profile_image(
         avatar_bytes,
         display_name,
@@ -113,9 +124,8 @@ def _render_leaderboard_in_process(
     Render a leaderboard image in a separate process. A renderer instance is created
     inside the worker so Pillow runs outside the main event loop, leveraging multiple cores.
     """
-    renderer = ImageRenderer(
-        cache_size=Progression.RENDER_CACHE_SIZE,  # type: ignore[name-defined]
-    )
+    renderer = _PROCESS_CONTEXT["renderer"]
+    
     return renderer.create_leaderboard_image(
         rows=list(rows_data),
         fonts=FONTS,
@@ -334,7 +344,7 @@ class Progression(commands.Cog):
 
         self.renderer = ImageRenderer(cache_size=self.RENDER_CACHE_SIZE)
         
-        self._process_pool = concurrent.futures.ProcessPoolExecutor(max_workers=max_renders)
+        self._process_pool = concurrent.futures.ProcessPoolExecutor(max_workers=max_renders, initializer=_initialize_worker_safe, initargs=(self.RENDER_CACHE_SIZE,))
 
         print(f"[Progression] Initialized with max {max_renders} concurrent renders")
 

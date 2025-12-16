@@ -347,8 +347,7 @@ class ImageRenderer:
         # Lightweight TTL cache keyed by caller-provided identifiers (e.g., guild_id)
         self._leaderboard_cache: Dict[str, Tuple[float, bytes]] = {}
 
-    #  Cache helpers (leaderboard) 
-
+    #  Cache helpers (leaderboard)     
     def _get_cached_leaderboard(self, cache_key: Optional[str], ttl_seconds: int) -> Optional[bytes]:
         """
         Return cached leaderboard bytes when present and fresh.
