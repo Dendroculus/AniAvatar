@@ -4,7 +4,7 @@ import discord
 import json
 import os
 from datetime import datetime, timedelta, timezone
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Iterable
 from discord import ui
 from discord.ext import commands
 
@@ -17,100 +17,37 @@ Purpose
 -------
 Persistence and UI helpers for the bot's polling subsystem.
 
-This module provides a compact, production-oriented polling implementation
-combining an asyncpg-backed persistence layer with an interactive Discord UI
-(based on discord.ui.View and discord.ui.Modal). It was designed for robust
-concurrency, operational safety, and clear separation between runtime logic
-and one-time database migrations.
+This module provides a production-oriented polling implementation that:
+- Persists poll metadata (question/options/end time/finished state) in a `polls`
+  table.
+- Persists votes in a relational `poll_votes` table (one row per user vote).
+- Exposes a compact interactive UI (discord.ui.View + Modal) for creating and
+  running polls inside Discord.
 
-The module contains:
-- Database helpers and a small asyncpg connection pool wrapper:
-    init_db_pool, close_db_pool, get_pool, _set_stmt_timeout
-- Schema initialization helper:
-    init_db
-- CRUD-style persistence helpers used by runtime code:
-    save_active_poll, record_poll_result, load_active_polls, purge_finished_polls
-- UI classes for creating and running polls inside Discord:
-    PollView, AddOptionModal, PollInputModal
+Why relational votes?
+---------------------
+Storing votes as a JSONB blob and rewriting that blob on every vote leads to
+"write amplification" and heavy locks on the polls row under high concurrency.
+This causes latency spikes and can overload the database during viral events.
 
-Key design goals / constraints
-------------------------------
-- Concurrency: rely on PostgreSQL's concurrency primitives (INSERT ... ON CONFLICT)
-  rather than Python-level locks for write serialization. This supports higher
-  throughput under concurrent voting.
-- Safety: each acquired DB connection is configured with a local statement_timeout
-  (see _set_stmt_timeout) to avoid a single long-running query exhausting the pool.
-- Storage: poll option/vote/winner aggregates are stored as JSONB (recommended).
-  When migrating from older TEXT-based storage, follow the manual migration steps
-  described below before deploying to production.
-- Operational separation: runtime code creates the table if missing but does not
-  run intrusive ALTER TABLE migrations. Perform schema changes in a controlled
-  maintenance window (manual SQL or a migration system).
+This implementation instead stores individual votes in `poll_votes`:
+  (message_id, user_id, option_idx)
+with PRIMARY KEY (message_id, user_id) so each vote is a cheap INSERT/UPSERT that
+scales to many concurrent voters without rewriting a large JSON object.
 
-Quick operational checklist before upgrade
------------------------------------------
-1. Backup the database (pg_dump).
-2. Run the migration steps (convert TEXT columns to JSONB, sanitize NULLs).
-3. Verify column types in information_schema.
-4. Stage and test with a high-throughput voting test to validate pool sizing
-   and STMT_TIMEOUT_MS.
-5. Monitor for long-running queries and tune STMT_TIMEOUT_MS as needed.
-
-Usage (summary)
----------------
-On bot startup:
-    await pollUtils.init_db_pool()      # or pass explicit DSN
-    await pollUtils.init_db()          # creates polls table if missing
-    active = await pollUtils.load_active_polls()  # reload active polls into memory if needed
-
-On graceful shutdown:
-    await pollUtils.close_db_pool()
-
-Schema (recommended, after one-time migration)
----------------------------------------------
-CREATE TABLE polls (
-    message_id BIGINT PRIMARY KEY,
-    guild_id   BIGINT,
-    channel_id BIGINT,
-    author_id  BIGINT,
-    question   TEXT,
-    options    JSONB DEFAULT '[]'::jsonb,
-    votes      JSONB DEFAULT '{}'::jsonb,
-    end_time   DOUBLE PRECISION,
-    ended      BOOLEAN DEFAULT FALSE,
-    winners    JSONB,
-    counts     JSONB,
-    total_votes INTEGER,
-    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
-);
-
-Notes on stored JSON shapes
----------------------------
-- options: ordered list of option strings; the order defines select indices in the UI.
-- votes: mapping option -> list of user_id ints (runtime keeps these as sets for quick
-  add/remove, but they are stored as lists/JSON).
-- counts: mapping option -> integer (vote counts).
-- winners: JSON value describing winners (could be list of option strings or a richer
-  structure depending on how results are consumed).
-
-Operational recommendation on indexing
--------------------------------------
-To support queries that inspect JSON (for example, finding polls where a user voted),
-create appropriate GIN indexes on JSONB columns, e.g.:
-  CREATE INDEX CONCURRENTLY IF NOT EXISTS polls_votes_gin_idx ON polls USING gin (votes jsonb_path_ops);
-
-Configuration
--------------
-- Provide the database DSN via the DATABASE_URL environment variable or pass it
-  directly to init_db_pool.
-- Tune STMT_TIMEOUT_MS and pool sizes (min_size/max_size) based on expected load.
-
-Implementation notes
---------------------
-- The runtime persists "active" state frequently (on every vote/add/remove). This design
-  favors durability and crash-safety at the cost of additional write traffic.
-- If you prefer fewer DB writes, consider batching or debouncing persistence events
-  (trade-off: risk of losing recent votes on a crash).
+Key design goals
+----------------
+- Concurrency: rely on PostgreSQL atomic operations (INSERT ... ON CONFLICT)
+  and short transactions rather than in-process Python locks to permit high
+  throughput and multi-process/multi-host deployments.
+- Durability: persist every vote as it occurs to minimize recent-state loss on
+  crashes. If you prefer higher throughput at the cost of durability, consider
+  batching/debouncing writes (not implemented here).
+- Observability: table and index DDLs are included in init_db() so a fresh
+  deployment will create the minimal schema needed. Use migration tooling for
+  schema evolution in production.
+- Safety: every acquired connection is configured with a local statement_timeout
+  to prevent runaway queries from exhausting the pool.
 """
 
 _POOL: Optional[asyncpg.Pool] = None
@@ -127,23 +64,22 @@ async def init_db_pool(dsn: Optional[str] = None, *, min_size: int = 1, max_size
 
     Parameters
     ----------
-    dsn: Optional[str]
-        Database DSN - if omitted the function reads DATABASE_URL from the env.
-    min_size, max_size: int
-        Connection pool sizing parameters. Choose values appropriate to the
-        expected concurrency for the bot (e.g., higher if many guilds/users
-        will be voting concurrently).
+    dsn : Optional[str]
+        Database DSN to connect to. If omitted, the function reads
+        DATABASE_URL from the environment.
+    min_size, max_size : int
+        Connection pool sizing parameters. Increase max_size for higher
+        concurrent voter throughput.
 
     Behavior
     --------
     - The pool is cached in the module-global _POOL variable.
-    - Calling this function multiple times is safe: the pool is initialized only
-      once (unless close_db_pool resets it).
+    - Safe to call multiple times; the pool is only created once until closed.
 
     Raises
     ------
     RuntimeError
-        If no DSN is provided and DATABASE_URL is not set in the environment.
+        If no DSN was provided and DATABASE_URL is not set in the environment.
     """
     global _POOL
     if _POOL is None:
@@ -157,8 +93,8 @@ async def close_db_pool() -> None:
     """
     Close and clear the cached connection pool.
 
-    Safe to call multiple times (no-op if already closed). After calling this,
-    init_db_pool will create a new pool on the next call.
+    Safe to call multiple times. After calling this function, a subsequent
+    get_pool/init_db_pool call will create a new pool.
     """
     global _POOL
     if _POOL is not None:
@@ -170,14 +106,10 @@ async def get_pool() -> asyncpg.Pool:
     """
     Ensure the pool exists and return it.
 
-    Convenience helper used throughout the module. It calls init_db_pool()
-    which will create the pool using the DATABASE_URL env var if not already
-    present.
-
     Returns
     -------
     asyncpg.Pool
-        The active connection pool; never None on successful return.
+        A ready-to-use connection pool.
     """
     await init_db_pool()
     assert _POOL is not None
@@ -188,36 +120,35 @@ async def _set_stmt_timeout(conn: asyncpg.Connection, ms: int = STMT_TIMEOUT_MS)
     """
     Apply a per-connection statement timeout to avoid runaway queries.
 
-    This issues: SET LOCAL statement_timeout = <ms>
+    This uses: SET LOCAL statement_timeout = <ms>
 
     Notes
     -----
-    - Using SET LOCAL confines the timeout to the current transaction (or query)
-      and does not change global server configuration.
-    - This helper is best-effort: some server configurations or permission
-      settings may prevent changing timeouts; failures are ignored to avoid
-      interfering with normal operation.
+    - SET LOCAL limits the timeout to the current transaction or statement.
+    - This helper is best-effort; failures are ignored so callers do not crash
+      on restrictive DB server configurations.
     """
     try:
         await conn.execute(f"SET LOCAL statement_timeout = {ms}")
     except Exception:
-        # Best-effort: don't fail the caller if the server disallows this setting.
         pass
+
+
+#  Schema Initialization  #
 
 
 async def init_db():
     """
-    Initialize the polls table if it doesn't exist.
+    Initialize the polls and poll_votes tables if they don't exist.
 
-    This function will create the polls table with JSONB columns. If you are
-    upgrading an existing database that currently stores JSON data as TEXT you
-    MUST perform the one-time manual migration steps (documented in the module
-    top-level docstring) before relying on JSONB behavior.
+    The function is idempotent and will not alter existing columns. Use a
+    migration tool for schema changes in production.
 
-    Operational note
-    ----------------
-    - The function intentionally does not perform destructive ALTER TABLE
-      migrations at runtime. Structure changes should be handled externally.
+    Recommended schema:
+      - polls: stores poll metadata and final aggregated results
+      - poll_votes: one row per (message_id, user_id) to persist current vote
+
+    See module top-level docstring for migration guidance.
     """
     pool = await get_pool()
     async with pool.acquire() as conn:
@@ -230,7 +161,6 @@ async def init_db():
                 author_id  BIGINT,
                 question   TEXT,
                 options    JSONB DEFAULT '[]'::jsonb,
-                votes      JSONB DEFAULT '{}'::jsonb,
                 end_time   DOUBLE PRECISION,
                 ended      BOOLEAN DEFAULT FALSE,
                 winners    JSONB,
@@ -239,49 +169,61 @@ async def init_db():
                 created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS poll_votes (
+                message_id BIGINT REFERENCES polls(message_id) ON DELETE CASCADE,
+                user_id    BIGINT NOT NULL,
+                option_idx INTEGER NOT NULL,
+                PRIMARY KEY (message_id, user_id)
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS poll_votes_option_idx
+            ON poll_votes (message_id, option_idx)
+        """)
 
 
 def _json_dumps(value: Any) -> str:
-    """Serialize Python objects to JSON text (ensure_ascii disabled for clarity).
+    """
+    Serialize Python objects to JSON text for deterministic storage/inspection.
 
-    Rationale
-    ---------
-    - The code currently performs explicit json.dumps before passing values to
-      asyncpg. asyncpg can accept Python dict/list objects and marshal them to
-      JSONB automatically; keeping an explicit dump makes the stored bytes
-      deterministic and easier to inspect directly.
+    Parameters
+    ----------
+    value : Any
+        Python object to serialize.
+
+    Returns
+    -------
+    str
+        JSON encoded string.
     """
     return json.dumps(value, ensure_ascii=False)
 
 
-async def save_active_poll(message_id, guild_id, channel_id, author_id, question, options, votes, end_time):
-    """
-    Insert or update an active poll row into the database.
+#  Persistence helpers  #
 
-    The function serializes `options` and `votes` to JSON text for storage.
+
+async def save_active_poll(message_id, guild_id, channel_id, author_id, question, options, end_time):
+    """
+    Insert or update poll metadata (no vote blob).
+
+    Notes
+    -----
+    - votes are intentionally not stored on the polls row; they live in poll_votes.
+    - options is persisted as JSON text for human readability and to preserve
+      ordering. Consumers relying on DB access can read the options JSONB.
+    - end_time may be None; when provided it is stored as epoch seconds (float).
 
     Parameters
     ----------
-    message_id:
-        Discord message id (int) that identifies the poll message.
-    guild_id, channel_id, author_id:
-        Discord snowflakes for guild/channel/author.
-    question:
-        Poll question string.
-    options:
-        A Python list of option strings (will be json.dumps'ed).
-    votes:
-        A mapping of option -> set(user_id). This function converts sets to lists
-        before serialization to produce JSON arrays.
-    end_time:
-        Optional datetime (timezone-aware) indicating when the poll ends. Stored
-        as an epoch float (seconds) or NULL if not provided.
-
-    Consistency guarantees
-    ----------------------
-    - Uses INSERT ... ON CONFLICT (message_id) DO UPDATE to atomically upsert
-      the active poll row. This avoids a small race window where two writers
-      could otherwise insert concurrently.
+    message_id, guild_id, channel_id, author_id : int
+        Discord identifiers.
+    question : str
+        Poll question text.
+    options : list[str]
+        Ordered list of option strings.
+    end_time : Optional[datetime]
+        Expiration time for the poll or None.
     """
     pool = await get_pool()
     async with pool.acquire() as conn:
@@ -290,16 +232,15 @@ async def save_active_poll(message_id, guild_id, channel_id, author_id, question
             """
             INSERT INTO polls (
                 message_id, guild_id, channel_id, author_id,
-                question, options, votes, end_time, ended
+                question, options, end_time, ended
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, FALSE)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, FALSE)
             ON CONFLICT (message_id) DO UPDATE SET
                 guild_id   = EXCLUDED.guild_id,
                 channel_id = EXCLUDED.channel_id,
                 author_id  = EXCLUDED.author_id,
                 question   = EXCLUDED.question,
                 options    = EXCLUDED.options,
-                votes      = EXCLUDED.votes,
                 end_time   = EXCLUDED.end_time,
                 ended      = FALSE
             """,
@@ -309,9 +250,152 @@ async def save_active_poll(message_id, guild_id, channel_id, author_id, question
             author_id,
             question,
             _json_dumps(options),
-            _json_dumps({k: list(v) for k, v in votes.items()}),
             end_time.timestamp() if end_time else None,
         )
+
+
+async def upsert_vote(message_id: int, user_id: int, option_idx: int):
+    """
+    Insert or update a single user's vote (constant-time write).
+
+    Parameters
+    ----------
+    message_id : int
+        The Discord message id that identifies the poll.
+    user_id : int
+        The Discord user id of the voter.
+    option_idx : int
+        Zero-based index into the poll's options list.
+
+    Behavior
+    --------
+    - Uses INSERT ... ON CONFLICT to upsert the user's choice. This is atomic
+      at the row level and safe for concurrent writers.
+    - Caller should ensure option_idx is a valid index for the poll options.
+    """
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await _set_stmt_timeout(conn)
+        await conn.execute(
+            """
+            INSERT INTO poll_votes (message_id, user_id, option_idx)
+            VALUES ($1, $2, $3)
+            ON CONFLICT (message_id, user_id)
+            DO UPDATE SET option_idx = EXCLUDED.option_idx
+            """,
+            message_id, user_id, option_idx
+        )
+
+
+async def delete_vote(message_id: int, user_id: int):
+    """
+    Remove a user's vote for a poll.
+
+    If no vote exists this operation is a no-op.
+
+    Parameters
+    ----------
+    message_id : int
+        Poll message id.
+    user_id : int
+        Voter's Discord user id.
+    """
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await _set_stmt_timeout(conn)
+        await conn.execute(
+            "DELETE FROM poll_votes WHERE message_id = $1 AND user_id = $2",
+            message_id, user_id
+        )
+
+
+async def load_active_polls():
+    """
+    Return active polls plus their votes aggregated from poll_votes.
+
+    Returns
+    -------
+    List[dict]
+        Each dict contains poll columns and a `votes` mapping:
+            item["votes"] -> { option_label (str) : set(user_id ints) }
+
+    Notes
+    -----
+    - This function fetches polls (ended = FALSE) and then fetches all related
+      poll_votes for those polls in a single query (WHERE message_id = ANY(...)).
+    - Aggregation maps option_idx back to the option label using the poll's
+      persisted options value.
+    - Consumers should be careful with memory if reloading tens of thousands of
+      active polls (not typical). This function is primarily intended for
+      rehydrating currently active polls at bot startup.
+    """
+    pool = await get_pool()
+    query = """
+        SELECT
+            message_id,
+            guild_id,
+            channel_id,
+            author_id,
+            question,
+            options,
+            end_time,
+            ended
+        FROM polls
+        WHERE ended = FALSE
+    """
+    async with pool.acquire() as conn:
+        await _set_stmt_timeout(conn)
+        poll_rows = await conn.fetch(query)
+        if not poll_rows:
+            return []
+
+        message_ids = [r["message_id"] for r in poll_rows]
+        vote_rows = await conn.fetch(
+            "SELECT message_id, user_id, option_idx FROM poll_votes WHERE message_id = ANY($1)",
+            message_ids
+        )
+
+    votes_by_message: Dict[int, Dict[str, set[int]]] = {mid: {} for mid in message_ids}
+    # Build label lookup per poll to map option_idx -> option text
+    options_map: Dict[int, List[str]] = {r["message_id"]: json.loads(r["options"]) for r in poll_rows}
+    for row in vote_rows:
+        mid = row["message_id"]
+        option_idx = row["option_idx"]
+        user_id = row["user_id"]
+        opts = options_map.get(mid, [])
+        if 0 <= option_idx < len(opts):
+            label = opts[option_idx]
+            votes_by_message[mid].setdefault(label, set()).add(user_id)
+
+    result = []
+    for r in poll_rows:
+        mid = r["message_id"]
+        votes = votes_by_message.get(mid, {})
+        # ensure all options present even if zero votes
+        for opt in options_map.get(mid, []):
+            votes.setdefault(opt, set())
+            
+        item = dict(r)
+        item["options"] = options_map[mid]
+        item["votes"] = votes
+        result.append(item)
+
+    return result
+
+
+async def purge_finished_polls():
+    """
+    Delete polls that have ended (ended = TRUE).
+
+    Warning
+    -------
+    - This permanently removes historical poll rows and relies on cascade to
+      remove poll_votes. Archive to another table first if you need auditing.
+    """
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await _set_stmt_timeout(conn)
+        await conn.execute("DELETE FROM polls WHERE ended = TRUE")
 
 
 async def record_poll_result(message_id, winners, counts, total_votes):
@@ -320,21 +404,18 @@ async def record_poll_result(message_id, winners, counts, total_votes):
 
     Parameters
     ----------
-    message_id: int
+    message_id : int
         Poll identifier (Discord message id).
-    winners:
-        Python object (list or dict) representing winners; will be JSON-serialized.
-        Keep the shape stable if other consumers (archival scripts, web UI)
-        expect a particular format.
-    counts:
-        Python object representing counts per option; will be JSON-serialized.
-    total_votes:
-        Integer total vote count.
+    winners :
+        Python object describing winners; will be JSON-serialized.
+    counts :
+        Python object mapping option_label -> integer count; will be JSON-serialized.
+    total_votes : int
+        Total number of votes cast.
 
     Behavior
     --------
-    - Sets ended = TRUE so the poll no longer appears as active.
-    - Persists winners and counts for later auditing or reporting.
+    - Updates polls.winners, polls.counts, polls.total_votes and sets ended = TRUE.
     """
     pool = await get_pool()
     async with pool.acquire() as conn:
@@ -355,62 +436,6 @@ async def record_poll_result(message_id, winners, counts, total_votes):
         )
 
 
-async def load_active_polls():
-    """
-    Return a list of polls that are still active (ended = FALSE).
-
-    Returns
-    -------
-    List[dict]
-        Each dict maps column name -> stored value. Note:
-        - options and votes are returned as the DB types (jsonb) mapped to Python
-          objects by asyncpg (usually dict/list). Consumers should validate
-          shapes before use. If you prefer raw JSON text, call json.dumps/json.loads.
-        - end_time is returned as a float (epoch seconds) if present.
-
-    Usage note
-    ----------
-    - This function is intended to be used on bot startup to reload in-memory
-      PollView instances or to perform maintenance tasks on active polls.
-    """
-    pool = await get_pool()
-    query = """
-        SELECT
-            message_id,
-            guild_id,
-            channel_id,
-            author_id,
-            question,
-            options,
-            votes,
-            end_time,
-            ended
-        FROM polls
-        WHERE ended = FALSE
-    """
-    async with pool.acquire() as conn:
-        await _set_stmt_timeout(conn)
-        rows = await conn.fetch(query)
-        return [dict(r) for r in rows]
-
-
-async def purge_finished_polls():
-    """
-    Delete polls that have ended (ended = TRUE).
-
-    Useful for periodic cleanup jobs to keep the active polls table small.
-
-    Caution
-    -------
-    - This permanently removes historical poll rows. If you need an audit log,
-      instead archive results to a separate table before purging.
-    """
-    pool = await get_pool()
-    async with pool.acquire() as conn:
-        await _set_stmt_timeout(conn)
-        await conn.execute("DELETE FROM polls WHERE ended = TRUE")
-
-
 #  Poll UI  #
 
 
@@ -418,28 +443,23 @@ class PollView(discord.ui.View):
     """
     Interactive in-memory representation of a poll.
 
-    Responsibilities
-    ----------------
-    - Hold the poll state in-memory (question, options, votes as sets).
-    - Render a Discord embed summarizing the poll and provide interactive controls:
-        * Select menu for casting a vote
-        * Buttons to add an option, remove a vote, and end the poll
-    - Persist active state to the database after state-changing events (votes,
-      option additions, vote removals).
-    - Optionally auto-end the poll when a configured timeout expires and persist
-      final results.
+    Behavior & responsibilities
+    - Maintain an in-memory view of a poll (question/options/votes as sets).
+    - Render an embedded message and attach interactive controls (vote select,
+      remove vote, add option, end poll).
+    - Persist metadata (save_active_poll) and incremental vote changes via
+      upsert_vote/delete_vote in poll_votes to avoid JSON rewrites.
+    - Finalize and persist results on timeout or manual end (record_poll_result).
 
-    Notes for maintainers
-    ---------------------
-    - Votes are kept in-memory as sets (option -> set(user_id)) for efficient
-      add/remove semantics. When persisted, sets are converted to lists and
-      JSON-dumped.
-    - The view is resilient to common Discord errors (embed size limits,
-      message missing). It attempts progressively smaller embed renderings and
-      falls back to sending a new message if edits fail.
-    - For high-scale deployments, consider reducing persistence frequency or
-      using a write-behind approach, trading durability for reduced DB traffic.
+    Implementation notes
+    - Votes are kept in-memory for display speed and to compute the embed. On
+      process restart the bot should call load_active_polls() to reconstruct
+      in-memory PollView objects and rehydrate votes from poll_votes.
+    - The PollView code calls upsert_vote/delete_vote directly. For very high
+      scale, consider separating persistence into a background worker or
+      batching layer.
     """
+
     def __init__(self, question: str, options: List[str], author: discord.Member, timeout: Optional[int] = None):
         super().__init__(timeout=timeout)
         self.question = question
@@ -501,13 +521,10 @@ class PollView(discord.ui.View):
 
     async def _ensure_poll_active(self, interaction: discord.Interaction) -> bool:
         """
-        Helper to check whether the poll is still active and respond to the interaction
-        if it is not. Returns True when the poll is active and the interaction may proceed.
+        Ensure the poll is still active before processing an interaction.
 
-        Side effects
-        ------------
-        - If the poll is closed or its end_time already passed, the method will
-          attempt to inform the interacting user via an ephemeral message.
+        Returns True if the poll is active; otherwise informs the user and
+        returns False.
         """
         if self.ended:
             try:
@@ -537,12 +554,9 @@ class PollView(discord.ui.View):
 
     def _cancel_updater_if_needed(self):
         """
-        Cancel the updater_task if it's running and it's not the current asyncio task.
+        Cancel the background updater_task if it is still running.
 
-        Reason
-        ------
-        - Prevents the background auto-end task from firing after the poll has
-          been manually ended, avoiding duplicate finalization work.
+        Prevents the auto-end task from performing finalization after a manual end.
         """
         try:
             current = asyncio.current_task()
@@ -560,17 +574,10 @@ class PollView(discord.ui.View):
 
         Returns
         -------
-        results: dict
-            Mapping option -> vote count (integer).
-        winners: list
-            List of winning option strings (may be multiple on a tie).
-        winner_text: str
-            Friendly human-readable summary text suitable for posting to the channel.
-
-        Notes
-        -----
-        - If no votes were cast, winners will be an empty list and winner_text
-          will describe that no votes were cast.
+        tuple:
+            - results (dict): option -> vote count
+            - winners (list): list of winning option strings
+            - winner_text (str): human-readable summary for posting
         """
         results = {opt: len(users) for opt, users in self.votes.items()}
         winners = []
@@ -598,11 +605,10 @@ class PollView(discord.ui.View):
 
     async def _persist_results(self, results, winners):
         """
-        Persist final results to the DB using record_poll_result.
+        Persist final poll results to the database via record_poll_result.
 
-        The method swallows exceptions to avoid blocking finalization if the DB
-        is temporarily unavailable; errors are printed to stdout for later
-        inspection (use a structured logger in production).
+        This method swallows exceptions to avoid blocking finalization if the DB
+        is temporarily unavailable.
         """
         try:
             await record_poll_result(
@@ -616,13 +622,9 @@ class PollView(discord.ui.View):
 
     async def _finalize_view(self, winner_text: str):
         """
-        Update the Discord message to a closed view and send the winner_text if present.
+        Update the Discord message to a closed view and optionally announce winners.
 
-        Behavior
-        --------
-        - Clears interactive components from the view (so users cannot vote).
-        - Attempts to edit the original message's embed; if that fails it will try
-          to send the winner_text as a plain channel message.
+        Clears interactive components and attempts to edit the original message.
         """
         self.clear_items()
         if self.message:
@@ -639,14 +641,13 @@ class PollView(discord.ui.View):
 
     async def on_timeout(self):
         """
-        Finalize a poll when it times out. This method is safe to call multiple times.
+        Finalize a poll when it times out. Safe to call multiple times.
 
-        Steps performed
-        ---------------
-        - Mark the view as ended (idempotent).
-        - Cancel background updater if running.
+        Steps:
+        - Mark poll ended.
+        - Cancel the updater task.
         - Compute results and persist them.
-        - Update the message and announce winners (if any).
+        - Update the message and announce winners if any.
         """
         if self.ended:
             return
@@ -660,18 +661,12 @@ class PollView(discord.ui.View):
         """
         Handler for a user selecting an option from the Select menu.
 
-        Workflow
-        --------
+        Workflow:
         - Validate the poll is active.
         - Convert the selected index to an option label.
         - Ensure each user has at most one vote (removes prior choices).
-        - Persist the active poll state to the DB.
-        - Update the message with a short ephemeral confirmation.
-
-        Error handling
-        --------------
-        - Invalid selections produce an ephemeral warning.
-        - Persistence errors are logged to stdout but do not block the user reply.
+        - Persist the single vote using upsert_vote.
+        - Update the message and send an ephemeral confirmation.
         """
         if not await self._ensure_poll_active(interaction):
             return
@@ -690,18 +685,10 @@ class PollView(discord.ui.View):
             self.votes[opt].discard(interaction.user.id)
         self.votes[choice_label].add(interaction.user.id)
 
+        # Persist only the single vote change (no JSON blob rewrite)
         if self.message:
             try:
-                await save_active_poll(
-                    message_id=self.message.id,
-                    guild_id=self.message.guild.id,
-                    channel_id=self.message.channel.id,
-                    author_id=self.author.id,
-                    question=self.question,
-                    options=self.options,
-                    votes=self.votes,
-                    end_time=self.end_time
-                )
+                await upsert_vote(self.message.id, interaction.user.id, idx)
             except Exception as e:
                 print(f"[Poll DB Save Error on vote] {e}")
 
@@ -709,12 +696,11 @@ class PollView(discord.ui.View):
 
     async def add_option(self, interaction: discord.Interaction):
         """
-        Initiates the AddOptionModal to allow the poll author to append new options.
+        Initiate the AddOptionModal to let the poll author append options.
 
-        Permissions
-        -----------
-        - Only the poll creator (author) may add options. Attempts by other users
-          result in an ephemeral denial message.
+        Permissions:
+        - Only the poll creator (author) may add options. Attempts by others will
+          be rejected with an ephemeral message.
         """
         if not await self._ensure_poll_active(interaction):
             return
@@ -727,13 +713,11 @@ class PollView(discord.ui.View):
 
     async def remove_vote(self, interaction: discord.Interaction):
         """
-        Remove the invoking user's vote if they previously voted.
+        Remove the invoking user's vote if present.
 
-        Behavior
-        --------
-        - If the user had a vote recorded, it is removed and the active poll state
-          is persisted. The user receives an ephemeral confirmation.
-        - If the user had not voted, the user receives an ephemeral notice.
+        Behavior:
+        - Removes the in-memory vote and deletes the row in poll_votes.
+        - Sends an ephemeral confirmation to the user.
         """
         if not await self._ensure_poll_active(interaction):
             return
@@ -747,16 +731,7 @@ class PollView(discord.ui.View):
         if removed:
             if self.message:
                 try:
-                    await save_active_poll(
-                        message_id=self.message.id,
-                        guild_id=self.message.guild.id,
-                        channel_id=self.message.channel.id,
-                        author_id=self.author.id,
-                        question=self.question,
-                        options=self.options,
-                        votes=self.votes,
-                        end_time=self.end_time
-                    )
+                    await delete_vote(self.message.id, interaction.user.id)
                 except Exception as e:
                     print(f"[Poll DB Save Error on remove] {e}")
             await self.update_poll(interaction, "❌ Your vote was removed.")
@@ -767,14 +742,11 @@ class PollView(discord.ui.View):
         """
         Allow the poll author to end the poll immediately.
 
-        Permissions
-        -----------
+        Permissions:
         - Only the poll author may end the poll manually.
 
-        Behavior
-        --------
-        - Cancels any running updater_task and delegates to on_timeout() which
-          performs persistence and finalization.
+        Behavior:
+        - Cancels the background updater_task and finalizes the poll.
         """
         if interaction.user.id != self.author.id:
             return await interaction.response.send_message("⚠️ Only the poll creator can end this poll.", ephemeral=True)
@@ -792,14 +764,7 @@ class PollView(discord.ui.View):
 
         The method attempts progressively smaller embed renderings if Discord
         rejects the size due to embed field limits, and falls back to refetching
-        the original message or sending a new one.
-
-        Args
-        ----
-        interaction: discord.Interaction
-            The interaction that triggered the update (used to send ephemeral replies).
-        ephemeral_msg: str
-            Message content to send as an ephemeral acknowledgment.
+        or re-sending the message.
         """
         embed = self.make_poll_embed()
         if self.message:
@@ -866,9 +831,9 @@ class PollView(discord.ui.View):
 
         Parameters
         ----------
-        closed: bool
+        closed : bool
             If True, the embed will indicate the poll is closed.
-        bar_len: int
+        bar_len : int
             Length of the textual progress bar displayed for each option.
 
         Returns
@@ -898,9 +863,8 @@ class PollView(discord.ui.View):
             color = colors[i % len(colors)]
             bar = color * filled + f"{CustomEmojis['Gray_Large_Square']}" * empty
 
-            name = opt
             embed.add_field(
-                name=name,
+                name=opt,
                 value=f"{bar} `{percent:.0f}% ({count})`",
                 inline=False
             )
@@ -936,13 +900,6 @@ class AddOptionModal(ui.Modal, title="Add Poll Options"):
       poll's options list on submit (subject to duplication and maximum checks).
     - Updates the in-memory PollView instance and persists the new state.
     - Edits the poll message to reflect newly added options.
-
-    Validation rules
-    ----------------
-    - The modal will reject duplicate options (case-insensitive) relative to
-      the poll's existing options.
-    - Enforces a maximum number of total options (MAX_OPTIONS constant in the
-      modal implementation) to stay within Discord select menu limits.
     """
     opt1 = ui.TextInput(label="Option 1 (optional)", required=False, max_length=100,
                         placeholder=MODAL_PLACEHOLDER)
@@ -1028,7 +985,6 @@ class AddOptionModal(ui.Modal, title="Add Poll Options"):
                 author_id=self.poll_view.author.id,
                 question=self.poll_view.question,
                 options=self.poll_view.options,
-                votes=self.poll_view.votes,
                 end_time=self.poll_view.end_time
             )
         except Exception as e:
@@ -1052,11 +1008,6 @@ class PollInputModal(ui.Modal, title="Create Poll"):
     - Requires at least two non-empty options (opt1 and opt2 are required fields).
     - Enforces uniqueness of option text (case-insensitive).
     - Option fields are trimmed for whitespace before validation.
-
-    Typical usage
-    -------------
-    - Construct with the command context and an optional timeout in seconds.
-      The PollView will be created and posted into interaction.channel.
     """
     question = ui.TextInput(label="Question", placeholder="What's the poll about?", required=True, max_length=200)
     opt1 = ui.TextInput(label="Option 1 (required)", placeholder="First option (required)", required=True, max_length=100)
@@ -1083,11 +1034,6 @@ class PollInputModal(ui.Modal, title="Create Poll"):
           submitted.
         - Persists the active poll into the polls table via save_active_poll.
         - Sends an ephemeral confirmation to the user.
-
-        Error handling
-        --------------
-        - All exceptions are caught and printed; the user will receive an
-          ephemeral failure message if poll creation fails.
         """
         raw_opts = [
             self.opt1.value.strip(),
@@ -1122,7 +1068,6 @@ class PollInputModal(ui.Modal, title="Create Poll"):
                 author_id=interaction.user.id,
                 question=self.question.value,
                 options=opts,
-                votes=view.votes,
                 end_time=end_time
             )
 
