@@ -1,8 +1,0 @@
-discord.py
-aiohttp
-pillow
-python-dotenv
-asyncpg
-asyncio
-cachetools
-redis
