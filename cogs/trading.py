@@ -33,7 +33,6 @@ Contents:
 Notes:
 - This module expects a Progression cog to be present with:
   - pool: asyncpg pool
-  - db_lock: an asyncio lock to serialize DB writes.
   - get_user, add_exp, get_coins, remove_coins, announce_level_up, MAX_LEVEL attributes/methods.
 - All behavioral code is left unchanged; only the storage layer now uses asyncpg/PostgreSQL.
 - Production hardening additions:
@@ -41,6 +40,10 @@ Notes:
   - Index creation for hot paths on user_inventory.
   - Lightweight maintenance loop to purge empty inventory rows.
   - Guild cleanup on guild removal for inventory rows.
+- Concurrency model:
+  - Python-level locks have been removed. Concurrency safety is delegated to PostgreSQL via
+    atomic UPDATEs and explicit transactions (async with conn.transaction()) for multi-step
+    operations like donations. This allows many concurrent trades without a global bottleneck.
 """
 
 COG_PATH = os.path.dirname(os.path.abspath(__file__))
@@ -153,7 +156,6 @@ class InventorySelect(discord.ui.Select):
         self.guild_id = guild_id
         self.items_data = items
         self.parent_view = parent_view
-        self._release_lock_task = None  
 
         options = [
             discord.SelectOption(
@@ -188,44 +190,45 @@ class InventorySelect(discord.ui.Select):
             await interaction.response.send_message("⚠️ This is not your inventory!", ephemeral=True)
             return
 
-        self.cog.user_locks[self.user_id] = True
-
         try:
             selected_item = self.values[0]
             await interaction.response.defer()
             pool = self.cog.progression_cog.pool
-            lock = self.cog.progression_cog.db_lock
 
-            async with lock, pool.acquire() as conn:
+            async with pool.acquire() as conn:
                 await self.cog._set_stmt_timeout(conn)
                 row = await conn.fetchrow(SQL_SELECT_PRICE_EMOJI, selected_item)
                 selected_emoji = row["emoji"] if row and row["emoji"] else "📦"
 
-                row_qty = await conn.fetchrow(
-                    "SELECT quantity FROM user_inventory WHERE user_id = $1 AND guild_id = $2 AND item_name = $3",
-                    self.user_id, self.guild_id, selected_item
-                )
-                if not row_qty or row_qty["quantity"] <= 0:
-                    await interaction.followup.send("❌ You don't own this item anymore.", ephemeral=True)
-                    return
-
-                if selected_item in POTION_ITEMS:
-                    row_lvl = await conn.fetchrow(
-                        "SELECT level FROM users WHERE user_id = $1 AND guild_id = $2",
-                        self.user_id, self.guild_id
+                # Atomic decrement; prevents race conditions without Python locks
+                async with conn.transaction():
+                    deducted = await conn.fetchrow(
+                        """
+                        UPDATE user_inventory
+                        SET quantity = quantity - 1
+                        WHERE user_id = $1 AND guild_id = $2 AND item_name = $3 AND quantity > 0
+                        RETURNING quantity
+                        """,
+                        self.user_id, self.guild_id, selected_item
                     )
-                    if row_lvl and row_lvl["level"] >= self.cog.progression_cog.MAX_LEVEL:
-                        await interaction.followup.send(f"{MinoriEmojis['MinoriWink']} You’ve already reached the max level! You can’t use {EXP_EMOJI} items anymore.", ephemeral=True)
+                    if not deducted:
+                        await interaction.followup.send("❌ You don't own this item anymore.", ephemeral=True)
                         return
 
-                await conn.execute(
-                    "UPDATE user_inventory SET quantity = quantity - 1 WHERE user_id = $1 AND guild_id = $2 AND item_name = $3",
-                    self.user_id, self.guild_id, selected_item
-                )
-                await conn.execute(
-                    "DELETE FROM user_inventory WHERE user_id = $1 AND guild_id = $2 AND item_name = $3 AND quantity <= 0",
-                    self.user_id, self.guild_id, selected_item
-                )
+                    if selected_item in POTION_ITEMS:
+                        row_lvl = await conn.fetchrow(
+                            "SELECT level FROM users WHERE user_id = $1 AND guild_id = $2",
+                            self.user_id, self.guild_id
+                        )
+                        if row_lvl and row_lvl["level"] >= self.cog.progression_cog.MAX_LEVEL:
+                            await interaction.followup.send(f"{MinoriEmojis['MinoriWink']} You’ve already reached the max level! You can’t use {EXP_EMOJI} items anymore.", ephemeral=True)
+                            return
+
+                    if deducted["quantity"] <= 0:
+                        await conn.execute(
+                            "DELETE FROM user_inventory WHERE user_id = $1 AND guild_id = $2 AND item_name = $3",
+                            self.user_id, self.guild_id, selected_item
+                        )
 
             feedback_msg = f"You used {selected_emoji} **{selected_item}**!"
 
@@ -252,7 +255,7 @@ class InventorySelect(discord.ui.Select):
                     feedback_msg = f"{ShopEmojis['MysteryBox']} You opened a {MYSTERY_BOX_NAME} and got:\n" + "\n".join(reward_lines)
 
             # reload inventory
-            async with self.cog.progression_cog.db_lock, self.cog.progression_cog.pool.acquire() as conn:
+            async with self.cog.progression_cog.pool.acquire() as conn:
                 await self.cog._set_stmt_timeout(conn)
                 raw_items = await conn.fetch(SQL_USER_INV_SELECT, self.user_id, self.guild_id)
 
@@ -282,10 +285,8 @@ class InventorySelect(discord.ui.Select):
             await interaction.followup.send(feedback_msg)
 
         finally:
-            async def release_lock():
-                await asyncio.sleep(2)
-                self.cog.user_locks[self.user_id] = False
-            self._release_lock_task = asyncio.create_task(release_lock())
+            # no Python lock release needed; DB handled concurrency
+            pass
 
 
 class InventoryView(discord.ui.View):
@@ -407,16 +408,17 @@ class ShopSelect(discord.ui.Select):
                 await interaction.followup.send(NOT_ENOUGH_COINS_MSG, ephemeral=True)
                 return
 
-            async with self.progression_cog.db_lock, self.progression_cog.pool.acquire() as conn:
+            async with self.progression_cog.pool.acquire() as conn:
                 await self.parent_view.parent_cog._set_stmt_timeout(conn)
-                await conn.execute(
-                    """
-                    INSERT INTO user_inventory (user_id, guild_id, item_name, quantity)
-                    VALUES ($1, $2, $3, 1)
-                    ON CONFLICT(user_id, guild_id, item_name) DO UPDATE SET quantity = user_inventory.quantity + 1
-                    """,
-                    self.user_id, self.guild_id, selected_item
-                )
+                async with conn.transaction():
+                    await conn.execute(
+                        """
+                        INSERT INTO user_inventory (user_id, guild_id, item_name, quantity)
+                        VALUES ($1, $2, $3, 1)
+                        ON CONFLICT(user_id, guild_id, item_name) DO UPDATE SET quantity = user_inventory.quantity + 1
+                        """,
+                        self.user_id, self.guild_id, selected_item
+                    )
 
             new_balance = await self.progression_cog.get_coins(self.user_id, self.guild_id)
             async with self.progression_cog.pool.acquire() as conn:
@@ -529,7 +531,6 @@ class Trading(commands.Cog):
 
     Important attributes created at init:
     - progression_cog: reference to the Progression cog (set during cog_load).
-    - user_locks: used to rate-limit or serialize per-user item actions.
     - donate_cooldowns: map donor_id -> datetime when they can next donate.
     - open_inventories / open_shops: map guild_id -> map[user_id -> view/message] to prevent duplicates.
     - Additional production helpers:
@@ -543,7 +544,6 @@ class Trading(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.progression_cog = None
-        self.user_locks = {}
         self.donate_cooldowns = {}
         self.open_inventories = {}
         self.open_shops = {} 
@@ -690,25 +690,26 @@ class Trading(commands.Cog):
             List of (item_name, amount) awarded to the user.
         """
         rewards = []
-        async with self.progression_cog.db_lock, self.progression_cog.pool.acquire() as conn:
+        async with self.progression_cog.pool.acquire() as conn:
             await self._set_stmt_timeout(conn)
-            if random.random() < 0.15:
-                amount = random.randint(1, 3)
-                await conn.execute(SQL_UPSERT_USER_INV, user_id, guild_id, LEVEL_SKIP_TOKEN, amount)
-                rewards.append((LEVEL_SKIP_TOKEN, amount))
+            async with conn.transaction():
+                if random.random() < 0.15:
+                    amount = random.randint(1, 3)
+                    await conn.execute(SQL_UPSERT_USER_INV, user_id, guild_id, LEVEL_SKIP_TOKEN, amount)
+                    rewards.append((LEVEL_SKIP_TOKEN, amount))
 
-            if random.random() < 0.20:
-                amount = random.randint(1, 3)
-                await conn.execute(SQL_UPSERT_USER_INV, user_id, guild_id, LARGE_EXP_POTION, amount)
-                rewards.append((LARGE_EXP_POTION, amount))
+                if random.random() < 0.20:
+                    amount = random.randint(1, 3)
+                    await conn.execute(SQL_UPSERT_USER_INV, user_id, guild_id, LARGE_EXP_POTION, amount)
+                    rewards.append((LARGE_EXP_POTION, amount))
 
-            if random.random() < 0.50:
-                amount = random.randint(1, 3)
-                await conn.execute(SQL_UPSERT_USER_INV, user_id, guild_id, MEDIUM_EXP_POTION, amount)
-                rewards.append((MEDIUM_EXP_POTION, amount))
+                if random.random() < 0.50:
+                    amount = random.randint(1, 3)
+                    await conn.execute(SQL_UPSERT_USER_INV, user_id, guild_id, MEDIUM_EXP_POTION, amount)
+                    rewards.append((MEDIUM_EXP_POTION, amount))
 
-            await conn.execute(SQL_UPSERT_USER_INV, user_id, guild_id, SMALL_EXP_POTION, 3)
-            rewards.append((SMALL_EXP_POTION, 3))
+                await conn.execute(SQL_UPSERT_USER_INV, user_id, guild_id, SMALL_EXP_POTION, 3)
+                rewards.append((SMALL_EXP_POTION, 3))
 
         return rewards
 
@@ -928,34 +929,33 @@ class Trading(commands.Cog):
                     await interaction.response.send_modal(DonateAmountModal(selected_item, max_cap))
 
         async def finalize_donate(item_name, amount, interaction):
-            lock = self.progression_cog.db_lock
-            async with lock, conn_pool.acquire() as conn:
+            async with conn_pool.acquire() as conn:
                 await self._set_stmt_timeout(conn)
-                row = await conn.fetchrow(
-                    "SELECT quantity FROM user_inventory WHERE user_id = $1 AND guild_id = $2 AND item_name = $3",
-                    donor_id, guild_id, item_name
-                )
-                if not row or row["quantity"] < amount:
-                    await interaction.response.send_message("❌ You don't have enough of this item.", ephemeral=True)
-                    return
+                async with conn.transaction():
+                    row = await conn.fetchrow(
+                        "SELECT quantity FROM user_inventory WHERE user_id = $1 AND guild_id = $2 AND item_name = $3 FOR UPDATE",
+                        donor_id, guild_id, item_name
+                    )
+                    if not row or row["quantity"] < amount:
+                        await interaction.response.send_message("❌ You don't have enough of this item.", ephemeral=True)
+                        return
 
-                await conn.execute(
-                    "UPDATE user_inventory SET quantity = quantity - $1 WHERE user_id = $2 AND guild_id = $3 AND item_name = $4",
-                    amount, donor_id, guild_id, item_name
-                )
-                await conn.execute(
-                    "DELETE FROM user_inventory WHERE user_id = $1 AND guild_id = $2 AND item_name = $3 AND quantity <= 0",
-                    donor_id, guild_id, item_name
-                )
-
-                await conn.execute(
-                    """
-                    INSERT INTO user_inventory (user_id, guild_id, item_name, quantity)
-                    VALUES ($1, $2, $3, $4)
-                    ON CONFLICT(user_id, guild_id, item_name) DO UPDATE SET quantity = user_inventory.quantity + EXCLUDED.quantity
-                    """,
-                    receiver_id, guild_id, item_name, amount
-                )
+                    await conn.execute(
+                        "UPDATE user_inventory SET quantity = quantity - $1 WHERE user_id = $2 AND guild_id = $3 AND item_name = $4",
+                        amount, donor_id, guild_id, item_name
+                    )
+                    await conn.execute(
+                        "DELETE FROM user_inventory WHERE user_id = $1 AND guild_id = $2 AND item_name = $3 AND quantity <= 0",
+                        donor_id, guild_id, item_name
+                    )
+                    await conn.execute(
+                        """
+                        INSERT INTO user_inventory (user_id, guild_id, item_name, quantity)
+                        VALUES ($1, $2, $3, $4)
+                        ON CONFLICT(user_id, guild_id, item_name) DO UPDATE SET quantity = user_inventory.quantity + EXCLUDED.quantity
+                        """,
+                        receiver_id, guild_id, item_name, amount
+                    )
 
             self.donate_cooldowns[donor_id] = datetime.now(timezone.utc) + timedelta(hours=2)
 
@@ -977,9 +977,10 @@ class Trading(commands.Cog):
         """
         if not self.progression_cog or not self.progression_cog.pool:
             return
-        async with self.progression_cog.db_lock, self.progression_cog.pool.acquire() as conn:
+        async with self.progression_cog.pool.acquire() as conn:
             await self._set_stmt_timeout(conn)
-            await conn.execute("DELETE FROM user_inventory WHERE guild_id = $1", guild.id)
+            async with conn.transaction():
+                await conn.execute("DELETE FROM user_inventory WHERE guild_id = $1", guild.id)
         print(f"[Shop] Cleaned up inventory DB for guild {guild.id} ({guild.name})")
 
 

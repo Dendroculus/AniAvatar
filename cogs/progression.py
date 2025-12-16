@@ -1343,35 +1343,38 @@ class Progression(commands.Cog):
     # async def on_ready(self):
     #     """
     #     Development helper that seeds EXP/coins for a predefined list of users on startup.
-    #
+    
     #     NOTE: This block is explicitly intended for testing and should be removed in
     #     production deployments or gated behind configuration.
     #     """
     #     print(f"{self.bot.user} is ready!")
-    #
+    
     #     YOUR_ID = [
-    #         955268891125375036
+    #         955268891125375036, 550201320074903563, 872679412573802537,
+    #         1016489027211378719, 849510586568015923, 905752774497685554,
+    #         848525048201478184, 609614026573479936, 736068611017539585,
+    #         592632082841337857, 757192501831663627, 489068781705101335,
+    #         696014510367965275, 669515429823381505
     #     ]
-    #
-    #     GUILD_ID = 1412345648174333956
-    #
+    
+    #     GUILD_ID = 974498807817588756
+    
     #     progression = self.bot.get_cog("Progression")
     #     if not progression:
     #         print("Progression cog not loaded!")
     #         return
-    #
-    #     rand_exp = random.randint(5150, 5151)
+    
+    #     rand_exp = random.randint(1, 10000)
     #     for user_id in YOUR_ID:
     #         level, exp, leveled_up = await self.add_exp(user_id, GUILD_ID, rand_exp)
     #         print(f"User {user_id} → Level {level}, EXP {exp}, Leveled up? {leveled_up}")
-    #
-    #         await progression.add_coins(user_id, GUILD_ID, 9999)
+    
+    #         await progression.add_coins(user_id, GUILD_ID, 100)
     #         coins = await progression.get_coins(user_id, GUILD_ID)
     #         print(f"User {user_id} → Coins: {coins}")
-    #
+    
     #     first_user = YOUR_ID[0]
     #     print(f"🎉 First user {first_user} now has Level {level}, EXP {exp}, Coins {coins}. Leveled up? {leveled_up}")
-
 
 async def setup(bot):
     await bot.add_cog(Progression(bot))
