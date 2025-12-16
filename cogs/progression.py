@@ -946,6 +946,7 @@ class Progression(commands.Cog):
             return
 
         try:
+            await ctx.defer()
             exp, level = await self.get_user(member.id, ctx.guild.id)
             title_name = get_title(level)
             next_exp = None if level >= self.MAX_LEVEL else (50 * level + 20 * level**2)
