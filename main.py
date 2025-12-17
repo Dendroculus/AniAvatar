@@ -35,7 +35,7 @@ intents = discord.Intents.default()
 intents.members = True
 intents.message_content = True
 
-class Minori(commands.Bot):
+class Minori(commands.AutoShardedBot):
     """
     Main Bot subclass for the Minori/AniAvatar application.
 
