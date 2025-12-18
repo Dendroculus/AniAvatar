@@ -255,23 +255,38 @@ def get_title_emoji(level: int):
     """
     Return a compact emoji token representing the title tier for UI text fallback.
     """
-    # copilot help me change all into using TitleEmojis dict
-    if level < 5: return TitleEmojis["NOVICE"]
-    elif level < 10: return TitleEmojis["WARRIOR"]
-    elif level < 15: return TitleEmojis["ELITE"]
-    elif level < 20: return TitleEmojis["CHAMPION"]
-    elif level < 25: return TitleEmojis["HERO"]
-    elif level < 30: return TitleEmojis["LEGEND"]
-    elif level < 35: return TitleEmojis["MYTHIC"]
-    elif level < 40: return TitleEmojis["ASCENDANT"]
-    elif level < 50: return TitleEmojis["IMMORTAL"]
-    elif level < 60: return TitleEmojis["CELESTIAL"]
-    elif level < 70: return TitleEmojis["TRANSCENDENT"]
-    elif level < 80: return TitleEmojis["AETHERBORN"]
-    elif level < 90: return TitleEmojis["COSMIC"]
-    elif level < 100: return TitleEmojis["DIVINE"]
-    elif level < 125: return TitleEmojis["ETERNAL"]
-    else: return TitleEmojis["ENLIGHTENED"]
+    if level < 5: 
+        return TitleEmojis["NOVICE"]
+    elif level < 10: 
+        return TitleEmojis["WARRIOR"]
+    elif level < 15: 
+        return TitleEmojis["ELITE"]
+    elif level < 20: 
+        return TitleEmojis["CHAMPION"]
+    elif level < 25: 
+        return TitleEmojis["HERO"]
+    elif level < 30: 
+        return TitleEmojis["LEGEND"]
+    elif level < 35: 
+        return TitleEmojis["MYTHIC"]
+    elif level < 40: 
+        return TitleEmojis["ASCENDANT"]
+    elif level < 50: 
+        return TitleEmojis["IMMORTAL"]
+    elif level < 60: 
+        return TitleEmojis["CELESTIAL"]
+    elif level < 70: 
+        return TitleEmojis["TRANSCENDENT"]
+    elif level < 80: 
+        return TitleEmojis["AETHERBORN"]
+    elif level < 90: 
+        return TitleEmojis["COSMIC"]
+    elif level < 100: 
+        return TitleEmojis["DIVINE"]
+    elif level < 125: 
+        return TitleEmojis["ETERNAL"]
+    else: 
+        return TitleEmojis["ENLIGHTENED"]
 
 
 async def get_user_rank(pool: asyncpg.Pool, user_id: int, guild_id: int, max_level: int):
