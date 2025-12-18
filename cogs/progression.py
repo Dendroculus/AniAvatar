@@ -310,7 +310,7 @@ class Progression(commands.Cog):
     """
     MAX_LEVEL = 999
     MAX_BOX_WIDTH = 50
-    MAX_NAME_WIDTH = 20
+    MAX_NAME_WIDTH = 13
     MAX_EXP_WIDTH = 12
     RENDER_CACHE_SIZE = 200
     RENDER_CACHE_TTL = 300
@@ -630,7 +630,7 @@ class Progression(commands.Cog):
             rows_data.append({
                 "rank": idx,
                 "avatar_bytes": avatar_bytes or b"",
-                "name": self.truncate(name, self.MAX_NAME_WIDTH),
+                "name": self.truncate(name, self.MAX_NAME_WIDTH, ellipsis="...", strip=False),
                 "level": level,
                 "title": get_title(level),
                 "exp": exp or 0,
@@ -756,13 +756,22 @@ class Progression(commands.Cog):
                 user_id, theme_name, bg_file, font_color
             )
 
-    def truncate(self, text: str, max_len: int):
+    def truncate(self, text: str, max_len: int, ellipsis: str = "...", strip: bool = False) -> str:
         """
-        Truncate a string to max_len and append ellipsis if truncated.
-
-        Helper used to keep names within image layout constraints.
+        Truncate a string to a maximum length, appending an ellipsis if truncated.
+        
+        Parameters:
+        - text: string to truncate
+        - max_len: maximum total length including ellipsis
+        - ellipsis: string to append if truncated
+        - strip: whether to strip trailing whitespace before adding ellipsis
         """
-        return text if len(text) <= max_len else text[:max_len - 3] + "..."
+        if len(text) <= max_len:
+            return text
+        truncated = text[:max_len - len(ellipsis)]
+        if strip:
+            truncated = truncated.rstrip()
+        return truncated + ellipsis
 
     async def get_user(self, user_id: int, guild_id: int):
         """
@@ -1073,40 +1082,6 @@ class Progression(commands.Cog):
                 lb_log(f"DB query failed: {e}")
                 return None
 
-        async def build_rows_data(rows):
-            try:
-                lb_log(f"Build rows data start (rows={len(rows) if rows else 0})")
-                data = await self._build_rows_data(ctx, rows, avatar_size=128, avatar_timeout=3.0)
-                lb_log(f"Build rows data done (rows_data={len(data)})")
-                return data
-            except Exception as e:
-                lb_log(f"_build_rows_data failed: {e}\n{traceback.format_exc()}")
-                data = []
-                for idx, (user_id, level, exp) in enumerate(rows or [], start=1):
-                    try:
-                        member = ctx.guild.get_member(user_id)
-                        if member:
-                            name = member.display_name
-                            avatar_bytes = await asyncio.wait_for(member.display_avatar.with_size(128).read(), timeout=2.0)
-                        else:
-                            user = await self.bot.fetch_user(user_id)
-                            name = user.name
-                            avatar_bytes = await asyncio.wait_for(user.display_avatar.with_size(128).read(), timeout=2.0)
-                    except Exception:
-                        name, avatar_bytes = f"User {user_id}", b""
-                    next_exp = None if level >= self.MAX_LEVEL else (50 * level + 20 * level**2)
-                    data.append({
-                        "rank": idx,
-                        "avatar_bytes": avatar_bytes,
-                        "name": self.truncate(name, self.MAX_NAME_WIDTH),
-                        "level": level,
-                        "title": get_title(level),
-                        "exp": exp or 0,
-                        "next_exp": next_exp
-                    })
-                lb_log(f"Build rows data fallback done (rows_data={len(data)})")
-                return data
-
         async def render_image(rows_data):
             lb_log(f"Render start (rows={len(rows_data)})")
             exp_icon_path = os.path.join(EMOJI_PATH, "EXP.png")
@@ -1151,7 +1126,7 @@ class Progression(commands.Cog):
         if not rows:
             return await self.safe_send(ctx, "No users found in the leaderboard.")
 
-        rows_data = await build_rows_data(rows)
+        rows_data = await self._build_rows_data(ctx, rows)
         img_bytes = await render_image(rows_data)
         if not img_bytes:
             return await self.safe_send(ctx, "Failed to generate leaderboard image (check logs).")
