@@ -1,4 +1,5 @@
 import os
+from dotenv import load_dotenv
 
 ROOT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__))) 
 COG_PATH = os.path.join(ROOT_PATH, "cogs")  
