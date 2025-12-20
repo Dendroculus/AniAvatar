@@ -4,7 +4,7 @@ import discord
 import json
 import os
 from datetime import datetime, timedelta, timezone
-from typing import List, Optional, Dict, Any, Iterable
+from typing import List, Optional, Dict, Any
 from discord import ui
 from discord.ext import commands
 
@@ -803,7 +803,7 @@ class PollView(discord.ui.View):
                             self.message = new_msg
                         except Exception as ex:
                             print(f"[update_poll] failed to recover from HTTPException: {ex}")
-            except Exception as e:
+            except Exception :
                 try:
                     new_msg = await self.message.channel.send(embed=embed, view=self)
                     self.message = new_msg
