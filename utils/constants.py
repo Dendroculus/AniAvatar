@@ -1,4 +1,5 @@
 import os
+from dotenv import load_dotenv
 
 COG_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # points to ...\AniAvatar\cogs
 ROOT_PATH = os.path.dirname(COG_PATH)                                   # points to ...\AniAvatar
@@ -6,6 +7,18 @@ ROOT_PATH = os.path.dirname(COG_PATH)                                   # points
 FONT_DIR = os.path.join(ROOT_PATH, "assets", "fonts")
 EMOJI_PATH = os.path.join(ROOT_PATH, "assets", "RANK ICONS")
 BG_PATH = os.path.join(ROOT_PATH, "assets", "background")  # singular
+
+
+"""
+Load necessary environment variables
+
+"""
+load_dotenv()
+DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
+GOOGLE_API = os.getenv("GOOGLE_API_KEY")
+GOOGLE_SEARCH_ENGINE = os.getenv("SEARCH_ENGINE_ID")
+DATABASE = os.getenv("DATABASE_URL")
+REDIS_CACHING = os.getenv("REDIS_URL")
 
 FONTS = {
     "bold": os.path.join(FONT_DIR, "gg sans Bold.ttf"),

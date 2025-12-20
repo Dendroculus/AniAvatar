@@ -13,15 +13,15 @@ from typing import Optional, Iterable, Any
 from collections import OrderedDict
 from discord import MessageReference
 import redis.asyncio as redis
-from cogs.utils.progUtils import (
+from utils.progUtils import (
     ImageRenderer,
     get_title,
     get_title_emoji,
     TITLE_COLORS,
 )
-from cogs.utils.constants import BG_PATH, EMOJI_PATH, FONTS, TITLE_EMOJI_FILES
-from cogs.trading import format_coins
-from cogs.utils.emojis import CustomEmojis, MinoriEmojis, TitleEmojis, ShopEmojis
+from utils.constants import BG_PATH, EMOJI_PATH, FONTS, TITLE_EMOJI_FILES, DATABASE, REDIS_CACHING
+from .trading import format_coins
+from utils.emojis import CustomEmojis, MinoriEmojis, TitleEmojis, ShopEmojis
 
 _PROCESS_CONTEXT: dict[str, Any] = {}
 
@@ -327,7 +327,7 @@ class Progression(commands.Cog):
 
         self._render_cache: OrderedDict[str, tuple[bytes, float]] = OrderedDict()
 
-        self.redis_url = os.getenv("REDIS_URL")
+        self.redis_url = REDIS_CACHING
         self.redis: redis.Redis | None = None
         if self.redis_url:
             try:
@@ -350,7 +350,7 @@ class Progression(commands.Cog):
 
     async def _ensure_pool(self):
         if self.pool is None:
-            dsn = os.getenv("DATABASE_URL")
+            dsn = DATABASE
             if not dsn:
                 raise RuntimeError("DATABASE_URL is not set")
             # command_timeout applies to pool operations; per-connection statement_timeout set in _pool_init.

@@ -1,9 +1,9 @@
-import os
 from dotenv import load_dotenv
 import discord
 from discord.ext import commands
 import logging
-from cogs.utils.logging_setup import setup_logging
+from utils.logging_setup import setup_logging
+from utils.constants import DISCORD_TOKEN
 
 """
 main.py
@@ -99,8 +99,5 @@ class Minori(commands.AutoShardedBot):
 if __name__ == "__main__":
     # Load environment variables from .env PERSONAL NOTE: PLEASE ADD YOUR .env FILE TO .gitignore 
     load_dotenv()
-    TOKEN = os.getenv("DISCORD_TOKEN")
-    
-    # Keep the bot alive if running in an environment that may sleep    
     bot = Minori()
-    bot.run(TOKEN)
+    bot.run(DISCORD_TOKEN)
