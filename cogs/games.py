@@ -7,9 +7,9 @@ import json
 import os
 from itertools import cycle
 
-from cogs.utils.anime_api import fetch_random_character, build_character_select_options
-from cogs.utils.game_text import random_win_message, random_lose_message, compute_rewards, award_rewards
-from cogs.utils.emojis import CustomEmojis
+from utils.anime_api import fetch_random_character, build_character_select_options
+from utils.game_text import random_win_message, random_lose_message, compute_rewards, award_rewards
+from utils.emojis import CustomEmojis
 
 """
 games.py
