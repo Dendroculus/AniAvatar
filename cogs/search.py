@@ -2,22 +2,17 @@ import discord
 from discord.ext import commands
 from discord.ui import View, Select
 import aiohttp
-import os
-from dotenv import load_dotenv
 from collections import OrderedDict, deque
 
-from cogs.utils.anime_api import (
+from utils.anime_api import (
     fetch_character_by_name,
     char_has_anime_media,
     is_image_url_ok,
     google_image_search,
     first_reachable_image,
 )
+from utils.constants import GOOGLE_API, GOOGLE_SEARCH_ENGINE
 
-load_dotenv()
-
-GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
-SEARCH_ENGINE_ID = os.getenv("SEARCH_ENGINE_ID")
 
 ANILIST_API = "https://graphql.anilist.co"
 
@@ -124,18 +119,18 @@ class Search(commands.Cog):
         return char, official_image
 
     async def _find_google_image(self, character_name: str, cache_key: str | None, timeout: aiohttp.ClientTimeout):
-        if not GOOGLE_API_KEY or not SEARCH_ENGINE_ID:
+        if not GOOGLE_API or not GOOGLE_SEARCH_ENGINE:
             return None
 
-        links = await google_image_search(f"{character_name} anime pfp", GOOGLE_API_KEY, SEARCH_ENGINE_ID)
+        links = await google_image_search(f"{character_name} anime pfp", GOOGLE_API, GOOGLE_SEARCH_ENGINE)
         if not links:
             return None
 
         candidates = links
         if cache_key:
             entry = self._cache_get(cache_key)
-            unsent = [l for l in links if l not in entry["google"] and l not in entry["anilist_images"]]
-            candidates = unsent or [l for l in links if l not in entry["anilist_images"]]
+            unsent = [link for link in links if link not in entry["google"] and link not in entry["anilist_images"]]
+            candidates = unsent or [link for link in links if link not in entry["anilist_images"]]
 
         chosen = await first_reachable_image(candidates, timeout)
         if chosen and cache_key:
@@ -161,7 +156,7 @@ class Search(commands.Cog):
             exclude: Set of image URLs to exclude
             search_variation: Search variation number (0-2) to try different queries
         """
-        if not GOOGLE_API_KEY or not SEARCH_ENGINE_ID:
+        if not GOOGLE_API or not GOOGLE_SEARCH_ENGINE:
             return []
 
         # Try different search queries to get more variety
@@ -172,12 +167,12 @@ class Search(commands.Cog):
         ]
 
         search_query = search_queries[min(search_variation, len(search_queries) - 1)]
-        links = await google_image_search(search_query, GOOGLE_API_KEY, SEARCH_ENGINE_ID)
+        links = await google_image_search(search_query, GOOGLE_API, GOOGLE_SEARCH_ENGINE)
         if not links:
             return []
 
         # Filter out excluded images first
-        candidates = [l for l in links if l not in exclude]
+        candidates = [link for link in links if link not in exclude]
 
         found_images = []
         for candidate in candidates:

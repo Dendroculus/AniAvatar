@@ -6,7 +6,7 @@ from discord.ext import commands, tasks
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any
 
-from cogs.utils.pollUtils import (
+from utils.pollUtils import (
     init_db,
     load_active_polls,
     PollView,
