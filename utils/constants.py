@@ -8,8 +8,6 @@ FONT_DIR = os.path.join(ROOT_PATH, "assets", "fonts")
 EMOJI_PATH = os.path.join(ROOT_PATH, "assets", "RANK ICONS")
 BG_PATH = os.path.join(ROOT_PATH, "assets", "background")  # singular
 
-<<<<<<< Updated upstream:cogs/utils/constants.py
-=======
 
 """
 Load necessary environment variables
@@ -21,7 +19,6 @@ GOOGLE_SEARCH_ENGINE = os.getenv("SEARCH_ENGINE_ID")
 DATABASE = os.getenv("DATABASE_URL")
 REDIS_CACHING = os.getenv("REDIS_URL")
 
->>>>>>> Stashed changes:utils/constants.py
 FONTS = {
     "bold": os.path.join(FONT_DIR, "gg sans Bold.ttf"),
     "medium": os.path.join(FONT_DIR, "gg sans Medium.ttf"),
