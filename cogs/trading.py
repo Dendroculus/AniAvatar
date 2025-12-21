@@ -5,7 +5,7 @@ import random
 from datetime import datetime, timedelta, timezone
 import asyncio
 
-from utils.emojis import CustomEmojis, MinoriEmojis, ShopEmojis
+from constants.emojis import CustomEmojis, MinoriEmojis, ShopEmojis
 
 """
 trading.py

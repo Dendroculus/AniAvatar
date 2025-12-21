@@ -11,7 +11,7 @@ from utils.anime_api import (
     google_image_search,
     first_reachable_image,
 )
-from utils.constants import GOOGLE_API, GOOGLE_SEARCH_ENGINE
+from constants.configs import GOOGLE_API, GOOGLE_SEARCH_ENGINE
 
 
 ANILIST_API = "https://graphql.anilist.co"

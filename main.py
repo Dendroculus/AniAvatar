@@ -2,8 +2,8 @@ from dotenv import load_dotenv
 import discord
 from discord.ext import commands
 import logging
-from utils.logging_setup import setup_logging
-from utils.constants import DISCORD_TOKEN
+from loggers.bot_logging import setup_logging
+from constants.configs import DISCORD_TOKEN
 
 """
 main.py

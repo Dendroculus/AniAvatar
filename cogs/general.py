@@ -1,7 +1,7 @@
 import discord
 from discord.ext import commands
 from discord import ui, ButtonStyle
-from utils.emojis import MinoriEmojis, CustomEmojis
+from constants.emojis import MinoriEmojis, CustomEmojis
 
 class DeleteView(ui.View):
     def __init__(self, user, timeout = None):

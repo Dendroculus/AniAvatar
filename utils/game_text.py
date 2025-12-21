@@ -1,6 +1,6 @@
 import random
 from typing import Optional, Tuple
-from .emojis import ShopEmojis, MinoriEmojis, CustomEmojis
+from constants.emojis import ShopEmojis, MinoriEmojis, CustomEmojis
 
 # EXP IS CustomEmojis["EXP"]
 # COINS IS ShopEmojis["Coins"]
