@@ -6,8 +6,8 @@ from datetime import datetime, timedelta, timezone
 from typing import List, Optional, Dict, Any
 from discord import ui
 from discord.ext import commands
-from .constants import DATABASE
-from .emojis import MinoriEmojis, CustomEmojis
+from constants.configs import DATABASE
+from constants.emojis import MinoriEmojis, CustomEmojis
 
 """
 pollUtils.py

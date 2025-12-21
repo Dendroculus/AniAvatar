@@ -10,7 +10,7 @@ import time
 from itertools import cycle
 from typing import Dict, Optional, Any
 from utils.pollUtils import PollInputModal
-from utils.emojis import MinoriEmojis, ShopEmojis
+from constants.emojis import MinoriEmojis, ShopEmojis
 
 FALSE_GAMBLE_SESSION = "⚠️ This is not your gamble session."
 

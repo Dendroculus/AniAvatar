@@ -5,6 +5,7 @@ import time
 import json
 import traceback
 from typing import Optional, Sequence, Any, Dict
+from constants.configs import ROOT_PATH
 
 """
 logging_setup.py
@@ -32,7 +33,7 @@ Important operational notes:
       for `asyncpg`, `aiohttp`, and `discord` (adjustable if you need more detailed DB logs).
 """
 
-DEFAULT_LOG_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "..", "logs")
+DEFAULT_LOG_DIR = os.path.join(ROOT_PATH, "logs")
 DEFAULT_TEXT_LOG = "bot.log"
 DEFAULT_JSON_LOG = "bot.jsonl"
 

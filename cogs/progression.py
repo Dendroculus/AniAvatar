@@ -19,9 +19,9 @@ from utils.progUtils import (
     get_title_emoji,
     TITLE_COLORS,
 )
-from utils.constants import BG_PATH, EMOJI_PATH, FONTS, TITLE_EMOJI_FILES, DATABASE, REDIS_CACHING
+from constants.configs import BG_PATH, EMOJI_PATH, FONTS, TITLE_EMOJI_FILES, DATABASE, REDIS_CACHING
 from .trading import format_coins
-from utils.emojis import CustomEmojis, MinoriEmojis, TitleEmojis, ShopEmojis
+from constants.emojis import CustomEmojis, MinoriEmojis, TitleEmojis, ShopEmojis
 
 _PROCESS_CONTEXT: dict[str, Any] = {}
 

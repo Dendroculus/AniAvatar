@@ -4,7 +4,7 @@ import discord
 import aiohttp
 import traceback
 
-from utils.emojis import CustomEmojis
+from constants.emojis import CustomEmojis
 
 """
 Errors module - centralized command and slash-command error handling.

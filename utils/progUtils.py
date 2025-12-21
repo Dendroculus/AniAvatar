@@ -10,8 +10,8 @@ import asyncpg
 import unicodedata
 import time
 from typing import Optional, Dict, Tuple
-from .constants import BG_PATH, FONTS, ROOT_PATH, TITLE_EMOJI_FILES
-from .emojis import TitleEmojis
+from constants.configs import BG_PATH, FONTS, ROOT_PATH, TITLE_EMOJI_FILES
+from constants.emojis import TitleEmojis
 
 """
 PERSONAL NOTE : 
