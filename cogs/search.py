@@ -132,7 +132,7 @@ class Search(commands.Cog):
             unsent = [link for link in links if link not in entry["google"] and link not in entry["anilist_images"]]
             candidates = unsent or [link for link in links if link not in entry["anilist_images"]]
 
-        chosen = await first_reachable_image(candidates, timeout)
+        chosen = await first_reachable_image(candidates)
         if chosen and cache_key:
             self._cache_add_google(cache_key, chosen)
         return chosen
