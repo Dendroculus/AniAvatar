@@ -1,7 +1,7 @@
 import discord
 from discord.ext import commands
 from discord import app_commands
-from utils.discord_helpers import create_choices
+from utils.discordHelpers import create_choices
 
 """
 Purpose:

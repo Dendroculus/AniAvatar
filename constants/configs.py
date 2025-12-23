@@ -1,6 +1,6 @@
 import os
 from dotenv import load_dotenv
-from .emojis import CustomEmojis
+from .emojis import ShopEmojis
 
 ROOT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__))) 
 COG_PATH = os.path.join(ROOT_PATH, "cogs")  
@@ -53,13 +53,13 @@ class TradingConstants:
     Constants used in the Trading Cog for managing in-game item trading,
      including SQL statements and item definitions.
     """
+    
     SHOP_ICON_URL = "https://cdn.discordapp.com/emojis/1415555390489366680.png"
     MYSTERY_BOX_NAME = "Mystery Box"
     SMALL_EXP_POTION = "Small EXP Potion"
     MEDIUM_EXP_POTION = "Medium EXP Potion"
     LARGE_EXP_POTION = "Large EXP Potion"
     LEVEL_SKIP_TOKEN = "Level Skip Token"
-    EXP_EMOJI = f"{CustomEmojis['EXP']}"
     POTION_ITEMS = (SMALL_EXP_POTION, MEDIUM_EXP_POTION, LARGE_EXP_POTION, LEVEL_SKIP_TOKEN)
     SQL_USER_INV_SELECT = "SELECT item_name, quantity FROM user_inventory WHERE user_id = $1 AND guild_id = $2"
     SQL_UPSERT_USER_INV = """
@@ -68,3 +68,26 @@ class TradingConstants:
     ON CONFLICT(user_id, guild_id, item_name) DO UPDATE SET quantity = user_inventory.quantity + EXCLUDED.quantity
     """
     SQL_SELECT_PRICE_EMOJI = "SELECT price, emoji FROM shop_items WHERE name = $1"
+
+class ProgressionConstants:
+    """
+    Constants used in the Progression Cog for managing user progression,
+     including SQL statements and rank definitions.
+    """
+
+    @classmethod
+    def COINS_EMOJI(cls):
+        return f"{ShopEmojis['Coins']}"
+    
+    PROFILE_PNG = "profile.png"
+    ATTACHMENT_PROFILE = f"attachment://{PROFILE_PNG}"
+    SQL_INSERT_OR_IGNORE_USER_COINS_ZERO = (
+        "INSERT INTO user_coins (user_id, guild_id, coins) VALUES ($1, $2, 0) ON CONFLICT DO NOTHING"
+    )
+    
+    DEFAULT_STATEMENT_TIMEOUT_MS = int(os.getenv("PG_STATEMENT_TIMEOUT_MS", "2000"))
+    MAX_LEVEL = 999
+    MAX_NAME_WIDTH = 13
+    RENDER_CACHE_SIZE = 200
+    RENDER_CACHE_TTL = 300
+    LEADERBOARD_CACHE_TTL = 120 # 2 minutes

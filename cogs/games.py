@@ -8,8 +8,8 @@ import os
 from itertools import cycle
 
 from utils.animeAPI import fetch_random_character, build_character_select_options
-from utils.game_text import random_win_message, random_lose_message, compute_rewards, award_rewards
-from utils.discord_helpers import create_same_choices
+from utils.gameTexts import random_win_message, random_lose_message, compute_rewards, award_rewards
+from utils.discordHelpers import create_same_choices
 from constants.emojis import CustomEmojis
 
 """

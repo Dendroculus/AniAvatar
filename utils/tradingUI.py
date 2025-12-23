@@ -1,6 +1,6 @@
 import discord
 import asyncio
-from constants.configs import TradingConstants as TC
+from constants.configs import TradingConstants as TC, ProgressionConstants as PC
 from constants.emojis import MinoriEmojis, ShopEmojis
 
 def format_coins(coins: int) -> str:
@@ -155,7 +155,7 @@ class InventorySelect(discord.ui.Select):
                             "SELECT level FROM users WHERE user_id = $1 AND guild_id = $2",
                             self.user_id, self.guild_id
                         )
-                        if row_lvl and row_lvl["level"] >= self.cog.progression_cog.MAX_LEVEL:
+                        if row_lvl and row_lvl["level"] >= PC.MAX_LEVEL:
                             await interaction.followup.send(f"{MinoriEmojis['MinoriWink']} You’ve already reached the max level! You can’t use {TC.EXP_EMOJI} items anymore.", ephemeral=True)
                             return
 

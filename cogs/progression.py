@@ -13,15 +13,25 @@ from typing import Optional, Iterable, Any
 from collections import OrderedDict
 from discord import MessageReference
 import redis.asyncio as redis
-from utils.progUtils import (
+from utils.progression.profileCards import (
     ImageRenderer,
     get_title,
     get_title_emoji,
     TITLE_COLORS,
 )
-from constants.configs import BG_PATH, EMOJI_PATH, FONTS, TITLE_EMOJI_FILES, DATABASE, REDIS_CACHING
+from utils.progression.profileTheme import MainThemeView
+from constants.configs import (
+    BG_PATH,
+    EMOJI_PATH,
+    FONTS,
+    TITLE_EMOJI_FILES,
+    DATABASE,
+    REDIS_CACHING,
+    ProgressionConstants as PC,
+)
+
 from .trading import format_coins
-from constants.emojis import CustomEmojis, MinoriEmojis, TitleEmojis, ShopEmojis
+from constants.emojis import CustomEmojis, TitleEmojis
 
 _PROCESS_CONTEXT: dict[str, Any] = {}
 
@@ -69,16 +79,6 @@ Design notes and important operational guidance:
   - For multi-instance deployments, rely on DB constraints/transactions rather than in-process
     locks for cross-process safety; the current locks only protect within this process.
 """
-
-PROFILE_PNG = "profile.png"
-ATTACHMENT_PROFILE = f"attachment://{PROFILE_PNG}"
-SQL_INSERT_OR_IGNORE_USER_COINS_ZERO = (
-    "INSERT INTO user_coins (user_id, guild_id, coins) VALUES ($1, $2, 0) ON CONFLICT DO NOTHING"
-)
-COINS_EMOJI = f"{ShopEmojis['Coins']}"
-
-# Statement timeout (ms) applied per-connection to avoid runaway queries.
-DEFAULT_STATEMENT_TIMEOUT_MS = int(os.getenv("PG_STATEMENT_TIMEOUT_MS", "2000"))
 
 def _render_profile_in_process(
     avatar_bytes: bytes,
@@ -140,162 +140,11 @@ async def _pool_init(conn: asyncpg.Connection):
     Keeps long/blocked queries from piling up.
     """
     try:
-        await conn.execute(f"SET statement_timeout TO {DEFAULT_STATEMENT_TIMEOUT_MS}")
+        await conn.execute(f"SET statement_timeout TO {PC.DEFAULT_STATEMENT_TIMEOUT_MS}")
         await conn.execute("SET application_name TO 'minori-progression'")
     except Exception:
         # Best-effort; don't block pool init
         pass
-
-
-class MainThemeSelect(discord.ui.Select):
-    """
-    Select menu listing top-level theme folders for profile backgrounds.
-
-    Responsibilities:
-    - Present available theme folders (derived from BG_PATH) as Select options.
-    - Validate that the invoking user owns the selection (protects other users' selections).
-    - On selection, transition the interaction to a SubThemeView to pick a specific background.
-    """
-    def __init__(self, user_id, cog):
-        self.user_id = user_id
-        self.cog = cog
-        self.folders = [folder for folder in os.listdir(BG_PATH) if os.path.isdir(os.path.join(BG_PATH, folder))]
-        options = [
-            discord.SelectOption(label=folder.capitalize(), description=f"Choose {folder.capitalize()} theme")
-            for folder in self.folders
-        ]
-        super().__init__(placeholder="Select a theme...", min_values=1, max_values=1, options=options)
-
-    async def callback(self, interaction: discord.Interaction):
-        if interaction.user.id != self.user_id:
-            await interaction.response.send_message("⚠️ You can only select a background for yourself.", ephemeral=True)
-            return
-        idx = self.values[0].lower()
-        selected_theme = next(f for f in self.folders if f.lower() == idx)
-        self.disabled = True
-        for item in self.view.children:
-            if isinstance(item, discord.ui.Select):
-                item.disabled = True
-        await interaction.response.edit_message(
-            content=f"You have selected **{selected_theme.capitalize()}**! Now pick a background:",
-            view=SubThemeView(self.user_id, selected_theme, self.cog)
-        )
-
-
-class MainThemeView(discord.ui.View):
-    """
-    Wrapper view that adds a MainThemeSelect for a specific user.
-
-    This view is ephemeral per-invocation and used by the profiletheme command.
-    """
-    def __init__(self, user_id, cog):
-        super().__init__()
-        self.cog = cog
-        self.add_item(MainThemeSelect(user_id, cog))
-
-
-class SubThemeSelect(discord.ui.Select):
-    """
-    Select menu showing concrete background image files within a chosen theme folder.
-
-    Behavior:
-    - Maps "Theme N" labels to actual filenames and persists the user's theme choice
-      via Progression.set_user_theme.
-    - Verifies ownership (only the invoking user may confirm a background).
-    - After saving, renders and sends an updated profile image preview to the user.
-    """
-    def __init__(self, user_id, theme, cog):
-        self.theme = theme
-        self.cog = cog
-        theme_path = os.path.join(BG_PATH, theme)
-
-        files = [f for f in os.listdir(theme_path) if f.lower().endswith((".png", ".jpg", ".jpeg"))]
-        self.file_map = {f"Theme {i+1}": file for i, file in enumerate(files)}
-
-        options = [
-            discord.SelectOption(label=name, description=f"Select {name}")
-            for name in self.file_map.keys()
-        ]
-
-        super().__init__(placeholder="Select a background...", min_values=1, max_values=1, options=options)
-        self.user_id = user_id
-
-    async def callback(self, interaction: discord.Interaction):
-        if interaction.user.id != self.user_id:
-            await interaction.response.send_message(
-                "⚠️ You can only select a background for yourself.", ephemeral=True
-            )
-            return
-
-        selected_label = self.values[0]
-        bg_file = self.file_map[selected_label]
-        theme_name = self.theme
-        font_color = "white"
-
-        current_theme_name, current_bg_file, current_font_color = await self.cog.get_user_theme(self.user_id)
-        if (
-            current_theme_name == theme_name
-            and (current_bg_file or "").lower() == bg_file.lower()
-            and current_font_color == font_color
-        ):
-            await interaction.response.send_message(
-                f"{MinoriEmojis['MinoriSmile']} You already use this profile theme and background.", ephemeral=True
-            )
-            return
-
-        await self.cog.set_user_theme(self.user_id, theme_name, bg_file, font_color)
-
-        for item in self.view.children:
-            if isinstance(item, discord.ui.Select):
-                item.disabled = True
-
-        embed = discord.Embed(
-            title="Your profile card theme has been updated!",
-            description=f"Your selection has been saved!\n You have selected `{theme_name.capitalize()} {selected_label}`."
-        )
-        embed.set_image(url=ATTACHMENT_PROFILE)
-        try:
-            await interaction.response.edit_message(embed=embed, view=self.view)
-        except discord.errors.InteractionResponded:
-            await interaction.followup.send(embed=embed)
-        await interaction.message.edit(content="")
-
-        member = interaction.user
-        exp, level = await self.cog.get_user(member.id, interaction.guild.id)
-        title_name = get_title(level)
-        next_exp = None if level >= self.cog.MAX_LEVEL else 50 * level + 20 * level**2
-
-        avatar_bytes = await member.display_avatar.with_size(128).read()
-
-        img_bytes = await self.cog._render_profile_cached(
-            avatar_bytes,
-            member.display_name,
-            title_name,
-            level,
-            exp,
-            next_exp,
-            bg_file=bg_file,
-            theme_name=theme_name,
-            font_color=font_color
-        )
-
-        if img_bytes:
-            file = discord.File(io.BytesIO(img_bytes), filename=PROFILE_PNG)
-            await interaction.followup.send(
-                content=f"{member.mention}, here's your updated profile! {MinoriEmojis['MinoriSmile']}",
-                file=file
-            )
-
-
-class SubThemeView(discord.ui.View):
-    """
-    Simple wrapper view that holds a SubThemeSelect for the chosen theme.
-    """
-    def __init__(self, user_id, theme, cog):
-        super().__init__()
-        self.cog = cog
-        self.add_item(SubThemeSelect(user_id, theme, cog))
-
 
 class Progression(commands.Cog):
     """
@@ -308,13 +157,6 @@ class Progression(commands.Cog):
     - Leaderboard image generation based on top users in a guild.
     - Per-message cooldown for give EXP on activity, to limit spam-based leveling.
     """
-    MAX_LEVEL = 999
-    MAX_BOX_WIDTH = 50
-    MAX_NAME_WIDTH = 13
-    MAX_EXP_WIDTH = 12
-    RENDER_CACHE_SIZE = 200
-    RENDER_CACHE_TTL = 300
-    LEADERBOARD_CACHE_TTL = 120 # 2 minutes
 
     def __init__(self, bot):
         self.bot = bot
@@ -342,9 +184,9 @@ class Progression(commands.Cog):
                 self.redis = None
         self._fallback_cooldowns: dict[str, float] = {}
 
-        self.renderer = ImageRenderer(cache_size=self.RENDER_CACHE_SIZE)
+        self.renderer = ImageRenderer(cache_size=PC.RENDER_CACHE_SIZE)
         
-        self._process_pool = concurrent.futures.ProcessPoolExecutor(max_workers=max_renders, initializer=_initialize_worker_safe, initargs=(self.RENDER_CACHE_SIZE,))
+        self._process_pool = concurrent.futures.ProcessPoolExecutor(max_workers=max_renders, initializer=_initialize_worker_safe, initargs=(PC.RENDER_CACHE_SIZE,))
 
         print(f"[Progression] Initialized with max {max_renders} concurrent renders")
 
@@ -498,7 +340,7 @@ class Progression(commands.Cog):
         img_bytes, timestamp = self._render_cache[key]
         now = asyncio.get_event_loop().time()
 
-        if now - timestamp > self.RENDER_CACHE_TTL:
+        if now - timestamp > PC.RENDER_CACHE_TTL:
             del self._render_cache[key]
             return None
 
@@ -513,7 +355,7 @@ class Progression(commands.Cog):
         self._render_cache[key] = (img_bytes, now)
         self._render_cache.move_to_end(key)
 
-        while len(self._render_cache) > self.RENDER_CACHE_SIZE:
+        while len(self._render_cache) > PC.RENDER_CACHE_SIZE:
             self._render_cache.popitem(last=False)
 
     async def _render_profile_cached(
@@ -626,11 +468,11 @@ class Progression(commands.Cog):
             else:
                 name, avatar_bytes = res
 
-            next_exp = None if level >= self.MAX_LEVEL else (50 * level + 20 * level**2)
+            next_exp = None if level >= PC.MAX_LEVEL else (50 * level + 20 * level**2)
             rows_data.append({
                 "rank": idx,
                 "avatar_bytes": avatar_bytes or b"",
-                "name": self.truncate(name, self.MAX_NAME_WIDTH, ellipsis="...", strip=False),
+                "name": self.truncate(name, PC.MAX_NAME_WIDTH, ellipsis="...", strip=False),
                 "level": level,
                 "title": get_title(level),
                 "exp": exp or 0,
@@ -669,7 +511,7 @@ class Progression(commands.Cog):
         amount = int(amount)
         await self._ensure_pool()
         async with self.pool.acquire() as conn:
-            await conn.execute(SQL_INSERT_OR_IGNORE_USER_COINS_ZERO, user_id, guild_id)
+            await conn.execute(PC.SQL_INSERT_OR_IGNORE_USER_COINS_ZERO, user_id, guild_id)
             await conn.execute(
                 """
                 INSERT INTO user_coins (user_id, guild_id, coins) VALUES ($1, $2, $3)
@@ -684,7 +526,7 @@ class Progression(commands.Cog):
         """
         await self._ensure_pool()
         async with self.pool.acquire() as conn:
-            await conn.execute(SQL_INSERT_OR_IGNORE_USER_COINS_ZERO, user_id, guild_id)
+            await conn.execute(PC.SQL_INSERT_OR_IGNORE_USER_COINS_ZERO, user_id, guild_id)
 
     async def remove_coins(self, user_id: int, guild_id: int, amount: int) -> bool:
         """
@@ -697,7 +539,7 @@ class Progression(commands.Cog):
             return False
         await self._ensure_pool()
         async with self.pool.acquire() as conn:
-            await conn.execute(SQL_INSERT_OR_IGNORE_USER_COINS_ZERO, user_id, guild_id)
+            await conn.execute(PC.SQL_INSERT_OR_IGNORE_USER_COINS_ZERO, user_id, guild_id)
             result = await conn.execute(
                 "UPDATE user_coins SET coins = coins - $1 WHERE user_id = $2 AND guild_id = $3 AND coins >= $1",
                 amount, user_id, guild_id
@@ -836,7 +678,7 @@ class Progression(commands.Cog):
                 new_exp = exp + amount
                 leveled_up = False
 
-                while level < self.MAX_LEVEL:
+                while level < PC.MAX_LEVEL:
                     next_exp = 50 * level + 20 * level**2
                     if new_exp >= next_exp:
                         new_exp -= next_exp
@@ -845,8 +687,8 @@ class Progression(commands.Cog):
                     else:
                         break
 
-                if level >= self.MAX_LEVEL:
-                    level = self.MAX_LEVEL
+                if level >= PC.MAX_LEVEL:
+                    level = PC.MAX_LEVEL
                     new_exp = 0
 
                 await conn.execute(
@@ -934,7 +776,7 @@ class Progression(commands.Cog):
         coins_amount = random.randint(30, 50)
         await self.add_coins(user_id, guild_id, coins_amount)
         await channel.send(
-            f"{member.display_name} received {COINS_EMOJI} {coins_amount} coins for leveling up!",
+            f"{member.display_name} received {PC.COINS_EMOJI()} {coins_amount} coins for leveling up!",
             reference=MessageReference(message_id=lvlup_msg.id, channel_id=lvlup_msg.channel.id, guild_id=lvlup_msg.guild.id)
         )
 
@@ -970,7 +812,7 @@ class Progression(commands.Cog):
                 
             exp, level = await self.get_user(member.id, ctx.guild.id)
             title_name = get_title(level)
-            next_exp = None if level >= self.MAX_LEVEL else (50 * level + 20 * level**2)
+            next_exp = None if level >= PC.MAX_LEVEL else (50 * level + 20 * level**2)
 
             avatar_bytes = await self._fetch_avatar_bytes(member, size=128, timeout=3.0)
 
@@ -994,7 +836,7 @@ class Progression(commands.Cog):
                 await ctx.send("❌ Failed to generate profile image — check bot logs.")
                 return
 
-            file = discord.File(io.BytesIO(img_bytes), filename=PROFILE_PNG)
+            file = discord.File(io.BytesIO(img_bytes), filename=PC.PROFILE_PNG)
 
             badge_path = TITLE_EMOJI_FILES.get(title_name)
             badge_text = "" if (badge_path and os.path.exists(badge_path)) else get_title_emoji(level)
@@ -1045,7 +887,7 @@ class Progression(commands.Cog):
                 color=discord.Color.purple(),
                 description=(f"**Your Rank**\n"
                              f"You are ranked **#{user_rank}** on this server\n"
-                             f"with a total of **{formatted_coins}** {COINS_EMOJI}")
+                             f"with a total of **{formatted_coins}** {PC.COINS_EMOJI()}")
             )
             if ctx.guild.icon:
                 embed.set_thumbnail(url=ctx.guild.icon.url)
@@ -1069,7 +911,7 @@ class Progression(commands.Cog):
                         ORDER BY level DESC, exp DESC
                         LIMIT 10
                         """,
-                        ctx.guild.id, self.MAX_LEVEL
+                        ctx.guild.id, PC.MAX_LEVEL
                     )
                     rows_list = [(r["user_id"], r["level"], r["exp"]) for r in rows]
                     lb_log(f"Query done, rows={len(rows_list)}")
@@ -1091,7 +933,7 @@ class Progression(commands.Cog):
                         rows_data,
                         exp_icon_path,
                         cache_key_inner,
-                        self.LEADERBOARD_CACHE_TTL,
+                        PC.LEADERBOARD_CACHE_TTL,
                     ),
                     timeout=20.0
                 )
@@ -1105,7 +947,7 @@ class Progression(commands.Cog):
                             rows_data,
                             exp_icon_path,
                             cache_key_inner,
-                            self.LEADERBOARD_CACHE_TTL,
+                            PC.LEADERBOARD_CACHE_TTL,
                         ),
                         timeout=20.0
                     )
@@ -1139,7 +981,7 @@ class Progression(commands.Cog):
             color=embed_color,
             description=(f"**Your Rank**\n"
                          f"You are ranked **#{user_rank}** on this server\n"
-                         f"with a total of **{formatted_coins}** {COINS_EMOJI}")
+                         f"with a total of **{formatted_coins}** {PC.COINS_EMOJI()}")
         )
         if ctx.guild.icon:
             embed.set_thumbnail(url=ctx.guild.icon.url)
@@ -1167,7 +1009,7 @@ class Progression(commands.Cog):
         """
         exp, level = await self.get_user(ctx.author.id, ctx.guild.id)
         title_name = get_title(level)
-        next_exp = 50 * level + 20 * level**2 if level < self.MAX_LEVEL else None
+        next_exp = 50 * level + 20 * level**2 if level < PC.MAX_LEVEL else None
 
         avatar_asset = ctx.author.display_avatar.with_size(128)
         buffer_avatar = io.BytesIO()
@@ -1189,7 +1031,7 @@ class Progression(commands.Cog):
             font_color=font_color
         )
 
-        file = discord.File(io.BytesIO(img_bytes), filename=PROFILE_PNG)
+        file = discord.File(io.BytesIO(img_bytes), filename=PC.PROFILE_PNG)
 
         # NOTE : SAME LOGIC AS IN SubThemeSelect TO GET THE SUB LABEL
         sub_label = "Default"
@@ -1219,7 +1061,7 @@ class Progression(commands.Cog):
                 "You can change it by selecting a theme from the dropdown menu."
             )
         )
-        embed.set_image(url=ATTACHMENT_PROFILE)
+        embed.set_image(url=PC.ATTACHMENT_PROFILE)
 
         view = MainThemeView(ctx.author.id, cog=self)
         await ctx.send(embed=embed, file=file, view=view)
@@ -1235,7 +1077,7 @@ class Progression(commands.Cog):
 
             exp, level = await self.get_user(ctx.author.id, ctx.guild.id)
             title_name = get_title(level)
-            next_exp = 50 * level + 20 * level**2 if level < self.MAX_LEVEL else None
+            next_exp = 50 * level + 20 * level**2 if level < PC.MAX_LEVEL else None
             avatar_asset = ctx.author.display_avatar.with_size(128)
             buffer_avatar = io.BytesIO()
             await avatar_asset.save(buffer_avatar)
@@ -1259,7 +1101,7 @@ class Progression(commands.Cog):
                 title="Profile Theme Reset",
                 description="Your profile card theme has been reset to default."
             )
-            embed.set_image(url=ATTACHMENT_PROFILE)
+            embed.set_image(url=PC.ATTACHMENT_PROFILE)
 
             await ctx.send(embed=embed, file=file)
 
