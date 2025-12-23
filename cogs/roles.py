@@ -4,7 +4,7 @@ from collections import defaultdict
 from typing import Optional, List, Dict
 import discord
 from discord.ext import commands, tasks
-from utils.progUtils import get_title, TITLE_COLORS
+from utils.progression.profileCards import get_title, TITLE_COLORS
 
 TITLE_ORDER = [
     "Novice", "Warrior", "Elite", "Champion", "Hero", "Legend", "Mythic",

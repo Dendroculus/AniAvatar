@@ -53,9 +53,6 @@ class AvatarLoadError(AvatarError):
 class AvatarBytesMissing(AvatarError):
     """Raised when avatar bytes are missing."""
 
-
-#  Layout Classes 
-
 class ProfileCardLayout:
     WIDTH = 600
     HEIGHT = 260
