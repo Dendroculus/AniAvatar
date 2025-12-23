@@ -59,9 +59,8 @@ class Roles(commands.Cog):
                 print(f"[Roles] Error processing queued role update (guild {guild_id}, user {user_id}): {e}")
             finally:
                 self.queue.task_done()
-                await asyncio.sleep(1.5)  # Respect rate limits
-
-    #  Core role helpers 
+                await asyncio.sleep(1.5)
+                
     async def update_roles_by_ids(self, guild_id: int, user_id: int, level: int):
         guild = self.bot.get_guild(guild_id)
         if not guild:

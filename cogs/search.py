@@ -4,18 +4,14 @@ from discord.ui import View, Select
 import aiohttp
 from collections import OrderedDict, deque
 
-from utils.anime_api import (
+from utils.animeAPI import (
     fetch_character_by_name,
     char_has_anime_media,
     is_image_url_ok,
     google_image_search,
     first_reachable_image,
 )
-from constants.configs import GOOGLE_API, GOOGLE_SEARCH_ENGINE
-
-
-ANILIST_API = "https://graphql.anilist.co"
-
+from constants.configs import GOOGLE_API, GOOGLE_SEARCH_ENGINE, ANILIST_API
 
 class Search(commands.Cog):
     """Cog providing anime and character avatar utilities.

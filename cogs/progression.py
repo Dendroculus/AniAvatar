@@ -1027,7 +1027,6 @@ class Progression(commands.Cog):
         cache_key = f"lb_cache:{ctx.guild.id}"
         cached_bytes = None
 
-        # 1) Check Redis first
         if self.redis:
             try:
                 cached_bytes = await self.redis.get(cache_key)
@@ -1035,13 +1034,11 @@ class Progression(commands.Cog):
             except Exception as e:
                 lb_log(f"Cache read failed: {e}")
 
-        # 1a) FAST CACHE EXIT PATH
         if cached_bytes:
             user_rank = await self.get_rank(ctx.author.id, ctx.guild.id)
             user_coins = await self.get_coins(ctx.author.id, ctx.guild.id)
             formatted_coins = format_coins(user_coins)
 
-            # Build a generic embed (no expensive queries)
             file = discord.File(io.BytesIO(cached_bytes), filename="leaderboard.png")
             embed = discord.Embed(
                 title=f"{ctx.guild.name}'s Top Rank List {TitleEmojis['CHAMPION']}",
@@ -1058,7 +1055,6 @@ class Progression(commands.Cog):
             lb_log(f"FAST CACHE path completed in {time.perf_counter() - start:.3f}s")
             return
 
-        # 2) WORK PATH (only runs on cache miss)
         async def query_rows():
             lb_log(f"Query start (guild={ctx.guild.id})")
             try:
@@ -1151,7 +1147,6 @@ class Progression(commands.Cog):
 
         await self.safe_send(ctx, embed=embed, file=file)
 
-        # Fire-and-forget Redis upload (only on miss after sending)
         if self.redis:
             lb_log("Upload to Redis (fire-and-forget)")
             try:
