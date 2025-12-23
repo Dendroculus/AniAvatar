@@ -91,3 +91,4 @@ class ProgressionConstants:
     RENDER_CACHE_SIZE = 200
     RENDER_CACHE_TTL = 300
     LEADERBOARD_CACHE_TTL = 120 # 2 minutes
+    
