@@ -253,8 +253,6 @@ class Fun(commands.Cog):
         poll_modal = PollInputModal(ctx, timeout_seconds=timeout_seconds)
         await ctx.interaction.response.send_modal(poll_modal)
 
-    # ===== Gamble helpers (logic split out to reduce complexity) =====
-
     async def _send_insufficient_funds(
         self,
         ctx: commands.Context,

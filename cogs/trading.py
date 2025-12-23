@@ -59,6 +59,7 @@ EXP_EMOJI = f"{CustomEmojis['EXP']}"
 
 POTION_ITEMS = (SMALL_EXP_POTION, MEDIUM_EXP_POTION, LARGE_EXP_POTION, LEVEL_SKIP_TOKEN)
 
+""" Trading Cog SQL Statements """
 SQL_USER_INV_SELECT = "SELECT item_name, quantity FROM user_inventory WHERE user_id = $1 AND guild_id = $2"
 SQL_UPSERT_USER_INV = """
 INSERT INTO user_inventory (user_id, guild_id, item_name, quantity)
@@ -67,6 +68,7 @@ ON CONFLICT(user_id, guild_id, item_name) DO UPDATE SET quantity = user_inventor
 """
 SQL_SELECT_PRICE_EMOJI = "SELECT price, emoji FROM shop_items WHERE name = $1"
 
+""" End of Trading Cog SQL Statements """
 
 def format_coins(coins: int) -> str:
     """
