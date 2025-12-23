@@ -1,6 +1,7 @@
 import discord
 from discord.ext import commands
 from discord import app_commands
+from utils.discord_helpers import create_choices
 
 """
 Purpose:
@@ -73,11 +74,12 @@ class Admin(commands.Cog):
         description="Announce something in a channel (Admin only, modal input)"
     )
     @app_commands.describe(
-        mention="Choose whether to mention @everyone (yes/no)",
+        mention="Choose whether to mention @everyone",
         channel="The channel where the announcement will be sent"
     )
+    @app_commands.choices(mention=create_choices({"Yes": "yes", "No" : "no"}))
     @commands.guild_only()
-    async def announce(self, ctx: commands.Context, mention: str, channel: discord.TextChannel):
+    async def announce(self, ctx: commands.Context, mention: app_commands.Choice[str], channel: discord.TextChannel):
         """
         Open an announcement modal for authorized users.
 
@@ -94,7 +96,7 @@ class Admin(commands.Cog):
                 )
             return await ctx.reply("❌ You don’t have permission to use this command.")
 
-        mention_bool = mention.lower() in ["yes", "y", "true", "1"]
+        mention_bool = mention.value == "yes"
 
         if ctx.interaction:
             modal = AnnounceModal(channel=channel, author=ctx.author, mention=mention_bool)

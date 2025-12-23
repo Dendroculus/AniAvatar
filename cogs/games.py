@@ -9,6 +9,7 @@ from itertools import cycle
 
 from utils.anime_api import fetch_random_character, build_character_select_options
 from utils.game_text import random_win_message, random_lose_message, compute_rewards, award_rewards
+from utils.discord_helpers import create_same_choices
 from constants.emojis import CustomEmojis
 
 """
@@ -139,12 +140,7 @@ class Games(commands.Cog):
     @commands.hybrid_command(name="animequiz", description="Start an anime trivia quiz.")
     @commands.guild_only()
     @app_commands.describe(questions="Number of questions")
-    @app_commands.choices(questions=[
-        app_commands.Choice(name="5", value=5),
-        app_commands.Choice(name="10", value=10),
-        app_commands.Choice(name="15", value=15),
-        app_commands.Choice(name="20", value=20),
-    ])
+    @app_commands.choices(questions=create_same_choices([5, 10, 15, 20]))
     async def animequiz(self, ctx, questions: app_commands.Choice[int]):
         """
         Run a sequential trivia quiz presented question-by-question.
