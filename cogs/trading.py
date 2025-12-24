@@ -66,8 +66,7 @@ class Trading(commands.Cog):
       - Background maintenance for data hygiene.
       - Index creation for hot paths.
     """
-    STMT_TIMEOUT_MS = 2000
-    MAINTENANCE_INTERVAL = 6 * 60 * 60  # 6 hours
+
 
     def __init__(self, bot):
         self.bot = bot
@@ -80,7 +79,7 @@ class Trading(commands.Cog):
     async def _set_stmt_timeout(self, conn):
         """Apply a per-connection statement timeout to avoid runaway queries."""
         try:
-            await conn.execute(f"SET LOCAL statement_timeout = {self.STMT_TIMEOUT_MS}")
+            await conn.execute(f"SET LOCAL statement_timeout = {TC.STMT_TIMEOUT_MS}")
         except Exception:
             pass
 
@@ -103,7 +102,7 @@ class Trading(commands.Cog):
                             await conn.execute("DELETE FROM user_inventory WHERE quantity <= 0")
                 except Exception as e:
                     print(f"[Shop] maintenance loop error: {e}")
-                await asyncio.sleep(self.MAINTENANCE_INTERVAL)
+                await asyncio.sleep(TC.MAINTENANCE_INTERVAL)
         self._maintenance_task = asyncio.create_task(_loop())
 
     async def cog_load(self):

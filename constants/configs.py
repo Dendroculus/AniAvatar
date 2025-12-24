@@ -17,10 +17,7 @@ DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 GOOGLE_API = os.getenv("GOOGLE_API_KEY")
 GOOGLE_SEARCH_ENGINE = os.getenv("SEARCH_ENGINE_ID")
 DATABASE = os.getenv("DATABASE_URL")
-REDIS_CACHING = os.getenv("REDIS_URL")
-
-""" External API Endpoints """
-ANILIST_API = "https://graphql.anilist.co"
+REDIS_CACHING = os.getenv("REDIS_URL")    
 
 FONTS = {
     "bold": os.path.join(FONT_DIR, "gg sans Bold.ttf"),
@@ -48,6 +45,16 @@ TITLE_EMOJI_FILES = {
     "Eternal": os.path.join(EMOJI_PATH, "ETERNAL.png"),
     "Enlightened": os.path.join(EMOJI_PATH, "ENLIGHTENED.png"),
 }
+
+class ExternalAPIs:
+    """
+    Constants for external API endpoints used in the bot.
+    """
+    ANILIST_API = "https://graphql.anilist.co"
+    WAIFU_API = "https://api.waifu.pics/sfw/waifu"
+    JIKAN_TOP_CHAR_URL = "https://api.jikan.moe/v4/top/characters"
+    JIKAN_SEARCH_CHAR_URL = "https://api.jikan.moe/v4/characters"
+    
 class TradingConstants:
     """
     Constants used in the Trading Cog for managing in-game item trading,
@@ -61,6 +68,8 @@ class TradingConstants:
     LARGE_EXP_POTION = "Large EXP Potion"
     LEVEL_SKIP_TOKEN = "Level Skip Token"
     POTION_ITEMS = (SMALL_EXP_POTION, MEDIUM_EXP_POTION, LARGE_EXP_POTION, LEVEL_SKIP_TOKEN)
+    STMT_TIMEOUT_MS = 2000
+    MAINTENANCE_INTERVAL = 6 * 60 * 60  # 6 hours
     SQL_USER_INV_SELECT = "SELECT item_name, quantity FROM user_inventory WHERE user_id = $1 AND guild_id = $2"
     SQL_UPSERT_USER_INV = """
     INSERT INTO user_inventory (user_id, guild_id, item_name, quantity)
@@ -92,6 +101,22 @@ class ProgressionConstants:
     RENDER_CACHE_TTL = 300
     LEADERBOARD_CACHE_TTL = 120 # 2 minutes
     
+class FunConstants:
+    """
+    Constants used in the Fun Cog for managing fun interactions.
+    """
+    FALSE_GAMBLE_SESSION = "⚠️ This is not your gamble session."
+    GAMBLE_MAX_ATTEMPTS = 20
+    GAMBLE_COOLDOWN_SECONDS = 5 * 60  # 5 minutes
+    DEFAULT_WIN_PROBABILITY = 0.5 # 50% base chance to win
     
-# cogs.fun
-FALSE_GAMBLE_SESSION = "⚠️ This is not your gamble session."
+class RolesConstants:
+    """
+    Constants used in the Roles Cog for managing user roles.
+    """
+    TITLE_ORDER = [
+        "Novice", "Warrior", "Elite", "Champion", "Hero", "Legend", "Mythic",
+        "Ascendant", "Immortal", "Celestial", "Transcendent", "Aetherborn",
+        "Cosmic", "Divine", "Eternal", "Enlightened"
+    ]
+    SYNC_INTERVAL_MINUTES = 720  # 12 hours

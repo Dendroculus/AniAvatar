@@ -5,21 +5,12 @@ from typing import Optional, List, Dict
 import discord
 from discord.ext import commands, tasks
 from utils.progression.profileCards import get_title, TITLE_COLORS
-
-TITLE_ORDER = [
-    "Novice", "Warrior", "Elite", "Champion", "Hero", "Legend", "Mythic",
-    "Ascendant", "Immortal", "Celestial", "Transcendent", "Aetherborn",
-    "Cosmic", "Divine", "Eternal", "Enlightened"
-]
-
+from constants.configs import RolesConstants as RC
 
 class Roles(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self._locks: Dict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
-        self.SYNC_INTERVAL_MINUTES = 720
-        self.MAX_PER_GUILD = 30  # retained for compatibility if needed elsewhere
-        self.SLEEP_BETWEEN_OPS = 0.25  # retained for compatibility if needed elsewhere
 
         # Producer-Consumer queue
         self.queue: asyncio.Queue[tuple[int, int, int]] = asyncio.Queue()
@@ -28,7 +19,7 @@ class Roles(commands.Cog):
         self.worker_task = asyncio.create_task(self.worker())
 
         # Periodic fail-safe (no member fetching)
-        self.sync_roles_loop.change_interval(minutes=self.SYNC_INTERVAL_MINUTES)
+        self.sync_roles_loop.change_interval(minutes=RC.SYNC_INTERVAL_MINUTES)
         self.sync_roles_loop.start()
 
     async def cog_unload(self):
@@ -125,7 +116,7 @@ class Roles(commands.Cog):
 
     async def _ensure_titles_exist(self, guild: discord.Guild) -> List[discord.Role]:
         roles: List[discord.Role] = []
-        for title in TITLE_ORDER:
+        for title in RC.TITLE_ORDER:
             r = await self._get_or_create_role(guild, title)
             if r and not r.managed:
                 try:
@@ -202,7 +193,7 @@ class Roles(commands.Cog):
             except Exception as e:
                 print(f"[Roles] Error editing role color for {role.name}: {e}")
 
-            title_names = {t.strip().lower() for t in TITLE_ORDER}
+            title_names = {t.strip().lower() for t in RC.TITLE_ORDER}
             roles_to_remove = [r for r in member.roles if r.name and r.name.strip().lower() in title_names and r != role]
             if roles_to_remove:
                 try:
@@ -273,7 +264,7 @@ class Roles(commands.Cog):
         if before_role_ids == after_role_ids:
             return
 
-        title_names = {t.lower() for t in TITLE_ORDER}
+        title_names = {t.lower() for t in RC.TITLE_ORDER}
         added_roles = [r for r in after.roles if r.id not in before_role_ids and r.name and r.name.strip().lower() in title_names]
         removed_roles = [r for r in before.roles if r.id not in after_role_ids and r.name and r.name.strip().lower() in title_names]
 

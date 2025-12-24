@@ -7,10 +7,10 @@ import asyncio
 from typing import Optional, TYPE_CHECKING
 from constants.emojis import ShopEmojis
 from discord.ext import commands
-from constants.configs import FALSE_GAMBLE_SESSION
+from constants.configs import FunConstants as FC
 
-if TYPE_CHECKING:
-    from cogs.fun import Fun
+if TYPE_CHECKING: # NOTE : TYPE_CHECKING ONLY IS USED TOAVOID CIRCULAR IMPORTS
+    from cogs.fun import Fun 
     
 class GambleView(discord.ui.View):
         """
@@ -208,7 +208,7 @@ class GambleView(discord.ui.View):
 
                 async def on_submit(inner_self, inter: discord.Interaction):
                     if inter.user.id != parent.user_id:
-                        await parent.fun._send(parent.ctx, inter, FALSE_GAMBLE_SESSION, ephemeral=True)
+                        await parent.fun._send(parent.ctx, inter, FC.FALSE_GAMBLE_SESSION, ephemeral=True)
                         return
                     try:
                         amount = int(inner_self.amount_input.value)
@@ -274,7 +274,7 @@ class GambleView(discord.ui.View):
             Validates session ownership, parses the selection and dispatches to the appropriate handler.
             """
             if interaction.user.id != self.user_id:
-                await self.fun._send(self.ctx, interaction, FALSE_GAMBLE_SESSION, ephemeral=True)
+                await self.fun._send(self.ctx, interaction, FC.FALSE_GAMBLE_SESSION, ephemeral=True)
                 return
 
             self.reset_timeout()
@@ -294,7 +294,7 @@ class GambleView(discord.ui.View):
             Exit the gamble UI. Only the session owner may exit; cleans up active view mapping.
             """
             if interaction.user.id != self.user_id:
-                await self.fun._send(self.ctx, interaction, FALSE_GAMBLE_SESSION, ephemeral=True)
+                await self.fun._send(self.ctx, interaction, FC.FALSE_GAMBLE_SESSION, ephemeral=True)
                 return
             self.fun._set_active_view(self.guild_id, self.user_id, None)
             if self.timeout_task:

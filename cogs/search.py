@@ -11,7 +11,7 @@ from utils.animeAPI import (
     google_image_search,
     first_reachable_image,
 )
-from constants.configs import GOOGLE_API, GOOGLE_SEARCH_ENGINE, ANILIST_API
+from constants.configs import GOOGLE_API, GOOGLE_SEARCH_ENGINE, ExternalAPIs as EA
 
 class Search(commands.Cog):
     """Cog providing anime and character avatar utilities.
@@ -328,7 +328,7 @@ class Search(commands.Cog):
         variables = {"search": query}
 
         async with aiohttp.ClientSession() as session:
-            async with session.post(ANILIST_API, json={"query": query_str, "variables": variables}) as resp:
+            async with session.post(EA.ANILIST_API, json={"query": query_str, "variables": variables}) as resp:
                 if resp.status != 200:
                     return await ctx.send("❌ Could not fetch anime info right now.")
                 data = await resp.json()
@@ -402,7 +402,7 @@ class Search(commands.Cog):
                 text="Provided by AniList",
                 icon_url="https://anilist.co/img/icons/android-chrome-512x512.png",
             )
-            await interaction.edit_original_response(embed=embed, view=None)
+            await interaction.edit_original_response(content=None, embed=embed, view=None)
 
         select = Select(placeholder="Choose an anime...", options=options)
         select.callback = select_callback
@@ -467,7 +467,7 @@ class Search(commands.Cog):
         variables = {"search": name}
 
         async with aiohttp.ClientSession() as session:
-            async with session.post(ANILIST_API, json={"query": query_str, "variables": variables}) as resp:
+            async with session.post(EA.ANILIST_API, json={"query": query_str, "variables": variables}) as resp:
                 if resp.status != 200:
                     return await ctx.send("❌ Could not fetch character info right now.")
                 data = await resp.json()

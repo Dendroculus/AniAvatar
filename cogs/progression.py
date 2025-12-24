@@ -29,10 +29,10 @@ from constants.configs import (
     ProgressionConstants as PC,
 )
 from utils.progression.processWorker import (
-    _initialize_worker_safe,
-    _pool_init,
-    _render_profile_in_process,
-    _render_leaderboard_in_process,
+    initialize_worker_safe,
+    pool_init,
+    render_profile_in_process,
+    render_leaderboard_in_process,
 )
 
 from .trading import format_coins
@@ -112,7 +112,7 @@ class Progression(commands.Cog):
 
         self.renderer = ImageRenderer(cache_size=PC.RENDER_CACHE_SIZE)
         
-        self._process_pool = concurrent.futures.ProcessPoolExecutor(max_workers=max_renders, initializer=_initialize_worker_safe, initargs=(PC.RENDER_CACHE_SIZE,))
+        self._process_pool = concurrent.futures.ProcessPoolExecutor(max_workers=max_renders, initializer=initialize_worker_safe, initargs=(PC.RENDER_CACHE_SIZE,))
 
         print(f"[Progression] Initialized with max {max_renders} concurrent renders")
 
@@ -128,7 +128,7 @@ class Progression(commands.Cog):
                 max_size=10,
                 timeout=5.0,
                 command_timeout=5.0,
-                init=_pool_init,
+                init=pool_init,
             )
 
     async def _create_indexes(self, conn: asyncpg.Connection):
@@ -330,7 +330,7 @@ class Progression(commands.Cog):
                 img_bytes = await asyncio.wait_for(
                     loop.run_in_executor(
                         self._process_pool,
-                        _render_profile_in_process,
+                        render_profile_in_process,
                         avatar_bytes,
                         display_name,
                         title_name,
@@ -855,7 +855,7 @@ class Progression(commands.Cog):
                 return await asyncio.wait_for(
                     loop.run_in_executor(
                         self._process_pool,
-                        _render_leaderboard_in_process,
+                        render_leaderboard_in_process,
                         rows_data,
                         exp_icon_path,
                         cache_key_inner,
@@ -869,7 +869,7 @@ class Progression(commands.Cog):
                     return await asyncio.wait_for(
                         loop.run_in_executor(
                             self._process_pool,
-                            _render_leaderboard_in_process,
+                            render_leaderboard_in_process,
                             rows_data,
                             exp_icon_path,
                             cache_key_inner,
