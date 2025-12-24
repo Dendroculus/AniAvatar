@@ -92,3 +92,6 @@ class ProgressionConstants:
     RENDER_CACHE_TTL = 300
     LEADERBOARD_CACHE_TTL = 120 # 2 minutes
     
+    
+# cogs.fun
+FALSE_GAMBLE_SESSION = "⚠️ This is not your gamble session."
