@@ -2,10 +2,7 @@ import random
 from typing import Dict, List, Optional
 import aiohttp
 import discord
-
-ANILIST_URL = "https://graphql.anilist.co"
-JIKAN_TOP_CHAR_URL = "https://api.jikan.moe/v4/top/characters"
-JIKAN_SEARCH_CHAR_URL = "https://api.jikan.moe/v4/characters"
+from constants.configs import ExternalAPIs as EA
 
 """
 anime_api.py
@@ -102,7 +99,7 @@ async def _fetch_anilist_character_random(session: Optional[aiohttp.ClientSessio
     if owns:
         session = aiohttp.ClientSession(timeout=DEFAULT_TIMEOUT)
     try:
-        async with session.post(ANILIST_URL, json={"query": query, "variables": variables}) as resp:
+        async with session.post(EA.ANILIST_API, json={"query": query, "variables": variables}) as resp:
             resp.raise_for_status()
             payload = await resp.json()
         chars = payload.get("data", {}).get("Page", {}).get("characters", [])
@@ -126,7 +123,7 @@ async def _fetch_jikan_character_random(session: Optional[aiohttp.ClientSession]
     - Raises RuntimeError when no characters are available.
     """
     page = random.randint(1, 10)
-    url = f"{JIKAN_TOP_CHAR_URL}?page={page}"
+    url = f"{EA.JIKAN_TOP_CHAR_URL}?page={page}"
     owns = session is None
     if owns:
         session = aiohttp.ClientSession(timeout=DEFAULT_TIMEOUT)
@@ -193,7 +190,7 @@ async def _fetch_anilist_character_by_name(name: str, session: Optional[aiohttp.
     if owns:
         session = aiohttp.ClientSession(timeout=DEFAULT_TIMEOUT)
     try:
-        async with session.post(ANILIST_URL, json={"query": query, "variables": variables}) as resp:
+        async with session.post(EA.ANILIST_API, json={"query": query, "variables": variables}) as resp:
             if resp.status != 200:
                 return None
             data = await resp.json()
@@ -215,7 +212,7 @@ async def _fetch_jikan_character_by_name(name: str, session: Optional[aiohttp.Cl
       'large' and 'medium' pointing to the same Jikan image URL.
     """
     from urllib.parse import quote
-    url = f"{JIKAN_SEARCH_CHAR_URL}?q={quote(name)}&limit=1"
+    url = f"{EA.JIKAN_SEARCH_CHAR_URL}?q={quote(name)}&limit=1"
     owns = session is None
     if owns:
         session = aiohttp.ClientSession(timeout=DEFAULT_TIMEOUT)
@@ -304,7 +301,7 @@ async def _get_anilist_wrong_options(correct_name: str, session: Optional[aiohtt
     if owns:
         session = aiohttp.ClientSession(timeout=DEFAULT_TIMEOUT)
     try:
-        async with session.post(ANILIST_URL, json={"query": query, "variables": variables}) as resp:
+        async with session.post(EA.ANILIST_API, json={"query": query, "variables": variables}) as resp:
             if resp.status != 200:
                 return get_fallback_wrong_options(correct_name)
             payload = await resp.json()
@@ -325,7 +322,7 @@ async def _get_jikan_wrong_options(correct_name: str, session: Optional[aiohttp.
     - Falls back to the static pool when the HTTP call fails.
     """
     page = random.randint(1, 10)
-    url = f"{JIKAN_TOP_CHAR_URL}?page={page}"
+    url = f"{EA.JIKAN_TOP_CHAR_URL}?page={page}"
     owns = session is None
     if owns:
         session = aiohttp.ClientSession(timeout=DEFAULT_TIMEOUT)

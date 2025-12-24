@@ -11,6 +11,7 @@ from itertools import cycle
 from typing import Dict, Optional, Any
 from utils.pollings import PollInputModal
 from constants.emojis import MinoriEmojis, ShopEmojis
+from constants.configs import FunConstants as FC, ExternalAPIs as EC
 from utils.gambleHelpers import GambleView
 
 
@@ -61,8 +62,6 @@ class Fun(commands.Cog):
         self.lock = asyncio.Lock()
         self._gamble_counts: Dict[tuple, int] = {}
         self._gamble_cooldowns: Dict[tuple, float] = {}
-        self.GAMBLE_MAX_ATTEMPTS = 20
-        self.GAMBLE_COOLDOWN_SECONDS = 5 * 60
 
         self.data_path = os.path.join(os.path.dirname(__file__), "..", "data", "quotes.json")
         try:
@@ -134,7 +133,7 @@ class Fun(commands.Cog):
         Begin the configured gamble cooldown for the given user, and clear the attempt counter.
         """
         key = (guild_id, user_id)
-        self._gamble_cooldowns[key] = time.time() + self.GAMBLE_COOLDOWN_SECONDS
+        self._gamble_cooldowns[key] = time.time() + FC.GAMBLE_COOLDOWN_SECONDS
         self._gamble_counts.pop(key, None)
 
     def _count_attempt(self, guild_id: int, user_id: int) -> int:
@@ -207,10 +206,10 @@ class Fun(commands.Cog):
         """
         Fetch a safe-for-work image from the waifu.pics API and send it as an embed.
         """
-        url = "https://api.waifu.pics/sfw/waifu"
+        
 
         async with aiohttp.ClientSession() as session:
-            async with session.get(url) as resp:
+            async with session.get(EC.WAIFU_API) as resp:
                 if resp.status != 200:
                     return await ctx.send("❌ Couldn't fetch a waifu image. Try again.")
                 data = await resp.json()
@@ -441,9 +440,8 @@ class Fun(commands.Cog):
             )
             return
 
-        base_chance = 0.5
         bet_ratio = (amount / pre_balance) if pre_balance else 1
-        win_chance = max(0.201, base_chance - bet_ratio * 0.5)
+        win_chance = max(0.201, FC.DEFAULT_WIN_PROBABILITY - bet_ratio * 0.5) # 20.1 minimum will increase on larger bets
         won = random.random() < win_chance
 
         if won:
@@ -501,7 +499,7 @@ class Fun(commands.Cog):
         )
 
         count = self._count_attempt(guild_id, user_id)
-        if count >= self.GAMBLE_MAX_ATTEMPTS:
+        if count >= FC.GAMBLE_MAX_ATTEMPTS:
             await self._handle_gamble_cooldown_and_disable_view(
                 ctx, interaction, guild_id, user_id
             )

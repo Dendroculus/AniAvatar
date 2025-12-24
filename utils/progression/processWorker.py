@@ -5,7 +5,7 @@ from constants.configs import FONTS, TITLE_EMOJI_FILES, ProgressionConstants as 
 
 _PROCESS_CONTEXT: dict[str, Any] = {}
 
-def _initialize_worker_safe(cache_size: int):
+def initialize_worker_safe(cache_size: int):
     """
     Runs ONCE per ProcessPoolExecutor worker. Initializes and caches the 
     ImageRenderer instance in the process-local _PROCESS_CONTEXT dictionary.
@@ -15,7 +15,7 @@ def _initialize_worker_safe(cache_size: int):
     """
     _PROCESS_CONTEXT["renderer"] = ImageRenderer(cache_size=cache_size)
     
-def _render_profile_in_process(
+def render_profile_in_process(
     avatar_bytes: bytes,
     display_name: str,
     title_name: str,
@@ -49,7 +49,7 @@ def _render_profile_in_process(
     )
 
 
-def _render_leaderboard_in_process(
+def render_leaderboard_in_process(
     rows_data: Iterable[dict[str, Any]],
     exp_icon_path: str,
     cache_key: Optional[str],
@@ -69,7 +69,7 @@ def _render_leaderboard_in_process(
         cache_ttl=cache_ttl,
     )
 
-async def _pool_init(conn: asyncpg.Connection):
+async def pool_init(conn: asyncpg.Connection):
     """
     Apply per-connection settings (statement timeout, optional app name).
     Keeps long/blocked queries from piling up.
