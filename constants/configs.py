@@ -84,7 +84,7 @@ class ProgressionConstants:
      including SQL statements and rank definitions.
     """
 
-    @classmethod
+    @classmethod # use as a method to avoid issues with ShopEmojis not being defined yet
     def COINS_EMOJI(cls):
         return f"{ShopEmojis['Coins']}"
     

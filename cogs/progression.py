@@ -35,7 +35,7 @@ from utils.progression.processWorker import (
     render_leaderboard_in_process,
 )
 
-from .trading import format_coins
+from utils.tradingUI import format_coins
 from constants.emojis import CustomEmojis, TitleEmojis
 
 """
