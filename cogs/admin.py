@@ -21,6 +21,28 @@ class Admin(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
+
+    async def _deny(self, ctx: commands.Context, message: str) -> None:
+        """
+        A small helper to send denial messages ephemerally based on context type.
+        Security and UX:
+        - Ephemeral responses prevent cluttering channels with denial messages.
+        - Interaction checks ensure proper response methods are used.
+        
+        Args:
+            ctx (commands.Context): The command context.
+            message (str): The denial message to send.
+        
+        Returns:
+            None
+        """
+        if ctx.interaction and not ctx.interaction.response.is_done():
+            await ctx.interaction.response.send_message(message, ephemeral=True)
+        elif ctx.interaction:
+            await ctx.interaction.followup.send(message, ephemeral=True)
+        else:
+            await ctx.reply(message, mention_author=False)
+            
     @commands.hybrid_command(
         name="announce",
         description="Announce something in a channel (Admin only, modal input)"
@@ -42,11 +64,7 @@ class Admin(commands.Cog):
           can compose multi-line announcements; legacy prefix usage is redirected to the slash form.
         """
         if not ctx.author.guild_permissions.manage_guild:
-            if ctx.interaction:
-                return await ctx.interaction.response.send_message(
-                    "❌ You don’t have permission to use this command.", ephemeral=True
-                )
-            return await ctx.reply("❌ You don’t have permission to use this command.")
+            return await self._deny(ctx, "❌ You don’t have permission to use this command.")
 
         mention_bool = mention.value == "yes"
 
@@ -54,9 +72,9 @@ class Admin(commands.Cog):
             modal = AnnounceModal(channel=channel, author=ctx.author, mention=mention_bool)
             return await ctx.interaction.response.send_modal(modal)
 
-        return await ctx.reply(
-            "❌ Please use the slash version of this command to open the modal.",
-            mention_author=False
+        return await self._deny(
+            ctx,
+            "❌ Please use the slash version of this command to open the modal."
         )
 
 async def setup(bot: commands.Bot):
