@@ -13,60 +13,17 @@ trading.py
 
 Provides shop and inventory functionality for the AniAvatar bot.
 
-Contents:
-- Constants for items and SQL statements used by the shop/inventory.
-- Utility: format_coins(coins) -> human-friendly coin string.
-- UI components:
-  - CloseButton: button used to close shop/inventory views.
-  - InventorySelect: select menu for using items from inventory.
-  - InventoryView: view that contains the inventory select and close button.
-  - ShopSelect: select menu for buying items from the shop.
-  - ShopView: view that contains the shop select and close button.
-- Trading Cog:
-  - Initializes DB tables for shop and inventory on load.
-  - apply_potion_effect: apply consumable effects that grant exp or skip levels.
-  - apply_mystery_box: randomly awards items to a user.
-  - Commands:
-    - shop: shows shop and allows purchases.
-    - inventory: shows inventory and allows usage.
-    - donate: allows giving items to another user with cooldown and caps.
-
-Notes:
-- This module expects a Progression cog to be present with:
-  - pool: asyncpg pool
-  - get_user, add_exp, get_coins, remove_coins, announce_level_up, MAX_LEVEL attributes/methods.
-- All behavioral code is left unchanged; only the storage layer now uses asyncpg/PostgreSQL.
-- Production hardening additions:
-  - Statement timeout applied per-connection to avoid runaway queries.
-  - Index creation for hot paths on user_inventory.
-  - Lightweight maintenance loop to purge empty inventory rows.
-  - Guild cleanup on guild removal for inventory rows.
-- Concurrency model:
-  - Python-level locks have been removed. Concurrency safety is delegated to PostgreSQL via
-    atomic UPDATEs and explicit transactions (async with conn.transaction()) for multi-step
-    operations like donations. This allows many concurrent trades without a global bottleneck.
+Refactor Changes:
+- Replaced self.progression_cog.pool with self.bot.pool to decouple database access.
+- Removed internal pool management (ensure/close) as main.py handles it.
 """
 
 class Trading(commands.Cog):
     """
     Cog responsible for shop, inventory, and item trading functionality.
-
-    Responsibilities:
-    - Ensure DB tables for shop and inventory exist on cog load.
-    - Seed default shop items.
-    - Provide helper methods to apply item effects.
-    - Expose commands: shop, inventory, donate.
-
-    Important attributes created at init:
-    - progression_cog: reference to the Progression cog (set during cog_load).
-    - donate_cooldowns: map donor_id -> datetime when they can next donate.
-    - open_inventories / open_shops: map guild_id -> map[user_id -> view/message] to prevent duplicates.
-    - Additional production helpers:
-      - Statement timeout to guard queries.
-      - Background maintenance for data hygiene.
-      - Index creation for hot paths.
+    
+    Uses self.bot.pool for all database interactions.
     """
-
 
     def __init__(self, bot):
         self.bot = bot
@@ -96,8 +53,9 @@ class Trading(commands.Cog):
             await self.bot.wait_until_ready()
             while not self.bot.is_closed():
                 try:
-                    if self.progression_cog and self.progression_cog.pool:
-                        async with self.progression_cog.pool.acquire() as conn:
+                    # Use shared bot pool
+                    if self.bot.pool:
+                        async with self.bot.pool.acquire() as conn:
                             await self._set_stmt_timeout(conn)
                             await conn.execute("DELETE FROM user_inventory WHERE quantity <= 0")
                 except Exception as e:
@@ -107,19 +65,18 @@ class Trading(commands.Cog):
 
     async def cog_load(self):
         """
-        Called when the cog is loaded. Attaches to the Progression cog, creates DB tables,
-        and seeds a set of default shop items. Logs a warning if Progression isn't loaded.
+        Called when the cog is loaded. Attaches to the Progression cog for method access,
+        creates DB tables using bot.pool, and seeds default items.
         """
         self.progression_cog = self.bot.get_cog("Progression")
         if not self.progression_cog:
             print("[Shop] Progression cog not loaded! Coins won't work properly.")
-            return
+            # We continue loading to ensure DB tables exist even if progression logic is missing
 
-        # ensure pool exists
-        if self.progression_cog.pool is None:
-            await self.progression_cog._ensure_pool()
+        if not self.bot.pool:
+            raise RuntimeError("Bot database pool is not initialized.")
 
-        async with self.progression_cog.pool.acquire() as conn:
+        async with self.bot.pool.acquire() as conn:
             await self._set_stmt_timeout(conn)
             await conn.execute("""
                 CREATE TABLE IF NOT EXISTS shop_items (
@@ -161,25 +118,16 @@ class Trading(commands.Cog):
     async def cog_unload(self):
         if self._maintenance_task:
             self._maintenance_task.cancel()
-        if self.progression_cog and self.progression_cog.pool:
-            try:
-                await self.progression_cog.pool.close()
-            except Exception:
-                pass
+        # Pool cleanup is now handled by main.py
 
     async def apply_potion_effect(self, user_id: int, guild_id: int, item_name: str, channel: discord.TextChannel = None):
         """
         Apply the effect of a potion or level skip token.
-
-        Args:
-            user_id: ID of the user using the item.
-            guild_id: guild ID.
-            item_name: one of the potion constants or LEVEL_SKIP_TOKEN.
-            channel: optional channel to announce level-ups.
-
-        Returns:
-            (gain, extra_msg) where gain is the amount of EXP granted, and extra_msg is any extra string.
+        Uses Progression cog methods for EXP logic.
         """
+        if not self.progression_cog:
+            return 0, "Progression system unavailable."
+
         potion_effects = {
             TC.SMALL_EXP_POTION: 0.03,
             TC.MEDIUM_EXP_POTION: 0.12,
@@ -211,13 +159,11 @@ class Trading(commands.Cog):
 
     async def apply_mystery_box(self, user_id: int, guild_id: int):
         """
-        Open a Mystery Box and randomly award items to the user, writing to DB.
-
-        Returns:
-            List of (item_name, amount) awarded to the user.
+        Open a Mystery Box and randomly award items to the user.
+        Uses self.bot.pool for DB transactions.
         """
         rewards = []
-        async with self.progression_cog.pool.acquire() as conn:
+        async with self.bot.pool.acquire() as conn:
             await self._set_stmt_timeout(conn)
             async with conn.transaction():
                 if random.random() < 0.15:
@@ -243,8 +189,7 @@ class Trading(commands.Cog):
     @commands.guild_only()
     async def shop(self, ctx):
         """
-        Shows the list of shop items and opens a ShopView for the invoking user.
-        Prevents opening multiple shops per user per guild.
+        Shows the list of shop items and opens a ShopView.
         """
         if not self.progression_cog:
             await ctx.send("Progression cog not loaded. Shop unavailable.")
@@ -257,7 +202,7 @@ class Trading(commands.Cog):
             await ctx.send("⚠️ You already have a shop open! Close it first.", ephemeral=True)
             return
 
-        async with self.progression_cog.pool.acquire() as conn:
+        async with self.bot.pool.acquire() as conn:
             await self._set_stmt_timeout(conn)
             items = await conn.fetch("SELECT name, price, emoji FROM shop_items")
         if not items:
@@ -294,7 +239,6 @@ class Trading(commands.Cog):
     async def inventory(self, ctx):
         """
         Displays the user's current inventory items and opens an InventoryView.
-        Prevents opening multiple inventories per user per guild.
         """
         if not self.progression_cog:
             await ctx.send("Progression cog not loaded. Inventory unavailable.")
@@ -306,12 +250,12 @@ class Trading(commands.Cog):
             await ctx.send("⚠️ You already have an inventory open! Close it first.", ephemeral=True)
             return
 
-        async with self.progression_cog.pool.acquire() as conn:
+        async with self.bot.pool.acquire() as conn:
             await self._set_stmt_timeout(conn)
             raw_items = await conn.fetch(TC.SQL_USER_INV_SELECT, user_id, guild_id)
 
         items = []
-        async with self.progression_cog.pool.acquire() as conn:
+        async with self.bot.pool.acquire() as conn:
             await self._set_stmt_timeout(conn)
             for name, qty in raw_items:
                 if qty <= 0:
@@ -342,8 +286,8 @@ class Trading(commands.Cog):
     async def donate(self, ctx, member: discord.Member):
         """
          /donate <member>
-        Allows the invoking user to give an item from their inventory to another user, subject
-        to caps for certain items and a donor cooldown (2 hours).
+        Allows the invoking user to give an item from their inventory to another user.
+        Uses shared bot pool.
         """
         if member.bot:
             await ctx.send(f"{MinoriEmojis['MinoriConfused']} You cannot donate to bots.")
@@ -357,7 +301,7 @@ class Trading(commands.Cog):
             return
 
         guild_id = ctx.guild.id
-        conn_pool = self.progression_cog.pool
+        conn_pool = self.bot.pool # Updated to use shared pool
 
         now = datetime.now(timezone.utc)
         if donor_id in self.donate_cooldowns and now < self.donate_cooldowns[donor_id]:
@@ -501,9 +445,9 @@ class Trading(commands.Cog):
         """
         Cleanup handler that removes inventory rows for a guild when the bot leaves it.
         """
-        if not self.progression_cog or not self.progression_cog.pool:
+        if not self.bot.pool:
             return
-        async with self.progression_cog.pool.acquire() as conn:
+        async with self.bot.pool.acquire() as conn:
             await self._set_stmt_timeout(conn)
             async with conn.transaction():
                 await conn.execute("DELETE FROM user_inventory WHERE guild_id = $1", guild.id)
