@@ -34,11 +34,8 @@ Design notes (important):
   - The code checks for the Progression cog before attempting to award to avoid
     hard failures when the progression subsystem is not loaded.
 - Data resilience:
-  - Trivia/question pools are read from JSON on cog init and normalized into a dict
-    keyed by category. The cog tracks a used_questions set to reduce immediate repeats.
-- Maintainability:
-  - Game logic is split into small helper methods to make adjustments to difficulty,
-    reward scaling or timeouts straightforward without touching UI wiring.
+  - Trivia/question pools are read from JSON asynchronously on cog load to prevent
+    blocking the event loop. The cog tracks a used_questions set to reduce immediate repeats.
 """
 
 class Games(commands.Cog):
@@ -46,15 +43,37 @@ class Games(commands.Cog):
     Games cog: trivia and character-guessing interactions.
 
     Responsibilities:
-    - Load trivia data and provide a balanced sampling strategy to avoid repeats.
+    - Load trivia data asynchronously.
     - Present per-question UI, handle user answers, and reward correct responses.
     - Integrate with anime_api to provide image-based character guessing.
     """
     def __init__(self, bot):
         self.bot = bot
         self.data_path = os.path.join(os.path.dirname(__file__), "..", "data", "trivia.json")
-        with open(self.data_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
+        
+        # Initialize with safe defaults; data is loaded in cog_load
+        self.trivia_dict = {"Mixed": []}
+        
+        # used_questions prevents immediate repetition across quiz runs; it's intentionally
+        # kept in-memory so it resets on bot restart.
+        self.used_questions = set()
+
+    async def cog_load(self):
+        """
+        Asynchronously load trivia data from disk to avoid blocking the event loop.
+        """
+        def load_trivia_file():
+            try:
+                with open(self.data_path, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            except FileNotFoundError:
+                print(f"[Games] Trivia file not found at {self.data_path}")
+                return {}
+            except json.JSONDecodeError:
+                print(f"[Games] Invalid JSON in {self.data_path}")
+                return {}
+
+        data = await self.bot.loop.run_in_executor(None, load_trivia_file)
 
         if isinstance(data, dict):
             self.trivia_dict = data
@@ -62,25 +81,32 @@ class Games(commands.Cog):
             self.trivia_dict = {"Mixed": data}
         else:
             self.trivia_dict = {"Mixed": []}
-
-        # used_questions prevents immediate repetition across quiz runs; it's intentionally
-        # kept in-memory so it resets on bot restart (avoids long-term state management).
-        self.used_questions = set()
+            
+        total_q = sum(len(qs) for qs in self.trivia_dict.values())
+        print(f"[Games] Loaded {total_q} trivia questions.")
 
     def get_balanced_questions(self, num_questions: int):
         """
         Return up to `num_questions` sampled across available categories.
 
-        Strategy:
-        - Shuffle category order, then iterate categories in a round-robin fashion
-          selecting one unseen question per category until the requested number is reached.
-        - When the pool of tracked `used_questions` covers all available questions, the set
-          is cleared to allow reselection (keeps behavior simple and deterministic).
+        Args:
+            num_questions (int): The number of unique questions to retrieve.
+
+        Returns:
+            list: A list of question dictionaries.
         """
         titles = list(self.trivia_dict.keys())
+        if not titles:
+            return []
+
         random.shuffle(titles)
         questions = []
         title_cycle = cycle(titles)
+
+        # Safety: avoid infinite loop if no questions exist
+        total_available = sum(len(qs) for qs in self.trivia_dict.values())
+        if total_available == 0:
+            return []
 
         while len(questions) < num_questions:
             title = next(title_cycle)
@@ -90,7 +116,8 @@ class Games(commands.Cog):
                 self.used_questions.add(q["question"])
                 questions.append(q)
 
-            if len(self.used_questions) >= sum(len(qs) for qs in self.trivia_dict.values()):
+            # If we've used all questions, clear history to allow repeats
+            if len(self.used_questions) >= total_available:
                 self.used_questions.clear()
 
         return questions
@@ -110,14 +137,8 @@ class Games(commands.Cog):
 
         Parameters:
         - user_id, guild_id: identity for awarding.
-        - send_fn: a callable used to deliver text feedback (can be ctx.send or an interaction-aware wrapper).
-        - exp_mul, exp_base, coin_range: reward-determining parameters forwarded to compute_rewards.
-
-        Behavior:
-        - If the Progression cog is missing, the function gracefully notifies the user
-          and returns without attempting to award.
-        - compute_rewards encapsulates reward scaling; award_rewards applies the rewards
-          and persists them via the Progression cog.
+        - send_fn: a callable used to deliver text feedback (ctx.send or interaction.response.send_message).
+        - exp_mul, exp_base, coin_range: parameters passed to compute_rewards.
         """
         profile_cog = self.bot.get_cog("Progression")
         if not profile_cog:
@@ -145,14 +166,15 @@ class Games(commands.Cog):
         """
         Run a sequential trivia quiz presented question-by-question.
 
-        Interaction model:
-        - For each question, present a Select-based view with shuffled options and wait up to 15s
-          for the invoking user to answer.
-        - Uses a short-lived Future to bridge the interaction callback and the linear quiz loop.
-        - Correct answers are handled by _handle_correct_answer which takes care of rewards.
+        Args:
+            questions (int): The number of questions to ask (5, 10, 15, 20).
         """
         num_questions = questions.value
         quiz_questions = self.get_balanced_questions(num_questions)
+        
+        if not quiz_questions:
+            return await ctx.send("❌ No trivia questions available.")
+
         score = 0
 
         for idx, question in enumerate(quiz_questions, 1):
@@ -220,16 +242,17 @@ class Games(commands.Cog):
         """
         Image-based character guess game.
 
-        Flow:
-        - Fetch a random popular character (preferring AniList), then create a randomized
-          select menu with one correct and several distractors returned by
-          build_character_select_options.
-        - The callback created by create_select_callback enforces that only the invoking user
-          can answer and disables the select after an attempt.
+        Fetches a random character from AniList/Jikan and presents a 
+        multiple-choice menu with the correct name and randomized distractors.
         """
         try:
-            character = await fetch_random_character(prefer="AniList")
-        except Exception:
+            # Need a session to pass to the API; get from bot
+            if not self.bot.session:
+                 return await ctx.send("❌ Bot network session not initialized.")
+            
+            character = await fetch_random_character(session=self.bot.session, prefer="AniList")
+        except Exception as e:
+            print(f"[Games] guesscharacter error: {e}")
             return await ctx.send("❌ Couldn't fetch characters from any API. Please try again later.")
 
         correct_name = character["name"]
@@ -238,7 +261,7 @@ class Games(commands.Cog):
         source = character["source"]
 
         try:
-            options_list = await build_character_select_options(correct_name, source)
+            options_list = await build_character_select_options(correct_name, source, session=self.bot.session)
         except Exception:
             return await ctx.send("❌ Failed to fetch options for the quiz. Please try again.")
 
