@@ -59,13 +59,22 @@ class Events(commands.Cog):
         self.anime_list_path = os.path.join(
             os.path.dirname(os.path.dirname(__file__)), "data", "animelist.txt"
         )
-        try:
-            with open(self.anime_list_path, "r", encoding="utf-8") as f:
-                # Expect lines like "1. Title", extract the portion after the first dot-space
-                self.anime_list = [line.split(". ")[1].strip() for line in f.readlines() if ". " in line]
-        except Exception:
-            # If the file cannot be read, default to an empty list so presence rotation becomes a no-op.
-            self.anime_list = []
+        self.anime_list = []
+
+    async def cog_load(self):
+        """
+        Async initialization: load anime list from file without blocking the event loop.
+        """
+        def load_anime_file():
+            try:
+                with open(self.anime_list_path, "r", encoding="utf-8") as f:
+                    # Expect lines like "1. Title", extract the portion after the first dot-space
+                    return [line.split(". ")[1].strip() for line in f.readlines() if ". " in line]
+            except Exception:
+                return []
+
+        # Offload file I/O to a thread
+        self.anime_list = await self.bot.loop.run_in_executor(None, load_anime_file)
 
     async def _parse_options(self, raw) -> list:
         """
@@ -229,13 +238,15 @@ class Events(commands.Cog):
           and call its timeout handler to update the message to a finalized state.
 
         Notes:
+        - Uses self.bot.pool for DB operations.
         - If guild or message are missing, the function still records results to avoid
           losing poll outcomes.
-        - Failures in view editing are logged but do not interrupt finalization of other polls.
         """
         counts, winners = self._compute_results_from_votes(sanitized_votes)
         try:
+            # Use shared pool
             await record_poll_result(
+                self.bot.pool,
                 message_id=message_id,
                 winners=winners,
                 counts=counts,
@@ -251,7 +262,8 @@ class Events(commands.Cog):
         try:
             assert guild is not None
             author_member = await self._get_author_member(guild, author_id)
-            view = PollView(question=question or "Poll", options=options, author=author_member, timeout=None)
+            # Inject shared pool into View
+            view = PollView(self.bot.pool, question=question or "Poll", options=options, author=author_member, timeout=None)
             view.votes = {opt: set(uids) for opt, uids in sanitized_votes.items()}
             try:
                 view.end_time = datetime.fromtimestamp(float(end_time), timezone.utc) if end_time else None
@@ -281,13 +293,16 @@ class Events(commands.Cog):
 
         Behavior:
         - Creates a PollView with the remaining timeout and current votes.
+        - Injects self.bot.pool so the restored view can persist new votes.
         - If the message object is available, attempts to edit the message to attach the view.
         - If the message is missing, the view is kept in memory (so voting won't work),
           but an informational log is emitted to aid operators in troubleshooting.
         """
         try:
             author_member = await self._get_author_member(guild, author_id)
+            # Inject shared pool
             view = PollView(
+                self.bot.pool,
                 question=question or "Poll",
                 options=options,
                 author=author_member,
@@ -492,13 +507,17 @@ class Events(commands.Cog):
           a poll may be removed while being processed.
         - All operations are guarded so on_ready completes even if poll subsystem errors occur.
         """
+        if not self.bot.pool:
+            print("[Events] Warning: bot.pool is not initialized, cannot load polls.")
+            return
+
         try:
-            await init_db()
+            await init_db(self.bot.pool)
         except Exception as e:
             print(f"[DB Init Error] {e}")
 
         try:
-            rows = await load_active_polls()
+            rows = await load_active_polls(self.bot.pool)
         except Exception as e:
             print(f"[Poll Reload Error - load_active_polls] {e}")
             rows = []
@@ -510,7 +529,7 @@ class Events(commands.Cog):
                 print(f"[Poll Reload] unexpected error reconstructing a poll: {e}")
 
         try:
-            await purge_finished_polls()
+            await purge_finished_polls(self.bot.pool)
         except Exception as e:
             print(f"[Poll Reload] failed to purge finished polls: {e}")
 
