@@ -3,20 +3,28 @@ import asyncio
 from constants.configs import TradingConstants as TC, ProgressionConstants as PC
 from constants.emojis import MinoriEmojis, ShopEmojis
 
+"""
+tradingUI.py
+
+Provides the Discord UI components (Views, Selects, Buttons) for the
+shop and inventory systems. Handles user interaction logic for buying
+and using items.
+"""
+
 def format_coins(coins: int) -> str:
     """
     Format a coin integer into a compact human-readable string.
 
     Examples:
-    - 532 -> "532"
-    - 12500 -> "12.5K"
-    - 2000000 -> "2M"
+        532 -> "532"
+        12500 -> "12.5K"
+        2000000 -> "2M"
 
     Args:
-        coins: integer number of coins.
+        coins (int): The number of coins.
 
     Returns:
-        A string with suffix K/M/B as appropriate and trimmed trailing zeros.
+        str: A formatted string with K/M/B suffixes.
     """
     if coins < 1_000:
         return str(coins)
@@ -30,14 +38,15 @@ def format_coins(coins: int) -> str:
 
 class CloseButton(discord.ui.Button):
     """
-    A reusable 'Close' button for views (shop/inventory).
+    A reusable 'Close' button for shop and inventory views.
 
-    Attributes:
-        owner_id: ID of the user who opened the menu (only they may close it).
-        close_text: message to display after closing.
-        menu_type: "shop" or "inventory" to allow the cog to update open_shops/open_inventories.
-        cog: reference to the Trading cog for state updates.
-        guild_id: guild id used as key to manage open menus.
+    Args:
+        owner_id (int): ID of the user who owns the menu.
+        close_text (str): Message to display upon closing.
+        label (str): Text on the button.
+        menu_type (str): "shop" or "inventory" for state management.
+        cog (commands.Cog): Reference to the Trading cog.
+        guild_id (int): ID of the guild.
     """
     def __init__(self, owner_id: int, close_text: str, label: str = "Close", menu_type: str = None, cog=None, guild_id: int = None):
         self.guild_id = guild_id
@@ -48,10 +57,7 @@ class CloseButton(discord.ui.Button):
         self.cog = cog
 
     async def callback(self, interaction: discord.Interaction):
-        """
-        Close the menu if invoked by the original owner; otherwise send an ephemeral error.
-        Cancels any view timeout task and edits the message to display close_text.
-        """
+        """Handle button click to close the menu."""
         if interaction.user.id != self.owner_id:
             await interaction.response.send_message("⚠️ This is not your menu!", ephemeral=True)
             return
@@ -70,20 +76,14 @@ class CloseButton(discord.ui.Button):
 
 class InventorySelect(discord.ui.Select):
     """
-    A Select UI component representing the user's inventory items.
+    A dropdown menu for selecting and using inventory items.
 
-    When an item is selected:
-    - Verifies the user and locks their actions.
-    - Validates that they still own the item.
-    - Applies item effects (potion or mystery box) by calling cog helper methods.
-    - Updates the DB inventory and returns an updated InventoryView or a message if empty.
-
-    Parameters:
-        cog: reference to Trading cog.
-        user_id: the user who owns this inventory.
-        guild_id: guild id.
-        items: iterable of tuples (name, qty, emoji).
-        parent_view: the parent InventoryView for timer resets.
+    Args:
+        cog (commands.Cog): Reference to the Trading cog.
+        user_id (int): ID of the inventory owner.
+        guild_id (int): ID of the guild.
+        items (list): List of item tuples (name, qty, emoji).
+        parent_view (discord.ui.View): Parent view for timer resets.
     """
     def __init__(self, cog, user_id, guild_id, items, parent_view):
         self.cog = cog
@@ -104,21 +104,14 @@ class InventorySelect(discord.ui.Select):
         super().__init__(placeholder="Choose an item to use...", min_values=1, max_values=1, options=options)
         
     async def on_timeout(self):
-        """
-        Disable children and edit the message when the select times out.
-        """
+        """Disable component on timeout."""
         for child in self.children:
             child.disabled = True
         if hasattr(self, "message") and self.message:
             await self.message.edit(view=self)
 
     async def callback(self, interaction: discord.Interaction):
-        """
-        Handle the selection of an inventory item:
-        - Ensures only the owner can interact.
-        - Deducts the item from DB and applies effects if applicable.
-        - Rebuilds and sends an updated inventory embed or a message if empty.
-        """
+        """Process item usage, deduct from DB, and apply effects."""
         if hasattr(self.parent_view, "reset_timer"):
             self.parent_view.reset_timer()
         if interaction.user.id != self.user_id:
@@ -128,14 +121,15 @@ class InventorySelect(discord.ui.Select):
         try:
             selected_item = self.values[0]
             await interaction.response.defer()
-            pool = self.cog.progression_cog.pool
+            # Use bot.pool directly
+            pool = self.cog.bot.pool
 
             async with pool.acquire() as conn:
                 await self.cog._set_stmt_timeout(conn)
                 row = await conn.fetchrow(TC.SQL_SELECT_PRICE_EMOJI, selected_item)
                 selected_emoji = row["emoji"] if row and row["emoji"] else "📦"
 
-                # Atomic decrement; prevents race conditions without Python locks
+                # Atomic decrement
                 async with conn.transaction():
                     deducted = await conn.fetchrow(
                         """
@@ -180,7 +174,7 @@ class InventorySelect(discord.ui.Select):
                 if rewards:
                     reward_lines = []
                     # fetch emojis mapping
-                    async with self.cog.progression_cog.pool.acquire() as conn:
+                    async with pool.acquire() as conn:
                         await self.cog._set_stmt_timeout(conn)
                         emap_rows = await conn.fetch("SELECT name, emoji FROM shop_items")
                         emap = {r["name"]: r["emoji"] for r in emap_rows}
@@ -190,7 +184,7 @@ class InventorySelect(discord.ui.Select):
                     feedback_msg = f"{ShopEmojis['MysteryBox']} You opened a {TC.MYSTERY_BOX_NAME} and got:\n" + "\n".join(reward_lines)
 
             # reload inventory
-            async with self.cog.progression_cog.pool.acquire() as conn:
+            async with pool.acquire() as conn:
                 await self.cog._set_stmt_timeout(conn)
                 raw_items = await conn.fetch(TC.SQL_USER_INV_SELECT, self.user_id, self.guild_id)
 
@@ -220,21 +214,19 @@ class InventorySelect(discord.ui.Select):
             await interaction.followup.send(feedback_msg)
 
         finally:
-            # no Python lock release needed; DB handled concurrency
             pass
 
 
 class InventoryView(discord.ui.View):
     """
-    A view that shows a user's inventory and handles automatic timeout.
+    A view presenting the user's inventory with auto-timeout logic.
 
-    Attributes:
-        cog: reference to the Trading cog.
-        user_id: ID of inventory owner.
-        guild_id: ID of the guild.
-        items: list of (name, qty, emoji).
-        timeout_seconds: seconds before the view auto-closes.
-        _timeout_task: background task that enforces the timeout.
+    Args:
+        cog (commands.Cog): Reference to the Trading cog.
+        user_id (int): ID of the inventory owner.
+        guild_id (int): ID of the guild.
+        items (list): List of item tuples.
+        timeout (int): Seconds until auto-close.
     """
     def __init__(self, cog, user_id, guild_id, items, timeout=180):
         super().__init__(timeout=None) 
@@ -254,17 +246,13 @@ class InventoryView(discord.ui.View):
         self.start_timeout()
 
     def start_timeout(self):
-        """
-        Start or restart the background timeout loop.
-        """
+        """Initialize or reset the inactivity timeout task."""
         if self._timeout_task:
             self._timeout_task.cancel()
         self._timeout_task = asyncio.create_task(self._timeout_loop())
 
     async def _timeout_loop(self):
-        """
-        Sleep for timeout_seconds then close the view and remove it from the cog tracking.
-        """
+        """Wait for the timeout period, then close the view."""
         await asyncio.sleep(self.timeout_seconds)
         if self.message:
             try:
@@ -276,21 +264,20 @@ class InventoryView(discord.ui.View):
             self.cog.open_inventories.get(self.guild_id, {}).pop(self.user_id, None)
 
     def reset_timer(self):
-        """
-        External callers (selects) can reset the timeout to keep the view alive.
-        """
+        """Reset the internal timer to prevent premature closing."""
         self.start_timeout()
 
 
 class ShopSelect(discord.ui.Select):
     """
-    A Select UI component used in the shop view that lets a user buy one of the available items.
+    A dropdown menu for purchasing items from the shop.
 
-    When an item is selected:
-    - Validates ownership of the menu.
-    - Checks price and user's coins via progression_cog.
-    - Deducts coins and adds the item to the user's inventory.
-    - Updates the shop embed/options and notifies the buyer.
+    Args:
+        progression_cog (commands.Cog): Reference to Progression cog.
+        user_id (int): ID of the buyer.
+        guild_id (int): ID of the guild.
+        options (list): List of SelectOptions.
+        parent_view (discord.ui.View): Parent ShopView.
     """
     def __init__(self, progression_cog, user_id, guild_id, options, parent_view):
         self.progression_cog = progression_cog
@@ -301,6 +288,7 @@ class ShopSelect(discord.ui.Select):
         super().__init__(placeholder="Select an item to buy...", min_values=1, max_values=1, options=options)
 
     async def callback(self, interaction: discord.Interaction):
+        """Handle purchase logic: validate funds, deduct cost, add item."""
         if interaction.user.id != self.user_id:
             await interaction.response.send_message("⚠️ You can only buy items for yourself.", ephemeral=True)
             return
@@ -322,8 +310,10 @@ class ShopSelect(discord.ui.Select):
 
         try:
             selected_item = self.values[0]
+            # Use bot.pool directly from the progression cog's bot instance
+            pool = self.progression_cog.bot.pool
 
-            async with self.progression_cog.pool.acquire() as conn:
+            async with pool.acquire() as conn:
                 await self.parent_view.parent_cog._set_stmt_timeout(conn)
                 row = await conn.fetchrow(TC.SQL_SELECT_PRICE_EMOJI, selected_item)
 
@@ -343,7 +333,7 @@ class ShopSelect(discord.ui.Select):
                 await interaction.followup.send(NOT_ENOUGH_COINS_MSG, ephemeral=True)
                 return
 
-            async with self.progression_cog.pool.acquire() as conn:
+            async with pool.acquire() as conn:
                 await self.parent_view.parent_cog._set_stmt_timeout(conn)
                 async with conn.transaction():
                     await conn.execute(
@@ -356,7 +346,7 @@ class ShopSelect(discord.ui.Select):
                     )
 
             new_balance = await self.progression_cog.get_coins(self.user_id, self.guild_id)
-            async with self.progression_cog.pool.acquire() as conn:
+            async with pool.acquire() as conn:
                 await self.parent_view.parent_cog._set_stmt_timeout(conn)
                 items = await conn.fetch("SELECT name, price, emoji FROM shop_items")
 
@@ -397,15 +387,15 @@ class ShopSelect(discord.ui.Select):
 
 class ShopView(discord.ui.View):
     """
-    A shop view that presents available items and handles closure/timeouts.
+    A view for the shop interface, managing timeouts and close logic.
 
-    Attributes:
-        progression_cog: reference to the Progression cog for coins/db access.
-        user_id: ID of the user that opened the shop.
-        guild_id: guild id.
-        options: initial select options for the shop.
-        parent_cog: the Trading cog reference for state updates.
-        timeout_seconds: how long before the shop auto-closes.
+    Args:
+        progression_cog (commands.Cog): Reference to Progression cog.
+        user_id (int): ID of the user.
+        guild_id (int): ID of the guild.
+        options (list): List of initial select options.
+        parent_cog (commands.Cog): Reference to Trading cog.
+        timeout (int): Seconds until auto-close.
     """
     def __init__(self, progression_cog, user_id, guild_id, options, parent_cog, timeout=180):
         super().__init__(timeout=None) 
@@ -435,11 +425,13 @@ class ShopView(discord.ui.View):
         self.start_timeout()
 
     def start_timeout(self):
+        """Initialize or restart the timeout task."""
         if self._timeout_task:
             self._timeout_task.cancel()
         self._timeout_task = asyncio.create_task(self._timeout_loop())
 
     async def _timeout_loop(self):
+        """Close the shop after inactivity."""
         await asyncio.sleep(self.timeout_seconds)
         if self.message:
             try:
@@ -451,4 +443,5 @@ class ShopView(discord.ui.View):
             self.parent_cog.open_shops.get(self.guild_id, {}).pop(self.user_id, None)
                 
     def reset_timer(self):
+        """Reset the internal timer."""
         self.start_timeout()
