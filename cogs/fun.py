@@ -11,7 +11,7 @@ from typing import Dict, Optional, Any, List
 from utils.pollings import PollInputModal
 from constants.emojis import MinoriEmojis, ShopEmojis
 from constants.configs import FunConstants as FC, ExternalAPIs as EC
-from utils.gambleHelpers import GambleView
+from utils.gamble_helpers import GambleView
 
 
 """

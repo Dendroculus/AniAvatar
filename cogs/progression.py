@@ -1,26 +1,21 @@
 import discord
 from discord.ext import commands
-import asyncpg
 import os
 import random
 import asyncio
 import traceback
 import io
-import hashlib
 import time
-import concurrent.futures
-from typing import Optional
-from collections import OrderedDict
+from typing import Optional, Tuple
 from discord import MessageReference
 import redis.asyncio as redis
 
-from utils.progression.profileCards import (
-    ImageRenderer,
+from utils.progression.profile_cards import (
     get_title,
     get_title_emoji,
     TITLE_COLORS,
 )
-from utils.progression.profileTheme import MainThemeView
+from utils.progression.profile_theme import MainThemeView
 from constants.configs import (
     BG_PATH,
     EMOJI_PATH,
@@ -28,13 +23,10 @@ from constants.configs import (
     REDIS_CACHING,
     ProgressionConstants as PC,
 )
-from utils.progression.processWorker import (
-    initialize_worker_safe,
-    render_profile_in_process,
-    render_leaderboard_in_process,
-)
-from utils.tradingUI import format_coins
+from utils.trading_ui import format_coins
 from constants.emojis import CustomEmojis, TitleEmojis
+from services.render_manager import RenderManager, RenderContext
+from services.user_repository import UserRepository
 
 """
 progression.py
@@ -43,24 +35,17 @@ Handles the leveling system, experience tracking, economy (coins), and
 image generation for user profiles and leaderboards.
 """
 
+
 class Progression(commands.Cog):
     """
     Manages user progression, economy, and profile rendering.
-
-    This cog relies on the shared database pool (bot.pool) for persistence and 
-    uses a ProcessPoolExecutor to handle CPU-intensive image generation.
     """
 
     def __init__(self, bot):
         self.bot = bot
-        self._leaderboard_cache = {}
-
-        cpu_count = os.cpu_count() or 2
-        max_renders = max(2, cpu_count - 1)
-        self._render_semaphore = asyncio.Semaphore(max_renders)
-
-        self._render_cache: OrderedDict[str, tuple[bytes, float]] = OrderedDict()
-
+        self.repo: Optional[UserRepository] = None # Initialized in cog_load
+        self.render_manager = RenderManager()
+        
         self.redis_url = REDIS_CACHING
         self.redis: redis.Redis | None = None
         if self.redis_url:
@@ -76,81 +61,116 @@ class Progression(commands.Cog):
                 self.redis = None
         
         self._fallback_cooldowns: dict[str, float] = {}
-        self.renderer = ImageRenderer(cache_size=PC.RENDER_CACHE_SIZE)
-        
-        self._process_pool = concurrent.futures.ProcessPoolExecutor(
-            max_workers=max_renders, 
-            initializer=initialize_worker_safe, 
-            initargs=(PC.RENDER_CACHE_SIZE,)
-        )
-
-        print(f"[Progression] Initialized with max {max_renders} concurrent renders")
-
-    async def _create_indexes(self, conn: asyncpg.Connection):
-        """Create database indexes to optimize leaderboard and user lookups."""
-        try:
-            await conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_users_guild_level_exp ON users (guild_id, level DESC, exp DESC)"
-            )
-        except Exception as e:
-            print(f"[Progression] Index creation warning: {e}")
 
     async def cog_load(self):
-        """Initialize database tables and indexes using the bot's shared pool."""
+        """Initialize database tables and repository."""
         if not self.bot.pool:
             raise RuntimeError("Bot database pool is not initialized.")
-
-        async with self.bot.pool.acquire() as conn:
-            await conn.execute("""
-                CREATE TABLE IF NOT EXISTS users (
-                    user_id BIGINT,
-                    guild_id BIGINT,
-                    exp BIGINT NOT NULL DEFAULT 0,
-                    level INTEGER NOT NULL DEFAULT 1,
-                    PRIMARY KEY (user_id, guild_id)
-                )
-            """)
-            await conn.execute("""
-                CREATE TABLE IF NOT EXISTS profile_theme (
-                    user_id BIGINT PRIMARY KEY,
-                    theme_name TEXT DEFAULT 'default',
-                    bg_file TEXT DEFAULT 'NULL',
-                    font_color TEXT DEFAULT 'white'
-                )
-            """)
-            await conn.execute("""
-                CREATE TABLE IF NOT EXISTS user_coins (
-                    user_id BIGINT,
-                    guild_id BIGINT,
-                    coins BIGINT DEFAULT 0,
-                    PRIMARY KEY(user_id, guild_id)
-                )
-            """)
-            await self._create_indexes(conn)
+        
+        self.repo = UserRepository(self.bot.pool)
+        await self.repo.initialize_schema()
 
     async def cog_unload(self):
-        """Clean up resources including the process pool and Redis connection."""
+        """Clean up resources."""
         try:
             if self.redis:
                 await self.redis.close()
         except Exception:
             pass
-        try:
-            self._process_pool.shutdown(wait=False, cancel_futures=True)
-        except Exception:
-            pass
+        self.render_manager.shutdown()
+
+    async def get_coins(self, user_id: int, guild_id: int) -> int:
+        """
+        Function to get a user's coin balance.
+        
+        Args:
+            user_id (int): The ID of the user.
+            guild_id (int): The ID of the guild.
+        
+        Returns:
+            int: The user's coin balance.
+        """
+        return await self.repo.get_coins(user_id, guild_id)
+
+    async def add_coins(self, user_id: int, guild_id: int, amount: int):
+        """
+        Function to add coins to a user's balance.
+        Args:
+            user_id (int): The ID of the user.
+            guild_id (int): The ID of the guild.
+            amount (int): The amount of coins to add.
+        
+        Returns:
+            None
+        """
+        await self.repo.add_coins(user_id, guild_id, amount)
+
+    async def ensure_user_row(self, user_id: int, guild_id: int):
+        """
+        Function to ensure a user row exists in the database.
+        Args:
+            user_id (int): The ID of the user.
+            guild_id (int): The ID of the guild.
+            
+        Returns:
+            None
+        """
+        await self.repo.ensure_user_row(user_id, guild_id)
+        
+    async def remove_coins(self, user_id: int, guild_id: int, amount: int) -> bool:
+        """
+        Function to deduct coins from a user's balance.
+        Args:
+            user_id (int): The ID of the user.
+            guild_id (int): The ID of the guild.
+            amount (int): The amount of coins to deduct.
+            
+        Returns:
+            bool: True if the operation was successful, False otherwise.
+        """
+        return await self.repo.remove_coins(user_id, guild_id, amount)
+
+    async def reserve_coins(self, user_id: int, guild_id: int, amount: int) -> bool:
+        """
+        Function to reserve coins from a user's balance (for trades, etc), without permanently deducting them.
+        Args:
+            user_id (int): The ID of the user.
+            guild_id (int): The ID of the guild.
+            amount (int): The amount of coins to reserve.
+            
+        Returns:
+            bool: True if the operation was successful, False otherwise.
+        """
+        return await self.repo.remove_coins(user_id, guild_id, amount)
+
+    async def get_user(self, user_id: int, guild_id: int) -> Tuple[int, int]:
+        """
+        Function to get a user's EXP and level.
+        Args:
+            user_id (int): The ID of the user.
+            guild_id (int): The ID of the guild.
+        
+        Returns:
+            Tuple[int, int]: A tuple containing the user's EXP and level.
+        """
+        return await self.repo.get_user(user_id, guild_id)
+    
+    async def add_exp(self, user_id: int, guild_id: int, amount: int) -> Tuple[int, int, bool]:
+        """
+        Function to add EXP to a user.
+        Args:
+            user_id (int): The ID of the user.
+            guild_id (int): The ID of the guild.
+            amount (int): The amount of EXP to add.
+            
+        Returns:
+            Tuple[int, int, bool]: A tuple containing the new level, new EXP, and a boolean indicating if the user leveled up.
+        """
+        return await self.repo.add_exp(user_id, guild_id, amount)
 
     async def safe_send(self, ctx, *args, **kwargs):
         """
         Send a message safely handling both Context and Interaction objects.
-
-        Args:
-            ctx: The command context.
-            *args: Positional arguments for sending.
-            **kwargs: Keyword arguments for sending.
-
-        Returns:
-            discord.Message: The message sent.
         """
         interaction = getattr(ctx, "interaction", None)
         if interaction is not None:
@@ -168,157 +188,17 @@ class Progression(commands.Cog):
     async def _fetch_avatar_bytes(self, member_or_user, size=128, timeout=3.0) -> bytes:
         """
         Fetch the user's avatar as bytes.
-
-        Args:
-            member_or_user: The discord Member or User object.
-            size (int): The requested avatar size.
-            timeout (float): Max time to wait for the download.
-
-        Returns:
-            bytes: The image data, or empty bytes on failure.
         """
         try:
             return await asyncio.wait_for(member_or_user.display_avatar.with_size(size).read(), timeout=timeout)
         except Exception as e:
+            # Log specific error before returning empty bytes
             print(f"[avatar_fetch] failed for {getattr(member_or_user,'id',None)}: {e}")
             return b""
 
-    def _get_render_cache_key(
-        self,
-        avatar_bytes: bytes,
-        display_name: str,
-        title_name: str,
-        level: int,
-        exp: int,
-        next_exp: int,
-        bg_file: str,
-        theme_name: str,
-        font_color: str,
-        user_rank: Optional[int] = None,
-    ) -> str:
-        """Generate a unique cache key for a profile image based on its visual attributes."""
-        avatar_hash = hashlib.sha1(avatar_bytes[:256] if avatar_bytes else b"").hexdigest()[:16]
-        return f"{avatar_hash}:{display_name}:{title_name}:{level}:{exp}:{next_exp}:{theme_name}:{bg_file}:{font_color}:{user_rank}"
-
-    def _get_from_cache(self, key: str) -> bytes | None:
-        """Retrieve an image from the LRU cache if it exists and hasn't expired."""
-        if key not in self._render_cache:
-            return None
-
-        img_bytes, timestamp = self._render_cache[key]
-        now = asyncio.get_event_loop().time()
-
-        if now - timestamp > PC.RENDER_CACHE_TTL:
-            del self._render_cache[key]
-            return None
-
-        self._render_cache.move_to_end(key)
-        return img_bytes
-
-    def _add_to_cache(self, key: str, img_bytes: bytes):
-        """Add an image to the LRU cache, evicting old entries if full."""
-        now = asyncio.get_event_loop().time()
-        self._render_cache[key] = (img_bytes, now)
-        self._render_cache.move_to_end(key)
-
-        while len(self._render_cache) > PC.RENDER_CACHE_SIZE:
-            self._render_cache.popitem(last=False)
-
-    async def _render_profile_cached(
-        self,
-        avatar_bytes: bytes,
-        display_name: str,
-        title_name: str,
-        level: int,
-        exp: int,
-        next_exp: int,
-        bg_file: Optional[str] = None,
-        theme_name: str = "default",
-        font_color: str = "white",
-        user_rank: int = None,
-     ) -> bytes | None:
-        """
-        Render a profile image using a process pool, with caching.
-
-        Args:
-            avatar_bytes: The user's avatar image data.
-            display_name: The user's name.
-            title_name: The user's rank title.
-            level: Current level.
-            exp: Current experience.
-            next_exp: Experience required for next level.
-            bg_file: Filename of the background image.
-            theme_name: Name of the theme folder.
-            font_color: Color of the text.
-            user_rank: The user's rank on the leaderboard.
-
-        Returns:
-            bytes | None: The rendered PNG data, or None on failure.
-        """
-        cache_key = self._get_render_cache_key(
-            avatar_bytes,
-            display_name,
-            title_name,
-            level,
-            exp,
-            next_exp,
-            bg_file,
-            theme_name,
-            font_color,
-            user_rank,
-        )
-        cached = self._get_from_cache(cache_key)
-        if cached:
-            print(f"[Progression] Cache hit for {display_name}")
-            return cached
-
-        async with self._render_semaphore:
-            loop = asyncio.get_running_loop()
-            try:
-                img_bytes = await asyncio.wait_for(
-                    loop.run_in_executor(
-                        self._process_pool,
-                        render_profile_in_process,
-                        avatar_bytes,
-                        display_name,
-                        title_name,
-                        level,
-                        exp,
-                        next_exp,
-                        bg_file,
-                        theme_name,
-                        font_color,
-                        user_rank,
-                    ),
-                    timeout=20.0,
-                )
-
-                if img_bytes:
-                    self._add_to_cache(cache_key, img_bytes)
-                    print(f"[Progression] Rendered and cached profile for {display_name}")
-
-                return img_bytes
-
-            except asyncio.TimeoutError:
-                print(f"[Progression] Render timeout for {display_name}")
-                return None
-            except Exception as e:
-                print(f"[Progression] Render error for {display_name}: {e}")
-                traceback.print_exc()
-                return None
-            
     async def _build_rows_data(self, ctx, rows, avatar_size=128, avatar_timeout=3.0):
         """
         Prepare data structures for leaderboard rendering by fetching names and avatars.
-
-        Args:
-            ctx: Command context.
-            rows: List of user database rows (user_id, level, exp).
-            avatar_size: Size of avatar to fetch.
-            avatar_timeout: Timeout for avatar fetching.
-
-        Returns:
-            list[dict]: A list of user data dictionaries ready for the renderer.
         """
         meta = [(idx, user_id, level, exp) for idx, (user_id, level, exp) in enumerate(rows, start=1)]
 
@@ -359,107 +239,6 @@ class Progression(commands.Cog):
 
         return rows_data
 
-    async def get_coins(self, user_id: int, guild_id: int) -> int:
-        """
-        Get the coin balance for a user.
-
-        Returns:
-            int: Current coin balance.
-        """
-        async with self.bot.pool.acquire() as conn:
-            row = await conn.fetchrow(
-                "SELECT coins FROM user_coins WHERE user_id = $1 AND guild_id = $2",
-                user_id, guild_id
-            )
-            if not row:
-                await conn.execute(
-                    "INSERT INTO user_coins (user_id, guild_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
-                    user_id, guild_id
-                )
-                return 0
-            return int(row["coins"])
-
-    async def add_coins(self, user_id: int, guild_id: int, amount: int):
-        """Add coins to a user's balance."""
-        if amount == 0:
-            return
-        amount = int(amount)
-        async with self.bot.pool.acquire() as conn:
-            await conn.execute(PC.SQL_INSERT_OR_IGNORE_USER_COINS_ZERO, user_id, guild_id)
-            await conn.execute(
-                """
-                INSERT INTO user_coins (user_id, guild_id, coins) VALUES ($1, $2, $3)
-                ON CONFLICT(user_id, guild_id) DO UPDATE SET coins = user_coins.coins + EXCLUDED.coins
-                """,
-                user_id, guild_id, amount
-            )
-
-    async def ensure_user_row(self, user_id: int, guild_id: int):
-        """Ensure a user exists in the coin database."""
-        async with self.bot.pool.acquire() as conn:
-            await conn.execute(PC.SQL_INSERT_OR_IGNORE_USER_COINS_ZERO, user_id, guild_id)
-
-    async def remove_coins(self, user_id: int, guild_id: int, amount: int) -> bool:
-        """
-        Remove coins from a user's balance safely.
-
-        Returns:
-            bool: True if coins were successfully removed, False if insufficient balance.
-        """
-        amount = int(amount)
-        if amount <= 0:
-            return False
-        async with self.bot.pool.acquire() as conn:
-            await conn.execute(PC.SQL_INSERT_OR_IGNORE_USER_COINS_ZERO, user_id, guild_id)
-            result = await conn.execute(
-                "UPDATE user_coins SET coins = coins - $1 WHERE user_id = $2 AND guild_id = $3 AND coins >= $1",
-                amount, user_id, guild_id
-            )
-            try:
-                updated = int(result.split()[-1])
-            except Exception:
-                updated = 0
-            return updated > 0
-
-    async def reserve_coins(self, user_id: int, guild_id: int, amount: int) -> bool:
-        """Reserve coins (currently an alias for remove_coins)."""
-        return await self.remove_coins(user_id, guild_id, amount)
-
-    async def get_user_theme(self, user_id: int):
-        """
-        Get the user's profile theme configuration.
-
-        Returns:
-            tuple: (theme_name, bg_file, font_color)
-        """
-        async with self.bot.pool.acquire() as conn:
-            row = await conn.fetchrow(
-                "SELECT theme_name, bg_file, font_color FROM profile_theme WHERE user_id = $1",
-                user_id
-            )
-            if not row:
-                await conn.execute(
-                    "INSERT INTO profile_theme (user_id) VALUES ($1) ON CONFLICT DO NOTHING",
-                    user_id
-                )
-                return "galaxy", "GALAXY.PNG", "white"
-            return (row["theme_name"], row["bg_file"], row["font_color"])
-
-    async def set_user_theme(self, user_id: int, theme_name: str, bg_file: Optional[str], font_color: str = "white"):
-        """Update the user's profile theme configuration."""
-        async with self.bot.pool.acquire() as conn:
-            await conn.execute(
-                """
-                INSERT INTO profile_theme (user_id, theme_name, bg_file, font_color)
-                VALUES ($1, $2, $3, $4)
-                ON CONFLICT (user_id) DO UPDATE
-                SET theme_name = EXCLUDED.theme_name,
-                    bg_file = EXCLUDED.bg_file,
-                    font_color = EXCLUDED.font_color
-                """,
-                user_id, theme_name, bg_file, font_color
-            )
-
     def truncate(self, text: str, max_len: int, ellipsis: str = "...", strip: bool = False) -> str:
         """Truncate a string to a maximum length."""
         if len(text) <= max_len:
@@ -468,121 +247,6 @@ class Progression(commands.Cog):
         if strip:
             truncated = truncated.rstrip()
         return truncated + ellipsis
-
-    async def get_user(self, user_id: int, guild_id: int):
-        """
-        Get user experience and level.
-
-        Returns:
-            tuple: (exp, level)
-        """
-        async with self.bot.pool.acquire() as conn:
-            row = await conn.fetchrow(
-                "SELECT exp, level FROM users WHERE user_id = $1 AND guild_id = $2",
-                user_id, guild_id
-            )
-            if row is None:
-                await conn.execute(
-                    "INSERT INTO users (user_id, guild_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
-                    user_id, guild_id
-                )
-                return 0, 1
-            return (row["exp"], row["level"])
-
-    async def add_exp(self, user_id: int, guild_id: int, amount: int):
-        """
-        Add experience points to a user and handle leveling up.
-
-        Returns:
-            tuple: (new_level, new_exp, leveled_up_bool)
-        """
-        async with self.bot.pool.acquire() as conn:
-            async with conn.transaction():
-                row = await conn.fetchrow(
-                    """
-                    SELECT exp, level
-                    FROM users
-                    WHERE user_id = $1 AND guild_id = $2
-                    FOR UPDATE
-                    """,
-                    user_id, guild_id,
-                )
-
-                if row is None:
-                    await conn.execute(
-                        """
-                        INSERT INTO users (user_id, guild_id, exp, level)
-                        VALUES ($1, $2, 0, 1)
-                        ON CONFLICT DO NOTHING
-                        """,
-                        user_id, guild_id,
-                    )
-                    row = await conn.fetchrow(
-                        """
-                        SELECT exp, level
-                        FROM users
-                        WHERE user_id = $1 AND guild_id = $2
-                        FOR UPDATE
-                        """,
-                        user_id, guild_id,
-                    )
-
-                exp, level = row["exp"], row["level"]
-                new_exp = exp + amount
-                leveled_up = False
-
-                while level < PC.MAX_LEVEL:
-                    next_exp = 50 * level + 20 * level**2
-                    if new_exp >= next_exp:
-                        new_exp -= next_exp
-                        level += 1
-                        leveled_up = True
-                    else:
-                        break
-
-                if level >= PC.MAX_LEVEL:
-                    level = PC.MAX_LEVEL
-                    new_exp = 0
-
-                await conn.execute(
-                    """
-                    UPDATE users
-                    SET exp = $1, level = $2
-                    WHERE user_id = $3 AND guild_id = $4
-                    """,
-                    new_exp, level, user_id, guild_id,
-                )
-
-                return level, new_exp, leveled_up
-
-    async def get_rank(self, user_id: int, guild_id: int):
-        """Get the user's rank position in the guild."""
-        async with self.bot.pool.acquire() as conn:
-            row = await conn.fetchrow(
-                """
-                SELECT COUNT(*) + 1 AS rnk
-                FROM users
-                WHERE guild_id = $1
-                    AND (
-                    level > (SELECT level FROM users WHERE user_id = $2 AND guild_id = $1)
-                    OR (
-                        level = (SELECT level FROM users WHERE user_id = $2 AND guild_id = $1)
-                        AND exp > (SELECT exp FROM users WHERE user_id = $2 AND guild_id = $1)
-                    )
-                    )
-                """,
-                guild_id, user_id
-            )
-            return int(row["rnk"]) if row and row["rnk"] is not None else 1
-
-    async def get_rank_for(self, guild_id: int, level: int, exp: int):
-        """Calculate the rank for a hypothetical level and experience value."""
-        async with self.bot.pool.acquire() as conn:
-            row = await conn.fetchrow(
-                "SELECT COUNT(*) + 1 AS rnk FROM users WHERE guild_id = $1 AND (level > $2 OR (level = $2 AND exp > $3))",
-                guild_id, level, exp
-            )
-            return int(row["rnk"]) if row and row["rnk"] is not None else 1
 
     async def announce_level_up(self, guild_id: int, user_id: int, new_level: int, old_level: int, channel: discord.abc.Messageable):
         """Send a level-up announcement and award bonus coins."""
@@ -616,7 +280,7 @@ class Progression(commands.Cog):
         embed.set_thumbnail(url=member.display_avatar.url)
         lvlup_msg = await channel.send(embed=embed)
         coins_amount = random.randint(30, 50)
-        await self.add_coins(user_id, guild_id, coins_amount)
+        await self.repo.add_coins(user_id, guild_id, coins_amount)
         await channel.send(
             f"{member.display_name} received {PC.COINS_EMOJI()} {coins_amount} coins for leveling up!",
             reference=MessageReference(message_id=lvlup_msg.id, channel_id=lvlup_msg.channel.id, guild_id=lvlup_msg.guild.id)
@@ -625,8 +289,7 @@ class Progression(commands.Cog):
     @commands.Cog.listener()
     async def on_guild_remove(self, guild: discord.Guild):
         """Remove all user data for a guild when the bot leaves it."""
-        async with self.bot.pool.acquire() as conn:
-            await conn.execute("DELETE FROM users WHERE guild_id = $1", guild.id)
+        await self.repo.delete_guild_data(guild.id)
         print(f"[Progression] Cleaned up DB for guild {guild.id} ({guild.name})")
 
     def _check_badge_exists_safe(self, path: str) -> bool:
@@ -638,9 +301,6 @@ class Progression(commands.Cog):
     async def profile(self, ctx, member: discord.Member = None):
         """
         Display a rendered profile card for the user.
-
-        Args:
-            member (discord.Member, optional): The user to view. Defaults to author.
         """
         member = member or ctx.author
         if member.bot:
@@ -651,27 +311,30 @@ class Progression(commands.Cog):
             if ctx.interaction:
                 await ctx.defer()
                 
-            exp, level = await self.get_user(member.id, ctx.guild.id)
+            exp, level = await self.repo.get_user(member.id, ctx.guild.id)
             title_name = get_title(level)
             next_exp = None if level >= PC.MAX_LEVEL else (50 * level + 20 * level**2)
 
             avatar_bytes = await self._fetch_avatar_bytes(member, size=128, timeout=3.0)
 
-            theme_name, bg_file, font_color = await self.get_user_theme(member.id)
-            user_rank = await self.get_rank(member.id, ctx.guild.id)
+            theme_name, bg_file, font_color = await self.repo.get_user_theme(member.id)
+            user_rank = await self.repo.get_rank(member.id, ctx.guild.id)
 
-            img_bytes = await self._render_profile_cached(
-                avatar_bytes,
-                member.display_name,
-                title_name,
-                level,
-                exp,
-                next_exp,
+            # Create context object for clean passing
+            render_ctx = RenderContext(
+                avatar_bytes=avatar_bytes,
+                display_name=member.display_name,
+                title_name=title_name,
+                level=level,
+                exp=exp,
+                next_exp=next_exp,
                 bg_file=bg_file,
                 theme_name=theme_name,
                 font_color=font_color,
                 user_rank=user_rank
             )
+
+            img_bytes = await self.render_manager.render_profile(render_ctx)
 
             if not img_bytes:
                 await ctx.send("❌ Failed to generate profile image — check bot logs.")
@@ -718,8 +381,8 @@ class Progression(commands.Cog):
                 lb_log(f"Cache read failed: {e}")
 
         if cached_bytes:
-            user_rank = await self.get_rank(ctx.author.id, ctx.guild.id)
-            user_coins = await self.get_coins(ctx.author.id, ctx.guild.id)
+            user_rank = await self.repo.get_rank(ctx.author.id, ctx.guild.id)
+            user_coins = await self.repo.get_coins(ctx.author.id, ctx.guild.id)
             formatted_coins = format_coins(user_coins)
 
             file = discord.File(io.BytesIO(cached_bytes), filename="leaderboard.png")
@@ -741,61 +404,11 @@ class Progression(commands.Cog):
         async def query_rows():
             lb_log(f"Query start (guild={ctx.guild.id})")
             try:
-                async with self.bot.pool.acquire() as conn:
-                    rows = await conn.fetch(
-                        """
-                        SELECT user_id, level, exp
-                        FROM users
-                        WHERE guild_id = $1
-                            AND ((exp > 0 AND level >= 1) OR level = $2)
-                        ORDER BY level DESC, exp DESC
-                        LIMIT 10
-                        """,
-                        ctx.guild.id, PC.MAX_LEVEL
-                    )
-                    rows_list = [(r["user_id"], r["level"], r["exp"]) for r in rows]
-                    lb_log(f"Query done, rows={len(rows_list)}")
-                    return rows_list
+                rows_list = await self.repo.get_leaderboard_rows(ctx.guild.id, 10)
+                lb_log(f"Query done, rows={len(rows_list)}")
+                return rows_list
             except Exception as e:
                 lb_log(f"DB query failed: {e}")
-                return None
-
-        async def render_image(rows_data):
-            lb_log(f"Render start (rows={len(rows_data)})")
-            exp_icon_path = os.path.join(EMOJI_PATH, "EXP.png")
-            loop = asyncio.get_running_loop()
-            cache_key_inner = str(ctx.guild.id)
-            try:
-                return await asyncio.wait_for(
-                    loop.run_in_executor(
-                        self._process_pool,
-                        render_leaderboard_in_process,
-                        rows_data,
-                        exp_icon_path,
-                        cache_key_inner,
-                        PC.LEADERBOARD_CACHE_TTL,
-                    ),
-                    timeout=20.0
-                )
-            except asyncio.TimeoutError:
-                lb_log("Render timed out — retrying")
-                try:
-                    return await asyncio.wait_for(
-                        loop.run_in_executor(
-                            self._process_pool,
-                            render_leaderboard_in_process,
-                            rows_data,
-                            exp_icon_path,
-                            cache_key_inner,
-                            PC.LEADERBOARD_CACHE_TTL,
-                        ),
-                        timeout=20.0
-                    )
-                except Exception as e:
-                    lb_log(f"Fallback render failed: {e}\n{traceback.format_exc()}")
-                    return None
-            except Exception as e:
-                lb_log(f"Render error: {e}\n{traceback.format_exc()}")
                 return None
 
         rows = await query_rows()
@@ -805,12 +418,18 @@ class Progression(commands.Cog):
             return await self.safe_send(ctx, "No users found in the leaderboard.")
 
         rows_data = await self._build_rows_data(ctx, rows)
-        img_bytes = await render_image(rows_data)
+        exp_icon_path = os.path.join(EMOJI_PATH, "EXP.png")
+        img_bytes = await self.render_manager.render_leaderboard(
+            rows_data, 
+            exp_icon_path, 
+            str(ctx.guild.id)
+        )
+        
         if not img_bytes:
             return await self.safe_send(ctx, "Failed to generate leaderboard image (check logs).")
 
-        user_rank = await self.get_rank(ctx.author.id, ctx.guild.id)
-        user_coins = await self.get_coins(ctx.author.id, ctx.guild.id)
+        user_rank = await self.repo.get_rank(ctx.author.id, ctx.guild.id)
+        user_coins = await self.repo.get_coins(ctx.author.id, ctx.guild.id)
         formatted_coins = format_coins(user_coins)
 
         embed_color = TITLE_COLORS.get(get_title(rows_data[0]["level"]) if rows_data else "Leaderboard",
@@ -862,7 +481,7 @@ class Progression(commands.Cog):
     @commands.guild_only()
     async def profiletheme(self, ctx):
         """Interactive command to change profile theme."""
-        exp, level = await self.get_user(ctx.author.id, ctx.guild.id)
+        exp, level = await self.repo.get_user(ctx.author.id, ctx.guild.id)
         title_name = get_title(level)
         next_exp = 50 * level + 20 * level**2 if level < PC.MAX_LEVEL else None
 
@@ -872,19 +491,22 @@ class Progression(commands.Cog):
         buffer_avatar.seek(0)
         avatar_bytes = buffer_avatar.getvalue()
 
-        theme_name, bg_file, font_color = await self.get_user_theme(ctx.author.id)
+        theme_name, bg_file, font_color = await self.repo.get_user_theme(ctx.author.id)
 
-        img_bytes = await self._render_profile_cached(
-            avatar_bytes,
-            ctx.author.display_name,
-            title_name,
-            level,
-            exp,
-            next_exp,
+        # Create context object
+        render_ctx = RenderContext(
+            avatar_bytes=avatar_bytes,
+            display_name=ctx.author.display_name,
+            title_name=title_name,
+            level=level,
+            exp=exp,
+            next_exp=next_exp,
             bg_file=bg_file,
             theme_name=theme_name,
             font_color=font_color
         )
+
+        img_bytes = await self.render_manager.render_profile(render_ctx)
 
         file = discord.File(io.BytesIO(img_bytes), filename=PC.PROFILE_PNG)
 
@@ -909,9 +531,9 @@ class Progression(commands.Cog):
     async def resetprofiletheme(self, ctx):
         """Reset the user's profile theme to default settings."""
         try:
-            await self.set_user_theme(ctx.author.id, "default", None, "white")
+            await self.repo.set_user_theme(ctx.author.id, "default", None, "white")
 
-            exp, level = await self.get_user(ctx.author.id, ctx.guild.id)
+            exp, level = await self.repo.get_user(ctx.author.id, ctx.guild.id)
             title_name = get_title(level)
             next_exp = 50 * level + 20 * level**2 if level < PC.MAX_LEVEL else None
             avatar_asset = ctx.author.display_avatar.with_size(128)
@@ -920,17 +542,19 @@ class Progression(commands.Cog):
             buffer_avatar.seek(0)
             avatar_bytes = buffer_avatar.getvalue()
 
-            img_bytes = await self._render_profile_cached(
-                avatar_bytes,
-                ctx.author.display_name,
-                title_name,
-                level,
-                exp,
-                next_exp,
+            render_ctx = RenderContext(
+                avatar_bytes=avatar_bytes,
+                display_name=ctx.author.display_name,
+                title_name=title_name,
+                level=level,
+                exp=exp,
+                next_exp=next_exp,
                 bg_file=None,
                 theme_name="default",
                 font_color="white"
             )
+
+            img_bytes = await self.render_manager.render_profile(render_ctx)
 
             file = discord.File(io.BytesIO(img_bytes), filename="profile.png")
             embed = discord.Embed(
@@ -974,16 +598,16 @@ class Progression(commands.Cog):
                 return
             self._fallback_cooldowns[cooldown_key] = now
 
-        exp, level = await self.get_user(user_id, guild_id)
+        exp, level = await self.repo.get_user(user_id, guild_id)
         old_level = level
 
         exp_gain = random.randint(5 + level * 8, 10 + level * 12)
-        level, new_exp, leveled_up = await self.add_exp(user_id, guild_id, exp_gain)
+        level, new_exp, leveled_up = await self.repo.add_exp(user_id, guild_id, exp_gain)
 
         if leveled_up:
             await self.announce_level_up(guild_id, user_id, level, old_level, message.channel)
-            old_rank = await self.get_rank_for(guild_id, old_level, exp)
-            new_rank = await self.get_rank_for(guild_id, level, new_exp)
+            old_rank = await self.repo.get_rank_for(guild_id, old_level, exp)
+            new_rank = await self.repo.get_rank_for(guild_id, level, new_exp)
             if new_rank < old_rank:
                 embed = discord.Embed(
                     title=f"{CustomEmojis['UPWARDARROW']} Rank Up! {message.author.display_name}",
@@ -992,41 +616,6 @@ class Progression(commands.Cog):
                 )
                 embed.set_thumbnail(url=message.author.display_avatar.url)
                 await message.channel.send(embed=embed)
-
-    # THIS IS A TESTING LISTENER TO ADD EXP/COINS TO SPECIFIC USERS ON BOT STARTUP TO VERIFY FUNCTIONALITY REMOVE OR COMMENT OUT FOR PRODUCTION USE
-    # @commands.Cog.listener()
-    # async def on_ready(self):
-    #     """
-    #     Development helper that seeds EXP/coins for a predefined list of users on startup.
-    #     """
-    #     print(f"{self.bot.user} is ready!")
-    
-    #     YOUR_ID = [
-    #         955268891125375036, 550201320074903563, 872679412573802537,
-    #         1016489027211378719, 849510586568015923, 905752774497685554,
-    #         848525048201478184, 609614026573479936, 736068611017539585,
-    #         592632082841337857, 757192501831663627, 489068781705101335,
-    #         696014510367965275, 669515429823381505
-    #     ]
-    
-    #     GUILD_ID = 974498807817588756
-    
-    #     progression = self.bot.get_cog("Progression")
-    #     if not progression:
-    #         print("Progression cog not loaded!")
-    #         return
-    
-    #     rand_exp = random.randint(1, 10000)
-    #     for user_id in YOUR_ID:
-    #         level, exp, leveled_up = await self.add_exp(user_id, GUILD_ID, rand_exp)
-    #         print(f"User {user_id} → Level {level}, EXP {exp}, Leveled up? {leveled_up}")
-    
-    #         await progression.add_coins(user_id, GUILD_ID, 100)
-    #         coins = await progression.get_coins(user_id, GUILD_ID)
-    #         print(f"User {user_id} → Coins: {coins}")
-    
-    #     first_user = YOUR_ID[0]
-    #     print(f"🎉 First user {first_user} now has Level {level}, EXP {exp}, Coins {coins}. Leveled up? {leveled_up}")
 
 async def setup(bot):
     await bot.add_cog(Progression(bot))

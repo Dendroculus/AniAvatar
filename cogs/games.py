@@ -9,9 +9,9 @@ from itertools import cycle
 from abc import ABC, abstractmethod
 from typing import Dict, List, Any
 
-from utils.animeAPI import fetch_random_character, build_character_select_options
-from utils.gameTexts import random_win_message, random_lose_message, compute_rewards, award_rewards
-from utils.discordHelpers import create_same_choices
+from utils.anime_api import fetch_random_character, build_character_select_options
+from utils.game_texts import random_win_message, random_lose_message, compute_rewards, award_rewards
+from utils.discord_helpers import create_same_choices
 from constants.emojis import CustomEmojis
 
 """

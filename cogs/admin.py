@@ -1,8 +1,8 @@
 import discord
 from discord.ext import commands
 from discord import app_commands
-from utils.discordHelpers import create_choices
-from utils.announceModal import AnnounceModal
+from utils.discord_helpers import create_choices
+from utils.announce_modal import AnnounceModal
 
 """
 Purpose:

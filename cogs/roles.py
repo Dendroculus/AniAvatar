@@ -4,7 +4,7 @@ from collections import defaultdict
 from typing import Optional, List, Dict
 import discord
 from discord.ext import commands, tasks
-from utils.progression.profileCards import get_title, TITLE_COLORS
+from utils.progression.profile_cards import get_title, TITLE_COLORS
 from constants.configs import RolesConstants as RC
 
 class Roles(commands.Cog):

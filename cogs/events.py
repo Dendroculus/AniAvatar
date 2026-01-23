@@ -3,7 +3,7 @@ import random
 import discord
 from discord.ext import commands, tasks
 
-from utils.pollingsDB import (
+from utils.pollings_db import (
     init_db,
     load_active_polls,
     purge_finished_polls,

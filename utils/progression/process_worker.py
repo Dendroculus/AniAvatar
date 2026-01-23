@@ -1,6 +1,6 @@
 import asyncpg
 from typing import Any, Optional, Iterable
-from utils.progression.profileCards import ImageRenderer
+from utils.progression.profile_cards import ImageRenderer
 from constants.configs import FONTS, TITLE_EMOJI_FILES, ProgressionConstants as PC
 
 _PROCESS_CONTEXT: dict[str, Any] = {}

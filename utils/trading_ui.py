@@ -14,17 +14,6 @@ and using items.
 def format_coins(coins: int) -> str:
     """
     Format a coin integer into a compact human-readable string.
-
-    Examples:
-        532 -> "532"
-        12500 -> "12.5K"
-        2000000 -> "2M"
-
-    Args:
-        coins (int): The number of coins.
-
-    Returns:
-        str: A formatted string with K/M/B suffixes.
     """
     if coins < 1_000:
         return str(coins)
@@ -39,14 +28,6 @@ def format_coins(coins: int) -> str:
 class CloseButton(discord.ui.Button):
     """
     A reusable 'Close' button for shop and inventory views.
-
-    Args:
-        owner_id (int): ID of the user who owns the menu.
-        close_text (str): Message to display upon closing.
-        label (str): Text on the button.
-        menu_type (str): "shop" or "inventory" for state management.
-        cog (commands.Cog): Reference to the Trading cog.
-        guild_id (int): ID of the guild.
     """
     def __init__(self, owner_id: int, close_text: str, label: str = "Close", menu_type: str = None, cog=None, guild_id: int = None):
         self.guild_id = guild_id
@@ -77,13 +58,6 @@ class CloseButton(discord.ui.Button):
 class InventorySelect(discord.ui.Select):
     """
     A dropdown menu for selecting and using inventory items.
-
-    Args:
-        cog (commands.Cog): Reference to the Trading cog.
-        user_id (int): ID of the inventory owner.
-        guild_id (int): ID of the guild.
-        items (list): List of item tuples (name, qty, emoji).
-        parent_view (discord.ui.View): Parent view for timer resets.
     """
     def __init__(self, cog, user_id, guild_id, items, parent_view):
         self.cog = cog
@@ -121,43 +95,28 @@ class InventorySelect(discord.ui.Select):
         try:
             selected_item = self.values[0]
             await interaction.response.defer()
-            # Use bot.pool directly
-            pool = self.cog.bot.pool
+            
+            repo = self.cog.trading_repo
+            
+            # Fetch item emoji for feedback
+            details = await repo.get_item_details(selected_item)
+            selected_emoji = details["emoji"] if details else "📦"
 
-            async with pool.acquire() as conn:
-                await self.cog._set_stmt_timeout(conn)
-                row = await conn.fetchrow(TC.SQL_SELECT_PRICE_EMOJI, selected_item)
-                selected_emoji = row["emoji"] if row and row["emoji"] else "📦"
+            # Check level cap for potions BEFORE consuming
+            if selected_item in TC.POTION_ITEMS:
+                # Use economy service (passed as progression_cog in ShopView, but here self.cog is Trading)
+                # self.cog.economy_service gives access to user data
+                exp, level = await self.cog.user_repo.get_user(self.user_id, self.guild_id)
+                if level >= PC.MAX_LEVEL:
+                    await interaction.followup.send(f"{MinoriEmojis['MinoriWink']} You’ve already reached the max level! You can’t use {TC.EXP_EMOJI} items anymore.", ephemeral=True)
+                    return
 
-                # Atomic decrement
-                async with conn.transaction():
-                    deducted = await conn.fetchrow(
-                        """
-                        UPDATE user_inventory
-                        SET quantity = quantity - 1
-                        WHERE user_id = $1 AND guild_id = $2 AND item_name = $3 AND quantity > 0
-                        RETURNING quantity
-                        """,
-                        self.user_id, self.guild_id, selected_item
-                    )
-                    if not deducted:
-                        await interaction.followup.send("❌ You don't own this item anymore.", ephemeral=True)
-                        return
-
-                    if selected_item in TC.POTION_ITEMS:
-                        row_lvl = await conn.fetchrow(
-                            "SELECT level FROM users WHERE user_id = $1 AND guild_id = $2",
-                            self.user_id, self.guild_id
-                        )
-                        if row_lvl and row_lvl["level"] >= PC.MAX_LEVEL:
-                            await interaction.followup.send(f"{MinoriEmojis['MinoriWink']} You’ve already reached the max level! You can’t use {TC.EXP_EMOJI} items anymore.", ephemeral=True)
-                            return
-
-                    if deducted["quantity"] <= 0:
-                        await conn.execute(
-                            "DELETE FROM user_inventory WHERE user_id = $1 AND guild_id = $2 AND item_name = $3",
-                            self.user_id, self.guild_id, selected_item
-                        )
+            # Use item via Repository (Handles SQL UPDATE/DELETE)
+            new_qty = await repo.use_item(self.user_id, self.guild_id, selected_item)
+            
+            if new_qty is None:
+                await interaction.followup.send("❌ You don't own this item anymore.", ephemeral=True)
+                return
 
             feedback_msg = f"You used {selected_emoji} **{selected_item}**!"
 
@@ -173,28 +132,16 @@ class InventorySelect(discord.ui.Select):
                 rewards = await self.cog.apply_mystery_box(self.user_id, self.guild_id)
                 if rewards:
                     reward_lines = []
-                    # fetch emojis mapping
-                    async with pool.acquire() as conn:
-                        await self.cog._set_stmt_timeout(conn)
-                        emap_rows = await conn.fetch("SELECT name, emoji FROM shop_items")
-                        emap = {r["name"]: r["emoji"] for r in emap_rows}
+                    # We need to look up emojis for the rewards
+                    # Optimization: create a small map or fetch individually
                     for item, qty in rewards:
-                        emoji = emap.get(item, "📦")
-                        reward_lines.append(f"{qty}x {emoji} {item}")
+                        d = await repo.get_item_details(item)
+                        em = d["emoji"] if d else "📦"
+                        reward_lines.append(f"{qty}x {em} {item}")
                     feedback_msg = f"{ShopEmojis['MysteryBox']} You opened a {TC.MYSTERY_BOX_NAME} and got:\n" + "\n".join(reward_lines)
 
-            # reload inventory
-            async with pool.acquire() as conn:
-                await self.cog._set_stmt_timeout(conn)
-                raw_items = await conn.fetch(TC.SQL_USER_INV_SELECT, self.user_id, self.guild_id)
-
-                items = []
-                for name, qty in raw_items:
-                    if qty <= 0:
-                        continue
-                    erow = await conn.fetchrow("SELECT emoji FROM shop_items WHERE name = $1", name)
-                    emoji = erow["emoji"] if erow else "📦"
-                    items.append((name, qty, emoji))
+            # Reload inventory for the UI update
+            items = await repo.get_user_inventory(self.user_id, self.guild_id)
 
             if not items:
                 await interaction.edit_original_response(embed=None, view=None, content="🧯 Your inventory is now empty.")
@@ -220,13 +167,6 @@ class InventorySelect(discord.ui.Select):
 class InventoryView(discord.ui.View):
     """
     A view presenting the user's inventory with auto-timeout logic.
-
-    Args:
-        cog (commands.Cog): Reference to the Trading cog.
-        user_id (int): ID of the inventory owner.
-        guild_id (int): ID of the guild.
-        items (list): List of item tuples.
-        timeout (int): Seconds until auto-close.
     """
     def __init__(self, cog, user_id, guild_id, items, timeout=180):
         super().__init__(timeout=None) 
@@ -271,13 +211,6 @@ class InventoryView(discord.ui.View):
 class ShopSelect(discord.ui.Select):
     """
     A dropdown menu for purchasing items from the shop.
-
-    Args:
-        progression_cog (commands.Cog): Reference to Progression cog.
-        user_id (int): ID of the buyer.
-        guild_id (int): ID of the guild.
-        options (list): List of SelectOptions.
-        parent_view (discord.ui.View): Parent ShopView.
     """
     def __init__(self, progression_cog, user_id, guild_id, options, parent_view):
         self.progression_cog = progression_cog
@@ -310,45 +243,34 @@ class ShopSelect(discord.ui.Select):
 
         try:
             selected_item = self.values[0]
-            # Use bot.pool directly from the progression cog's bot instance
-            pool = self.progression_cog.bot.pool
+            # Access Repo via Parent Cog
+            repo = self.parent_view.parent_cog.trading_repo
 
-            async with pool.acquire() as conn:
-                await self.parent_view.parent_cog._set_stmt_timeout(conn)
-                row = await conn.fetchrow(TC.SQL_SELECT_PRICE_EMOJI, selected_item)
+            # Fetch Price/Emoji via Repo
+            details = await repo.get_item_details(selected_item)
 
-            if not row:
+            if not details:
                 await interaction.followup.send("❌ This item no longer exists in the shop.", ephemeral=True)
                 return
-            price, selected_emoji = row["price"], row["emoji"]
-
-            NOT_ENOUGH_COINS_MSG = "❌ You don't have enough coins, nothing purchased."
+            price, selected_emoji = details["price"], details["emoji"]
+            
+            # Check coins using the wrapper passed in __init__ (EconomyServiceWrapper)
             coins = await self.progression_cog.get_coins(self.user_id, self.guild_id)
             if coins < price:
-                await interaction.followup.send(NOT_ENOUGH_COINS_MSG, ephemeral=True)
+                await interaction.followup.send(TC.NOT_ENOUGH_COINS_MSG, ephemeral=True)
                 return
 
             ok = await self.progression_cog.remove_coins(self.user_id, self.guild_id, price)
             if not ok:
-                await interaction.followup.send(NOT_ENOUGH_COINS_MSG, ephemeral=True)
+                await interaction.followup.send(TC.NOT_ENOUGH_COINS_MSG, ephemeral=True)
                 return
 
-            async with pool.acquire() as conn:
-                await self.parent_view.parent_cog._set_stmt_timeout(conn)
-                async with conn.transaction():
-                    await conn.execute(
-                        """
-                        INSERT INTO user_inventory (user_id, guild_id, item_name, quantity)
-                        VALUES ($1, $2, $3, 1)
-                        ON CONFLICT(user_id, guild_id, item_name) DO UPDATE SET quantity = user_inventory.quantity + 1
-                        """,
-                        self.user_id, self.guild_id, selected_item
-                    )
+            # Add Item via Repo
+            await repo.add_item(self.user_id, self.guild_id, selected_item, 1)
 
+            # Refresh Data
             new_balance = await self.progression_cog.get_coins(self.user_id, self.guild_id)
-            async with pool.acquire() as conn:
-                await self.parent_view.parent_cog._set_stmt_timeout(conn)
-                items = await conn.fetch("SELECT name, price, emoji FROM shop_items")
+            items = await repo.get_shop_items()
 
             embed = discord.Embed(
                 title="🛒 Minori Bargains",
@@ -388,14 +310,6 @@ class ShopSelect(discord.ui.Select):
 class ShopView(discord.ui.View):
     """
     A view for the shop interface, managing timeouts and close logic.
-
-    Args:
-        progression_cog (commands.Cog): Reference to Progression cog.
-        user_id (int): ID of the user.
-        guild_id (int): ID of the guild.
-        options (list): List of initial select options.
-        parent_cog (commands.Cog): Reference to Trading cog.
-        timeout (int): Seconds until auto-close.
     """
     def __init__(self, progression_cog, user_id, guild_id, options, parent_cog, timeout=180):
         super().__init__(timeout=None) 

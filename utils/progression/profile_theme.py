@@ -3,7 +3,7 @@ import os
 import io
 from constants.configs import ProgressionConstants as PC, BG_PATH
 from constants.emojis import MinoriEmojis
-from utils.progression.profileCards import get_title
+from utils.progression.profile_cards import get_title
 
 class MainThemeSelect(discord.ui.Select):
     """
