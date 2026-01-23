@@ -89,6 +89,7 @@ class Minori(commands.AutoShardedBot):
             "cogs.errors",
             "cogs.trading",
             "cogs.admin",
+            "utils.dev_commands"
         ]
         for ext in extensions:
             try:

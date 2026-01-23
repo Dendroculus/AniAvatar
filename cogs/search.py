@@ -4,7 +4,7 @@ from discord.ui import View, Select
 import aiohttp
 from collections import OrderedDict, deque
 
-from utils.animeAPI import (
+from utils.anime_api import (
     fetch_character_by_name,
     char_has_anime_media,
     is_image_url_ok,

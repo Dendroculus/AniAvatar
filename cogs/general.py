@@ -7,12 +7,18 @@ class DeleteView(ui.View):
     def __init__(self, user, timeout = None):
         super().__init__(timeout=timeout)
         self.user = user
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        """
+        Ensure only the user who invoked the command can use the controls.
+        """
+        if interaction.user.id != self.user.id:
+            await interaction.response.send_message("You can't delete someone else's message.", ephemeral=True)
+            return False
+        return True
         
     @discord.ui.button(label="Delete", style=ButtonStyle.danger)
     async def delete(self, interaction: discord.Interaction, _: discord.ui.Button): # _ is the button instance to avoid unused variable warning
-        if interaction.user.id != self.user.id:
-            return await interaction.response.send_message("You can't delete someone else's message.", ephemeral=True)
-        
         await interaction.response.defer()
         try:
             await interaction.message.delete()

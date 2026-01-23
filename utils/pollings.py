@@ -9,7 +9,7 @@ from discord.ext import commands
 from constants.emojis import MinoriEmojis, CustomEmojis
 from constants.configs import PollingConstants as POLCONST
 
-from utils.pollingsDB import (
+from utils.pollings_db import (
     PollData,
     save_active_poll,
     upsert_vote,

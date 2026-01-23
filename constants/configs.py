@@ -60,7 +60,7 @@ class TradingConstants:
     Constants used in the Trading Cog for managing in-game item trading,
      including SQL statements and item definitions.
     """
-    
+    NOT_ENOUGH_COINS_MSG = "❌ You don't have enough coins, nothing purchased."
     SHOP_ICON_URL = "https://cdn.discordapp.com/emojis/1415555390489366680.png"
     MYSTERY_BOX_NAME = "Mystery Box"
     SMALL_EXP_POTION = "Small EXP Potion"
