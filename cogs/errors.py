@@ -2,7 +2,7 @@ from discord.ext import commands
 from discord import app_commands, Interaction
 import discord
 import aiohttp
-import traceback
+import logging
 
 from constants.emojis import CustomEmojis
 
@@ -28,6 +28,8 @@ Notes for maintainers:
 - When extending this handler, prefer adding specific exception branches above the generic
   logging block so that the user gets the most helpful message possible.
 """
+
+logger = logging.getLogger(__name__)
 
 class ErrorHandler(commands.Cog):
     """
@@ -56,10 +58,10 @@ class ErrorHandler(commands.Cog):
             else:
                 # Fallback for legacy prefix commands: plain ctx.send
                 await ctx.send(message)
-        except (discord.Forbidden, discord.HTTPException):
+        except (discord.Forbidden, discord.HTTPException) as e:
             # Suppress delivery failures: we cannot reliably inform the user, and attempting
-            # to do so often raises the same error (e.g., missing channel send perms).
-            pass
+            # to do so often raises the same error. Log it for debugging.
+            logger.warning(f"Failed to send error response to context: {e}")
 
     async def _respond_interaction(self, interaction: Interaction, message: str, ephemeral: bool = True):
         """
@@ -74,9 +76,9 @@ class ErrorHandler(commands.Cog):
                 await interaction.response.send_message(message, ephemeral=ephemeral)
             else:
                 await interaction.followup.send(message, ephemeral=ephemeral)
-        except (discord.Forbidden, discord.HTTPException):
-            # Silently ignore inability to deliver error messages.
-            pass
+        except (discord.Forbidden, discord.HTTPException) as e:
+            # Silently ignore inability to deliver error messages, but log it.
+            logger.warning(f"Failed to send error response to interaction: {e}")
 
     @commands.Cog.listener()
     async def on_command_error(self, ctx, error):
@@ -111,11 +113,7 @@ class ErrorHandler(commands.Cog):
         if isinstance(err, (aiohttp.ClientOSError, aiohttp.ServerDisconnectedError, aiohttp.ClientPayloadError)):
             # These errors often indicate upstream network instability; surface a retry suggestion.
             await self._respond_ctx(ctx, "⚠️ Network hiccup — couldn’t complete your request. Try again in a moment.", ephemeral=True)
-            if hasattr(self.bot, "logger"):
-                # Use warning level because the failure is external and often transient.
-                self.bot.logger.warning(f"Network-related error in '{ctx.command}': {err}")
-            else:
-                print(f"Network-related error in '{ctx.command}': {err}")
+            logger.warning(f"Network-related error in '{ctx.command}': {err}")
             return
 
         if isinstance(err, commands.MissingPermissions):
@@ -141,14 +139,15 @@ class ErrorHandler(commands.Cog):
         if isinstance(err, commands.CommandNotFound):
             # Silently ignore command-not-found to emulate Discord's default behavior for unknown commands.
             return
+        
+        # Explicitly ignore CheckFailures that aren't MissingPermissions (e.g. custom decorators).
+        # This prevents "Unexpected error" logs when a command's local error handler has likely already dealt with it,
+        # or when we simply want to silence the failure.
+        if isinstance(err, commands.CheckFailure):
+            return
 
         # Unhandled exceptions: log full traceback and inform the user generically.
-        if hasattr(self.bot, "logger"):
-            self.bot.logger.exception(f"Unhandled error in '{ctx.command}': {error}")
-        else:
-            print(f"Unhandled error in '{ctx.command}': {error}")
-            traceback.print_exception(type(error), error, error.__traceback__)
-
+        logger.exception(f"Unhandled error in '{ctx.command}': {error}")
         await self._respond_ctx(ctx, "❌ An unexpected error occurred while processing that command.", ephemeral=True)
 
     @commands.Cog.listener()
@@ -170,12 +169,8 @@ class ErrorHandler(commands.Cog):
         if isinstance(error, app_commands.CommandInvokeError):
             # Surface a simple failure message to the user but log the detailed exception.
             await self._respond_interaction(interaction, "❌ Something went wrong with this slash command.", ephemeral=True)
-            if hasattr(self.bot, "logger"):
-                # Log the original exception to preserve stack and context for debugging.
-                self.bot.logger.error("Slash command error", exc_info=getattr(error, "original", error))
-            else:
-                orig = getattr(error, "original", error)
-                traceback.print_exception(type(orig), orig, orig.__traceback__)
+            # Log the original exception to preserve stack and context for debugging.
+            logger.error("Slash command error", exc_info=getattr(error, "original", error))
             return
 
         if isinstance(error, app_commands.TransformerError):
@@ -185,10 +180,7 @@ class ErrorHandler(commands.Cog):
 
         # Fallback for any other unhandled app command errors.
         await self._respond_interaction(interaction, "❌ An unexpected slash command error occurred.", ephemeral=True)
-        if hasattr(self.bot, "logger"):
-            self.bot.logger.error("Unhandled slash error", exc_info=error)
-        else:
-            traceback.print_exception(type(error), error, error.__traceback__)
+        logger.error("Unhandled slash error", exc_info=error)
 
 async def setup(bot):
     await bot.add_cog(ErrorHandler(bot))
