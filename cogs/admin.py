@@ -17,10 +17,17 @@ Design considerations:
   diagnose permission or delivery issues without spamming public channels.
 """
 
+def is_admin():
+    """
+    Custom check decorator to ensure the user has manage_guild permissions.
+    """
+    def predicate(ctx: commands.Context) -> bool:
+        return ctx.author.guild_permissions.manage_guild
+    return commands.check(predicate)
+
 class Admin(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
-
 
     async def _deny(self, ctx: commands.Context, message: str) -> None:
         """
@@ -36,12 +43,7 @@ class Admin(commands.Cog):
         Returns:
             None
         """
-        if ctx.interaction and not ctx.interaction.response.is_done():
-            await ctx.interaction.response.send_message(message, ephemeral=True)
-        elif ctx.interaction:
-            await ctx.interaction.followup.send(message, ephemeral=True)
-        else:
-            await ctx.reply(message, mention_author=False)
+        await ctx.send(message, ephemeral=True, mention_author=False)
             
     @commands.hybrid_command(
         name="announce",
@@ -53,6 +55,7 @@ class Admin(commands.Cog):
     )
     @app_commands.choices(mention=create_choices({"Yes": "yes", "No" : "no"}))
     @commands.guild_only()
+    @is_admin()
     async def announce(self, ctx: commands.Context, mention: app_commands.Choice[str], channel: discord.TextChannel):
         """
         Open an announcement modal for authorized users.
@@ -63,9 +66,6 @@ class Admin(commands.Cog):
         - When invoked as a slash command (interaction present) a Modal is presented so the admin
           can compose multi-line announcements; legacy prefix usage is redirected to the slash form.
         """
-        if not ctx.author.guild_permissions.manage_guild:
-            return await self._deny(ctx, "❌ You don’t have permission to use this command.")
-
         mention_bool = mention.value == "yes"
 
         if ctx.interaction:
@@ -76,6 +76,14 @@ class Admin(commands.Cog):
             ctx,
             "❌ Please use the slash version of this command to open the modal."
         )
+
+    @announce.error
+    async def announce_error(self, ctx: commands.Context, error: commands.CommandError):
+        """
+        Local error handler for the announce command to handle permission check failures.
+        """
+        if isinstance(error, commands.CheckFailure):
+            await self._deny(ctx, "❌ You don’t have permission to use this command.")
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(Admin(bot))
