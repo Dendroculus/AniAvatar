@@ -8,7 +8,7 @@ and interactions.
 from typing import TypeVar
 from discord import app_commands
 
-T = TypeVar("T")
+T = TypeVar("T", str, int, float)
 
 def create_choices(choices_dict: dict[str, T]) -> list[app_commands.Choice[T]]:
     """
@@ -41,4 +41,3 @@ def create_same_choices(choices_list: list[T]) -> list[app_commands.Choice[T]]:
         app_commands.Choice(name=choice, value=choice) 
         for choice in choices_list
         ]
-
