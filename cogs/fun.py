@@ -439,10 +439,6 @@ class Fun(commands.Cog):
             await self._send(ctx, interaction, "❌ Invalid bet amount.", ephemeral=True)
             return
 
-        view_obj = self._get_active_view(guild_id, user_id)
-        if view_obj:
-            view_obj.reset_timeout()
-
         pre_balance = await progression_cog.get_coins(user_id, guild_id)
         reserved = await progression_cog.reserve_coins(user_id, guild_id, amount)
         if not reserved:
