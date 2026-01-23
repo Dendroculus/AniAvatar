@@ -3,17 +3,18 @@ from typing import Any, Optional, Iterable
 from utils.progression.profile_cards import ImageRenderer
 from constants.configs import FONTS, TITLE_EMOJI_FILES, ProgressionConstants as PC
 
-_PROCESS_CONTEXT: dict[str, Any] = {}
+# Module-level global to hold the renderer instance within the worker process.
+# This replaces the dictionary context to ensure explicit state handling
+# compatible with 'spawn' multiprocessing contexts.
+_renderer: Optional[ImageRenderer] = None
 
 def initialize_worker_safe(cache_size: int):
     """
-    Runs ONCE per ProcessPoolExecutor worker. Initializes and caches the 
-    ImageRenderer instance in the process-local _PROCESS_CONTEXT dictionary.
-    
-    Avoids using the 'global' keyword by leveraging the process-local scope 
-    of the top-level dictionary.
+    Runs ONCE per ProcessPoolExecutor worker via the initializer argument.
+    Initializes the global ImageRenderer instance for this process.
     """
-    _PROCESS_CONTEXT["renderer"] = ImageRenderer(cache_size=cache_size)
+    global _renderer
+    _renderer = ImageRenderer(cache_size=cache_size)
     
 def render_profile_in_process(
     avatar_bytes: bytes,
@@ -28,12 +29,13 @@ def render_profile_in_process(
     user_rank: Optional[int],
 ) -> Optional[bytes]:
     """
-    Render a profile image in a separate process to bypass the GIL.
-    A fresh ImageRenderer is created per worker process to keep state isolated.
+    Render a profile image in a separate process.
+    Uses the pre-initialized global renderer to avoid pickling the renderer instance.
     """
-    renderer = _PROCESS_CONTEXT["renderer"] # Renderer is guaranteed to exist by the initializer
-    
-    return renderer.render_profile_image(
+    if _renderer is None:
+        raise RuntimeError("Worker process not initialized with ImageRenderer.")
+
+    return _renderer.render_profile_image(
         avatar_bytes,
         display_name,
         title_name,
@@ -56,12 +58,12 @@ def render_leaderboard_in_process(
     cache_ttl: int,
 ) -> Optional[bytes]:
     """
-    Render a leaderboard image in a separate process. A renderer instance is created
-    inside the worker so Pillow runs outside the main event loop, leveraging multiple cores.
+    Render a leaderboard image in a separate process using the global renderer.
     """
-    renderer = _PROCESS_CONTEXT["renderer"]
-    
-    return renderer.create_leaderboard_image(
+    if _renderer is None:
+        raise RuntimeError("Worker process not initialized with ImageRenderer.")
+
+    return _renderer.create_leaderboard_image(
         rows=list(rows_data),
         fonts=FONTS,
         exp_icon_path=exp_icon_path,
