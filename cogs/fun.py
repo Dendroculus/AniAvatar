@@ -7,7 +7,7 @@ import json
 import os
 import time
 from itertools import cycle
-from typing import Dict, Optional, Any
+from typing import Dict, Optional, Any, List
 from utils.pollings import PollInputModal
 from constants.emojis import MinoriEmojis, ShopEmojis
 from constants.configs import FunConstants as FC, ExternalAPIs as EC
@@ -26,8 +26,9 @@ Purpose:
 
 Design and operational notes (important):
 - Concurrency: GambleView instances are tied to a guild_id,user_id pair and tracked in
-  self.active_views to ensure only one view per user exists. Access to quote selection
-  and other small shared state is protected by an asyncio.Lock where appropriate.
+  self.active_views to ensure only one view per user exists.
+- Quote Management: Quote loading and balancing logic is encapsulated in QuoteManager.
+  File I/O is performed asynchronously in cog_load to avoid blocking the event loop.
 - Safety: The gambling flow reserves coins before attempting to settle a wager. On
   downstream errors the code attempts to refund or partially refund bets where possible.
 - UX: The cog favors ephemeral responses for errors and uses interaction response/followup
@@ -35,35 +36,29 @@ Design and operational notes (important):
 - Network: API calls (waifu) use self.bot.session to prevent socket exhaustion.
 """
 
-class Fun(commands.Cog):
+class QuoteManager:
     """
-    Fun cog providing entertainment commands.
-
-    Responsibilities:
-    - Manage interactive gambling sessions (GambleView lifecycle).
-    - Handle thread-safe anime quote retrieval.
-    - Perform API-based image fetching using the shared bot session.
-    - Provide poll creation utilities.
+    Manages loading and retrieving anime quotes with balancing logic.
     """
     def __init__(self, bot):
         self.bot = bot
-        # Maps (guild_id, user_id) -> GambleView instance
-        self.active_views: Dict[int, Dict[int, "GambleView"]] = {}
-        
-        # Concurrency lock for file/data access
-        self.lock = asyncio.Lock()
-        
-        # Internal tracking for gambling session limits
-        self._gamble_counts: Dict[tuple, int] = {}
-        self._gamble_cooldowns: Dict[tuple, float] = {}
-
-        # Load quotes from local JSON file
         self.data_path = os.path.join(os.path.dirname(__file__), "..", "data", "quotes.json")
-        try:
-            with open(self.data_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-        except FileNotFoundError:
-            data = {}
+        self.quotes_dict: Dict[str, List[Dict[str, str]]] = {"Mixed": []}
+        self.used_quotes = set()
+        self.lock = asyncio.Lock()
+
+    async def load_quotes(self):
+        """
+        Load quotes from JSON file asynchronously to avoid blocking the event loop.
+        """
+        def _read_json():
+            try:
+                with open(self.data_path, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            except FileNotFoundError:
+                return {}
+
+        data = await self.bot.loop.run_in_executor(None, _read_json)
 
         if isinstance(data, dict):
             self.quotes_dict = data
@@ -72,7 +67,68 @@ class Fun(commands.Cog):
         else:
             self.quotes_dict = {"Mixed": []}
 
-        self.used_quotes = set()
+    async def get_balanced_quotes(self, num_quotes: int) -> List[Dict[str, Any]]:
+        """
+        Select a balanced set of random quotes, avoiding immediate repetition.
+        Thread-safe.
+        
+        Args:
+            num_quotes (int): Number of quotes to retrieve.
+
+        Returns:
+            list: A list of quote dictionaries containing 'anime', 'character', and 'quote'.
+        """
+        async with self.lock:
+            titles = list(self.quotes_dict.keys())
+            if not titles:
+                return []
+
+            random.shuffle(titles)
+            quotes = []
+            title_cycle = cycle(titles)
+
+            while len(quotes) < num_quotes:
+                title = next(title_cycle)
+                cat_list = self.quotes_dict.get(title, [])
+                available = [q for q in cat_list if q.get("quote") and q["quote"] not in self.used_quotes]
+                if available:
+                    q = random.choice(available)
+                    self.used_quotes.add(q["quote"])
+                    quotes.append({"anime": title, **q})
+
+                total_quotes = sum(len(qs) for qs in self.quotes_dict.values())
+                if total_quotes and len(self.used_quotes) >= total_quotes:
+                    self.used_quotes.clear()
+
+            return quotes
+
+class Fun(commands.Cog):
+    """
+    Fun cog providing entertainment commands.
+
+    Responsibilities:
+    - Manage interactive gambling sessions (GambleView lifecycle).
+    - Handle thread-safe anime quote retrieval via QuoteManager.
+    - Perform API-based image fetching using the shared bot session.
+    - Provide poll creation utilities.
+    """
+    def __init__(self, bot):
+        self.bot = bot
+        # Maps (guild_id, user_id) -> GambleView instance
+        self.active_views: Dict[int, Dict[int, "GambleView"]] = {}
+        
+        # Internal tracking for gambling session limits
+        self._gamble_counts: Dict[tuple, int] = {}
+        self._gamble_cooldowns: Dict[tuple, float] = {}
+
+        # Quote Manager instance
+        self.quote_manager = QuoteManager(bot)
+
+    async def cog_load(self):
+        """
+        Async initialization to load quotes without blocking.
+        """
+        await self.quote_manager.load_quotes()
 
     async def _send(
         self,
@@ -162,43 +218,6 @@ class Fun(commands.Cog):
     def _get_active_view(self, guild_id: int, user_id: int) -> Optional[GambleView]:
         """Retrieve the active GambleView for a user, if one exists."""
         return self.active_views.get(guild_id, {}).get(user_id)
-
-    def get_balanced_quotes(self, num_quotes: int):
-        """
-        Select a balanced set of random quotes, avoiding immediate repetition.
-
-        Iterates through quote categories to ensure variety and uses a 
-        `used_quotes` set to prevent repeating the same quote until all 
-        quotes have been shown.
-
-        Args:
-            num_quotes (int): Number of quotes to retrieve.
-
-        Returns:
-            list: A list of quote dictionaries containing 'anime', 'character', and 'quote'.
-        """
-        titles = list(self.quotes_dict.keys())
-        if not titles:
-            return []
-
-        random.shuffle(titles)
-        quotes = []
-        title_cycle = cycle(titles)
-
-        while len(quotes) < num_quotes:
-            title = next(title_cycle)
-            cat_list = self.quotes_dict.get(title, [])
-            available = [q for q in cat_list if q.get("quote") and q["quote"] not in self.used_quotes]
-            if available:
-                q = random.choice(available)
-                self.used_quotes.add(q["quote"])
-                quotes.append({"anime": title, **q})
-
-            total_quotes = sum(len(qs) for qs in self.quotes_dict.values())
-            if total_quotes and len(self.used_quotes) >= total_quotes:
-                self.used_quotes.clear()
-
-        return quotes
 
     @commands.hybrid_command(name="waifu", description="Get a random waifu image")
     @commands.cooldown(1, 5, commands.BucketType.user)
@@ -667,11 +686,11 @@ class Fun(commands.Cog):
         Uses a lock to ensure the 'balanced' quote selection logic 
         (avoiding repeats) remains thread-safe.
         """
-        async with self.lock:
-            result = self.get_balanced_quotes(1)
-            if not result:
-                return await ctx.send("❌ No quotes available.")
-            q = result[0]
+        # Delegated to thread-safe manager
+        results = await self.quote_manager.get_balanced_quotes(1)
+        if not results:
+            return await ctx.send("❌ No quotes available.")
+        q = results[0]
 
         quote_text = q.get("quote", "")[:1900]
         character = q.get("character", "Unknown")

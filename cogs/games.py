@@ -6,6 +6,8 @@ import asyncio
 import json
 import os
 from itertools import cycle
+from abc import ABC, abstractmethod
+from typing import Dict, List, Any
 
 from utils.animeAPI import fetch_random_character, build_character_select_options
 from utils.gameTexts import random_win_message, random_lose_message, compute_rewards, award_rewards
@@ -33,23 +35,74 @@ Design notes (important):
     to centralize leveling/economy rules in one place.
   - The code checks for the Progression cog before attempting to award to avoid
     hard failures when the progression subsystem is not loaded.
-- Data resilience:
-  - Trivia/question pools are read from JSON asynchronously on cog load to prevent
-    blocking the event loop. The cog tracks a used_questions set to reduce immediate repeats.
+- Data resilience (Refactored):
+  - Trivia loading is abstracted behind a TriviaLoader interface.
+  - JsonTriviaLoader handles file I/O and structure normalization asynchronously.
 """
+
+# --- Trivia Data Adapter Interface ---
+
+class TriviaLoader(ABC):
+    """
+    Abstract interface for loading trivia questions.
+    Allows swapping the underlying data source (JSON, DB, API) without changing game logic.
+    """
+    @abstractmethod
+    async def load_data(self) -> Dict[str, List[Dict[str, Any]]]:
+        """
+        Load trivia questions and return them in a normalized dictionary format:
+        {'CategoryName': [{'question': '...', 'answer': '...', 'options': []}, ...]}
+        """
+        pass
+
+class JsonTriviaLoader(TriviaLoader):
+    """
+    Concrete implementation of TriviaLoader for local JSON files.
+    """
+    def __init__(self, file_path: str, loop: asyncio.AbstractEventLoop):
+        self.file_path = file_path
+        self.loop = loop
+
+    async def load_data(self) -> Dict[str, List[Dict[str, Any]]]:
+        def _read_file():
+            try:
+                with open(self.file_path, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            except FileNotFoundError:
+                print(f"[Games] Trivia file not found at {self.file_path}")
+                return {}
+            except json.JSONDecodeError:
+                print(f"[Games] Invalid JSON in {self.file_path}")
+                return {}
+
+        # Offload blocking I/O to executor
+        data = await self.loop.run_in_executor(None, _read_file)
+
+        # Normalize structure to Dict[str, List]
+        if isinstance(data, dict):
+            return data
+        elif isinstance(data, list):
+            return {"Mixed": data}
+        else:
+            return {"Mixed": []}
+
+# --- Games Cog ---
 
 class Games(commands.Cog):
     """
     Games cog: trivia and character-guessing interactions.
 
     Responsibilities:
-    - Load trivia data asynchronously.
+    - Load trivia data asynchronously via TriviaLoader.
     - Present per-question UI, handle user answers, and reward correct responses.
     - Integrate with anime_api to provide image-based character guessing.
     """
     def __init__(self, bot):
         self.bot = bot
-        self.data_path = os.path.join(os.path.dirname(__file__), "..", "data", "trivia.json")
+        
+        # Determine path and initialize the loader adapter
+        data_path = os.path.join(os.path.dirname(__file__), "..", "data", "trivia.json")
+        self.trivia_loader: TriviaLoader = JsonTriviaLoader(data_path, bot.loop)
         
         # Initialize with safe defaults; data is loaded in cog_load
         self.trivia_dict = {"Mixed": []}
@@ -60,27 +113,9 @@ class Games(commands.Cog):
 
     async def cog_load(self):
         """
-        Asynchronously load trivia data from disk to avoid blocking the event loop.
+        Asynchronously load trivia data using the configured loader.
         """
-        def load_trivia_file():
-            try:
-                with open(self.data_path, "r", encoding="utf-8") as f:
-                    return json.load(f)
-            except FileNotFoundError:
-                print(f"[Games] Trivia file not found at {self.data_path}")
-                return {}
-            except json.JSONDecodeError:
-                print(f"[Games] Invalid JSON in {self.data_path}")
-                return {}
-
-        data = await self.bot.loop.run_in_executor(None, load_trivia_file)
-
-        if isinstance(data, dict):
-            self.trivia_dict = data
-        elif isinstance(data, list):
-            self.trivia_dict = {"Mixed": data}
-        else:
-            self.trivia_dict = {"Mixed": []}
+        self.trivia_dict = await self.trivia_loader.load_data()
             
         total_q = sum(len(qs) for qs in self.trivia_dict.values())
         print(f"[Games] Loaded {total_q} trivia questions.")
