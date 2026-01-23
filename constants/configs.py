@@ -120,3 +120,11 @@ class RolesConstants:
         "Cosmic", "Divine", "Eternal", "Enlightened"
     ]
     SYNC_INTERVAL_MINUTES = 720  # 12 hours
+
+class PollingConstants:
+    """
+    Constants used in the Polling Cog for managing polling operations,
+    including timeouts and placeholders.
+    """
+    MODAL_PLACEHOLDER = "Leave empty if not needed"
+    SAFETY_TIMEOUT_MS = 2000 
