@@ -3,7 +3,6 @@ This module contains helper classes and functions for the gambling feature. It d
 """
 
 import discord
-import asyncio
 from typing import Optional, TYPE_CHECKING
 from constants.emojis import ShopEmojis
 from discord.ext import commands
@@ -18,7 +17,7 @@ class GambleView(discord.ui.View):
 
         Lifecycle:
         - Constructed with references to the parent Fun instance and progression cog.
-        - The view maintains a short-lived timeout_task to auto-timeout the UI.
+        - The view uses the native Discord.py timeout mechanism.
         - The view manipulates its own disabled state to prevent double submissions.
         """
         def __init__(
@@ -32,15 +31,13 @@ class GambleView(discord.ui.View):
             initial_coins: Optional[int],
             timeout: int = 120,
         ):
-            super().__init__(timeout=None)
+            super().__init__(timeout=timeout)
             self.fun = fun
             self.ctx = ctx
             self.bot = fun.bot
             self.user_id = user_id
             self.guild_id = guild_id
             self.progression_cog = progression_cog
-            self.timeout_seconds = timeout
-            self.timeout_task: Optional[asyncio.Task] = None
             self.message: Optional[discord.Message] = None
             self.initial_coins = initial_coins
 
@@ -57,8 +54,6 @@ class GambleView(discord.ui.View):
             self.exit_button = discord.ui.Button(label="Exit Gamble", style=discord.ButtonStyle.danger)
             self.exit_button.callback = self.exit_callback
             self.add_item(self.exit_button)
-
-            self.reset_timeout()
 
         def _create_select_options(self):
             """
@@ -82,27 +77,16 @@ class GambleView(discord.ui.View):
             select.callback = self.select_callback
             return select
 
-        def reset_timeout(self):
+        async def on_timeout(self) -> None:
             """
-            Restart the view's inactivity timeout task. Used to extend the UI lifetime
-            after user interactions.
+            Callback invoked when the view times out.
             """
-            if self.timeout_task:
-                self.timeout_task.cancel()
-            self.timeout_task = self.bot.loop.create_task(self._timeout_handler())
-
-        async def _timeout_handler(self):
-            """
-            Background coroutine that marks the view timed-out and clears active view mapping.
-            """
-            await asyncio.sleep(self.timeout_seconds)
             if self.message:
                 try:
                     await self.message.edit(content="❌ Gamble timed out.", embed=None, view=None)
                 except (discord.HTTPException, discord.Forbidden, discord.NotFound):
                     pass
             self.fun._set_active_view(self.guild_id, self.user_id, None)
-            self.stop()
 
         async def _disable_controls(self):
             """
@@ -277,8 +261,6 @@ class GambleView(discord.ui.View):
                 await self.fun._send(self.ctx, interaction, FC.FALSE_GAMBLE_SESSION, ephemeral=True)
                 return
 
-            self.reset_timeout()
-
             value = self._parse_value_from_interaction(interaction)
             if value is None:
                 return await self._send_invalid_selection(interaction)
@@ -297,8 +279,6 @@ class GambleView(discord.ui.View):
                 await self.fun._send(self.ctx, interaction, FC.FALSE_GAMBLE_SESSION, ephemeral=True)
                 return
             self.fun._set_active_view(self.guild_id, self.user_id, None)
-            if self.timeout_task:
-                self.timeout_task.cancel()
             try:
                 if not interaction.response.is_done():
                     await interaction.response.edit_message(content="❌ Gamble exited.", embed=None, view=None)
