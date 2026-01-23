@@ -2,7 +2,8 @@ import discord
 from discord.ext import commands
 from discord.ui import View, Select
 import aiohttp
-from collections import OrderedDict, deque
+from collections import deque
+from async_lru import alru_cache
 
 from utils.anime_api import (
     fetch_character_by_name,
@@ -10,8 +11,10 @@ from utils.anime_api import (
     is_image_url_ok,
     google_image_search,
     first_reachable_image,
+    search_anime,
+    search_characters,
 )
-from constants.configs import GOOGLE_API, GOOGLE_SEARCH_ENGINE, ExternalAPIs as EA
+from constants.configs import GOOGLE_API, GOOGLE_SEARCH_ENGINE
 
 """
 search.py
@@ -19,7 +22,7 @@ search.py
 Provides functionality for searching anime and character data using external APIs
 (AniList, Jikan, Google Images).
 
-Optimized to use the shared bot.session for all HTTP requests.
+Optimized to use the shared bot.session for all HTTP requests and async caching.
 """
 
 class Search(commands.Cog):
@@ -33,36 +36,11 @@ class Search(commands.Cog):
         "pfp", "pfps", "hd", "avatar", "icon", "anime", "wallpaper",
         "image", "picture", "pic", "profile"
     }
-    CACHE_MAX_KEYS = 200
 
     def __init__(self, bot):
         self.bot = bot
-        self._anilist_cache: OrderedDict[str, dict] = OrderedDict()
         # Track sent images per user per character using deque for efficient FIFO: {user_id: {character_id: deque(image_urls)}}
         self._sent_images: dict[int, dict[int, deque]] = {}
-
-    def _cache_get(self, key: str) -> dict:
-        """Retrieve or create a cache entry for the given key."""
-        entry = self._anilist_cache.get(key)
-        if entry is None:
-            entry = {"anilist_images": [], "google": []}
-            self._anilist_cache[key] = entry
-        self._anilist_cache.move_to_end(key, last=True)
-        if len(self._anilist_cache) > self.CACHE_MAX_KEYS:
-            self._anilist_cache.popitem(last=False)
-        return entry
-
-    def _cache_add_google(self, key: str, url: str):
-        """Add a Google image URL to the cache."""
-        entry = self._cache_get(key)
-        if url not in entry["google"]:
-            entry["google"].append(url)
-
-    def _cache_add_anilist(self, key: str, url: str):
-        """Add an AniList image URL to the cache."""
-        entry = self._cache_get(key)
-        if url not in entry["anilist_images"]:
-            entry["anilist_images"].append(url)
 
     def _get_sent_images(self, user_id: int, char_id: int) -> deque:
         """Get the deque of images already sent to this user for this character."""
@@ -82,6 +60,19 @@ class Search(commands.Cog):
         """Remove common keywords (noise) from the search query."""
         words = [w for w in (query or "").split() if w.lower() not in self.NOISE_WORDS]
         return " ".join(words).strip() or (query or "").strip()
+
+    @alru_cache(maxsize=200)
+    async def _cached_google_search(self, query: str) -> list[str]:
+        """Cached wrapper for Google Image Search."""
+        if not GOOGLE_API or not GOOGLE_SEARCH_ENGINE:
+            return []
+        
+        return await google_image_search(
+            query, 
+            GOOGLE_API, 
+            GOOGLE_SEARCH_ENGINE, 
+            session=self.bot.session
+        )
 
     async def _find_official_image(self, original_query: str, timeout: aiohttp.ClientTimeout):
         """
@@ -141,35 +132,18 @@ class Search(commands.Cog):
         
         Args:
             character_name (str): The character name to search.
-            cache_key (str): Key for caching results.
+            cache_key (str): Legacy cache key (unused in logic but kept for signature).
             timeout (aiohttp.ClientTimeout): Timeout configuration.
 
         Returns:
             str | None: The URL of the found image or None.
         """
-        if not GOOGLE_API or not GOOGLE_SEARCH_ENGINE:
-            return None
-
-        # Use shared session
-        links = await google_image_search(
-            f"{character_name} anime pfp", 
-            GOOGLE_API, 
-            GOOGLE_SEARCH_ENGINE, 
-            session=self.bot.session
-        )
+        links = await self._cached_google_search(f"{character_name} anime pfp")
         if not links:
             return None
 
-        candidates = links
-        if cache_key:
-            entry = self._cache_get(cache_key)
-            unsent = [link for link in links if link not in entry["google"] and link not in entry["anilist_images"]]
-            candidates = unsent or [link for link in links if link not in entry["anilist_images"]]
-
-        chosen = await first_reachable_image(candidates, self.bot.session)
-        if chosen and cache_key:
-            self._cache_add_google(cache_key, chosen)
-        return chosen
+        # Return first reachable image; no rotation logic without user context
+        return await first_reachable_image(links, self.bot.session)
 
     async def _find_multiple_google_images(
         self,
@@ -185,7 +159,7 @@ class Search(commands.Cog):
 
         Args:
             character_name: Name of the character to search for
-            cache_key: Cache key for storing results
+            cache_key: Legacy cache key (unused).
             timeout: HTTP timeout for requests
             count: Number of images to fetch
             exclude: Set of image URLs to exclude
@@ -194,9 +168,6 @@ class Search(commands.Cog):
         Returns:
             list[str]: A list of found image URLs.
         """
-        if not GOOGLE_API or not GOOGLE_SEARCH_ENGINE:
-            return []
-
         search_queries = [
             f"{character_name} anime pfp",
             f"{character_name} anime character",
@@ -205,13 +176,7 @@ class Search(commands.Cog):
 
         search_query = search_queries[min(search_variation, len(search_queries) - 1)]
         
-        # Use shared session
-        links = await google_image_search(
-            search_query, 
-            GOOGLE_API, 
-            GOOGLE_SEARCH_ENGINE, 
-            session=self.bot.session
-        )
+        links = await self._cached_google_search(search_query)
         if not links:
             return []
 
@@ -227,8 +192,6 @@ class Search(commands.Cog):
                 ok = await is_image_url_ok(self.bot.session, candidate, timeout)
                 if ok:
                     found_images.append(candidate)
-                    if cache_key:
-                        self._cache_add_google(cache_key, candidate)
             except Exception:
                 continue
 
@@ -264,6 +227,7 @@ class Search(commands.Cog):
             return await reply(f"`{char_name}` is not an anime character. Please search for anime characters only.")
 
         char_name = (char.get("name") or {}).get("full", "")
+        # cache_key preserved for consistency if needed in future, though _anilist_cache is removed
         cache_key = f"al_{char.get('id')}" if char.get("id") else None
 
         sent_deque = self._get_sent_images(user_id, char_id) if char_id else deque()
@@ -283,8 +247,6 @@ class Search(commands.Cog):
         collected_images: list[tuple[str, str]] = []  # (url, source)
 
         if official_image and official_image not in sent_images:
-            if cache_key:
-                self._cache_add_anilist(cache_key, official_image)
             collected_images.append((official_image, char.get("source") or "AniList"))
 
         exclude = sent_images.copy()
@@ -340,42 +302,9 @@ class Search(commands.Cog):
         """
         Interactive search for anime metadata using AniList.
         """
-        query_str = """
-        query ($search: String) {
-        Page(perPage: 5) {
-            media(search: $search, type: ANIME) {
-            id
-            title { romaji english native }
-            description(asHtml: false)
-            episodes
-            status
-            duration
-            startDate { year month day }
-            endDate { year month day }
-            season
-            averageScore
-            popularity
-            favourites
-            format
-            source
-            studios(isMain: true) { nodes { name } }
-            genres
-            coverImage { large medium }
-            bannerImage
-            siteUrl
-            }
-        }
-        }
-        """
-        variables = {"search": query}
+        # Parsing logic moved to utils/anime_api.py
+        results = await search_anime(self.bot.session, query)
 
-        # Use shared session
-        async with self.bot.session.post(EA.ANILIST_API, json={"query": query_str, "variables": variables}) as resp:
-            if resp.status != 200:
-                return await ctx.send("❌ Could not fetch anime info right now.")
-            data = await resp.json()
-
-        results = data.get("data", {}).get("Page", {}).get("media", [])
         if not results:
             return await ctx.send(f"❌ No results found for `{query}`.")
 
@@ -485,29 +414,9 @@ class Search(commands.Cog):
             except Exception:
                 deferred = False
 
-        query_str = """
-        query ($search: String) {
-            Page(perPage: 5) {
-                characters(search: $search) {
-                    id
-                    name { full native alternative }
-                    image { large medium }
-                    media(type: ANIME, perPage: 1) {
-                        nodes { id type }
-                    }
-                }
-            }
-        }
-        """
-        variables = {"search": name}
+        # Parsing logic moved to utils/anime_api.py
+        characters = await search_characters(self.bot.session, name)
 
-        # Use shared session
-        async with self.bot.session.post(EA.ANILIST_API, json={"query": query_str, "variables": variables}) as resp:
-            if resp.status != 200:
-                return await ctx.send("❌ Could not fetch character info right now.")
-            data = await resp.json()
-
-        characters = data.get("data", {}).get("Page", {}).get("characters", [])
         anime_characters = [c for c in characters if c.get("media", {}).get("nodes")]
 
         if not anime_characters:
