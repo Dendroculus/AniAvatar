@@ -7,13 +7,38 @@ from discord.ext import commands, tasks
 from utils.progression.profile_cards import get_title, TITLE_COLORS
 from constants.configs import RolesConstants as RC
 
+
+"""
+roles.py
+
+Cog managing role-based progression titles and synchronization.
+"""
+
 class Roles(commands.Cog):
+    """
+    Manages role-based progression, ensuring role hierarchy and synchronization with user levels.
+    
+    Responsibilities:
+    - Creating and maintaining progression title roles in guilds.
+    - Synchronizing role colors and hierarchy positions.
+    - Queueing and processing user role updates asynchronously.
+    - reacting to member updates to prevent manual role tampering.
+    """
     def __init__(self, bot: commands.Bot):
+        """
+        Initialize the Roles cog.
+
+        Args:
+            bot (commands.Bot): The bot instance.
+        """
         self.bot = bot
         self._locks: Dict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
 
         # Producer-Consumer queue
         self.queue: asyncio.Queue[tuple[int, int, int]] = asyncio.Queue()
+        
+        # Semaphore for concurrent guild processing
+        self._sync_sem = asyncio.Semaphore(5)
 
         # Background worker task
         self.worker_task = asyncio.create_task(self.worker())
@@ -23,6 +48,11 @@ class Roles(commands.Cog):
         self.sync_roles_loop.start()
 
     async def cog_unload(self):
+        """
+        Clean up background tasks when the cog is unloaded.
+        
+        Cancels the sync loop and the worker task, awaiting the worker's graceful exit.
+        """
         self.sync_roles_loop.cancel()
         self.worker_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
@@ -30,12 +60,24 @@ class Roles(commands.Cog):
 
     #  Producer API 
     async def queue_role_update(self, guild_id: int, user_id: int, level: int):
-        """Public method to enqueue a role update."""
+        """
+        Public method to enqueue a role update for a specific user.
+
+        Args:
+            guild_id (int): The ID of the guild.
+            user_id (int): The ID of the user to update.
+            level (int): The new progression level to apply.
+        """
         await self.queue.put((guild_id, user_id, level))
 
     #  Worker 
     async def worker(self):
-        """Background consumer processing queued role updates."""
+        """
+        Background consumer loop processing queued role updates.
+        
+        Continually pulls from self.queue and delegates to update_roles_by_ids
+        while managing concurrency locks per guild.
+        """
         while True:
             guild_id, user_id, level = await self.queue.get()
             try:
@@ -53,25 +95,61 @@ class Roles(commands.Cog):
                 await asyncio.sleep(1.5)
                 
     async def update_roles_by_ids(self, guild_id: int, user_id: int, level: int):
+        """
+        Fetches guild and member objects by ID and triggers the role update logic.
+        
+        Args:
+            guild_id (int): The target guild ID.
+            user_id (int): The target user ID.
+            level (int): The user's new progression level.
+        """
         guild = self.bot.get_guild(guild_id)
         if not guild:
             try:
                 guild = await self.bot.fetch_guild(guild_id)
-            except Exception:
+            except Exception as e:
+                print(f"[Roles] Failed to fetch guild {guild_id} in worker: {e}")
                 return
         try:
             member = guild.get_member(user_id) or await guild.fetch_member(user_id)
-        except Exception:
+        except Exception as e:
+            print(f"[Roles] Failed to fetch member {user_id} in guild {guild_id}: {e}")
             return
-        await self.update_roles(member, level)
+            
+        try:
+            await self.update_roles(member, level)
+        except Exception as e:
+            print(f"[Roles] Error executing update_roles for {user_id} in guild {guild_id}: {e}")
 
     async def _find_role_by_name(self, guild: discord.Guild, title: str) -> Optional[discord.Role]:
+        """
+        Finds a role in the guild by name using case-insensitive comparison.
+
+        Args:
+            guild (discord.Guild): The guild to search in.
+            title (str): The role name to find.
+
+        Returns:
+            Optional[discord.Role]: The matching Role object if found, else None.
+        """
         if not title:
             return None
         title_norm = title.strip().lower()
         return discord.utils.find(lambda r: r.name and r.name.strip().lower() == title_norm, guild.roles)
 
     async def _get_or_create_role(self, guild: discord.Guild, title: str) -> Optional[discord.Role]:
+        """
+        Retrieves an existing title role or creates it if missing.
+        
+        Handles deduplication by removing extra roles with the same name.
+
+        Args:
+            guild (discord.Guild): The guild context.
+            title (str): The name of the role (Title).
+
+        Returns:
+            Optional[discord.Role]: The active role object, or None if creation failed/permission missing.
+        """
         title_norm = title.strip().lower()
         matches = [r for r in guild.roles if r.name and r.name.strip().lower() == title_norm]
 
@@ -115,6 +193,16 @@ class Roles(commands.Cog):
         return None
 
     async def _ensure_titles_exist(self, guild: discord.Guild) -> List[discord.Role]:
+        """
+        Ensures all defined progression title roles exist in the given guild.
+        Also attempts to sync role colors if they mismatch.
+
+        Args:
+            guild (discord.Guild): The target guild.
+
+        Returns:
+            List[discord.Role]: A list of the valid title roles present in the guild.
+        """
         roles: List[discord.Role] = []
         for title in RC.TITLE_ORDER:
             r = await self._get_or_create_role(guild, title)
@@ -131,6 +219,13 @@ class Roles(commands.Cog):
         return roles
 
     async def _sync_role_hierarchy(self, guild: discord.Guild, roles: List[discord.Role]):
+        """
+        Adjusts role positions to match the progression order defined in configuration.
+
+        Args:
+            guild (discord.Guild): The target guild.
+            roles (List[discord.Role]): The list of title roles to order.
+        """
         if not roles:
             return
 
@@ -165,6 +260,16 @@ class Roles(commands.Cog):
             print(f"[Roles] Failed to reorder roles in guild {guild.id}: {e}")
 
     async def update_roles(self, member: discord.Member, level: int):
+        """
+        Updates a member's roles based on their current progression level.
+        
+        Calculates the correct title for the level, assigns it, and removes
+        any other outdated progression titles.
+
+        Args:
+            member (discord.Member): The member to update.
+            level (int): The current progression level.
+        """
         if member.bot:
             return
         try:
@@ -215,34 +320,56 @@ class Roles(commands.Cog):
             print(f"[Roles] Unexpected error updating roles for {member.display_name} ({member.id}): {e}")
 
     async def _ensure_guild_titles_and_hierarchy(self, guild: discord.Guild) -> None:
+        """
+        Helper method to sync titles and hierarchy for a single guild.
+
+        Args:
+            guild (discord.Guild): The guild to sync.
+        """
         roles = await self._ensure_titles_exist(guild)
         await self._sync_role_hierarchy(guild, roles)
 
     #  Fail-safe loop (no member iteration) 
     @tasks.loop(minutes=720)
     async def sync_roles_loop(self):
+        """
+        Periodic background task to sync role existence and hierarchy across guilds.
+        
+        Uses a semaphore to process guilds concurrently but with a limited pool
+        to prevent API flooding.
+        """
         progression = self.bot.get_cog("Progression")
         if not progression:
             print("[Roles] Progression cog not found for sync loop.")
             return
 
-        for guild in self.bot.guilds:
-            try:
-                await self._ensure_guild_titles_and_hierarchy(guild)
-                # TODO: Iterate through active users in Database and enqueue role updates
-            except Exception as e:
-                print(f"[Roles] Error during guild sync {guild.id}: {e}")
+        async def sync_guild_safe(guild: discord.Guild):
+            async with self._sync_sem:
+                try:
+                    await self._ensure_guild_titles_and_hierarchy(guild)
+                    # TODO: Iterate through active users in Database and enqueue role updates
+                except Exception as e:
+                    print(f"[Roles] Error during guild sync {guild.id}: {e}")
+
+        await asyncio.gather(*(sync_guild_safe(g) for g in self.bot.guilds))
 
         print("[Roles] Fail-safe role sync tick complete.\n")
 
     @sync_roles_loop.before_loop
     async def before_sync_roles(self):
+        """Pre-loop hook waiting for the bot to be fully ready before starting the sync loop."""
         await self.bot.wait_until_ready()
         print("[Roles] Started periodic role fail-safe sync loop.")
 
     #  Events 
     @commands.Cog.listener()
     async def on_ready(self):
+        """
+        Listener for the on_ready event.
+        
+        Triggers an initial scan of all guilds to ensure progression roles exist
+        and are ordered correctly upon startup.
+        """
         print("[Roles] Ensuring progression roles and order on startup...")
         try:
             for guild in self.bot.guilds:
@@ -254,6 +381,19 @@ class Roles(commands.Cog):
 
     @commands.Cog.listener()
     async def on_member_update(self, before: discord.Member, after: discord.Member):
+        """
+        Listener for member updates to detect and revert manual role changes.
+
+        If a user manually modifies roles that are managed by the progression system,
+        this listener queues a resync to restore the correct state.
+
+        Args:
+            before (discord.Member): The member state before update.
+            after (discord.Member): The member state after update.
+            
+        Returns:
+            None
+        """
         progression = self.bot.get_cog("Progression")
         if not progression or after.bot:
             return
