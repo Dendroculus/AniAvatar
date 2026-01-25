@@ -106,7 +106,7 @@ class InventorySelect(discord.ui.Select):
             if selected_item in TC.POTION_ITEMS:
                 # Use economy service (passed as progression_cog in ShopView, but here self.cog is Trading)
                 # self.cog.economy_service gives access to user data
-                exp, level = await self.cog.user_repo.get_user(self.user_id, self.guild_id)
+                _, level = await self.cog.user_repo.get_user(self.user_id, self.guild_id)
                 if level >= PC.MAX_LEVEL:
                     await interaction.followup.send(f"{MinoriEmojis['MinoriWink']} You’ve already reached the max level! You can’t use {TC.EXP_EMOJI} items anymore.", ephemeral=True)
                     return

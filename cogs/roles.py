@@ -4,7 +4,8 @@ from collections import defaultdict
 from typing import Optional, List, Dict
 import discord
 from discord.ext import commands, tasks
-from utils.progression.profile_cards import get_title, TITLE_COLORS
+from utils.progression.profile_cards import get_title
+from constants.configs import ProfileCardConstants as PCC
 from constants.configs import RolesConstants as RC
 
 
@@ -176,7 +177,7 @@ class Roles(commands.Cog):
             print(f"[Roles] Missing Manage Roles, cannot create role '{title}' in guild {guild.id}")
             return None
 
-        color = TITLE_COLORS.get(title, discord.Color.default())
+        color = PCC.TITLE_COLORS.get(title, discord.Color.default())
         try:
             role = await guild.create_role(
                 name=title,
@@ -208,7 +209,7 @@ class Roles(commands.Cog):
             r = await self._get_or_create_role(guild, title)
             if r and not r.managed:
                 try:
-                    desired_color = TITLE_COLORS.get(title, discord.Color.default())
+                    desired_color = PCC.TITLE_COLORS.get(title, discord.Color.default())
                     if guild.me and guild.me.guild_permissions.manage_roles and r.color != desired_color:
                         await r.edit(color=desired_color, reason="Sync role color with title")
                 except discord.Forbidden:
@@ -290,7 +291,7 @@ class Roles(commands.Cog):
 
             try:
                 if guild.me and guild.me.guild_permissions.manage_roles:
-                    desired_color = TITLE_COLORS.get(title, discord.Color.default())
+                    desired_color = PCC.TITLE_COLORS.get(title, discord.Color.default())
                     if role.color != desired_color:
                         await role.edit(color=desired_color, reason="Sync role color with title")
             except discord.Forbidden:

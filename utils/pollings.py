@@ -33,7 +33,7 @@ This module consumes `poll_db.py` to handle persistence but focuses on:
 
 #  Poll Reconstruction Logic  #
 
-async def _parse_options(raw) -> list:
+def _parse_options(raw) -> list:
     """Robustly parse stored poll options."""
     if raw is None:
         return []
@@ -48,7 +48,7 @@ async def _parse_options(raw) -> list:
             return []
     return []
 
-async def _parse_votes(raw) -> Dict[str, list]:
+def _parse_votes(raw) -> Dict[str, list]:
     """Parse persisted votes into a dictionary mapping option -> list of user ids."""
     if raw is None:
         return {}
