@@ -6,9 +6,10 @@ import asyncio
 import traceback
 import io
 import time
+import redis.asyncio as redis
+import logging
 from typing import Optional, Tuple
 from discord import MessageReference
-import redis.asyncio as redis
 
 from utils.progression.profile_cards import (
     get_title,
@@ -58,7 +59,7 @@ class Progression(commands.Cog):
                     socket_connect_timeout=3,
                 )
             except Exception as e:
-                print(f"[Progression] Failed to connect to Redis: {e}")
+                logging.getLogger("progression").warning(f"Failed to connect to Redis: {e}")
                 self.redis = None
         
         self._fallback_cooldowns: dict[str, float] = {}
@@ -76,8 +77,8 @@ class Progression(commands.Cog):
         try:
             if self.redis:
                 await self.redis.close()
-        except Exception:
-            pass
+        except Exception as e:
+            logging.getLogger("progression").warning(f"Error closing Redis connection: {e}")
         self.render_manager.shutdown()
 
     async def get_coins(self, user_id: int, guild_id: int) -> int:
@@ -366,43 +367,47 @@ class Progression(commands.Cog):
         def lb_log(msg: str):
             print(f"[Leaderboard] {msg}")
 
-        try:
-            await ctx.defer()
-        except Exception:
-            pass
-
-        cache_key = f"lb_cache:{ctx.guild.id}"
-        cached_bytes = None
-
-        if self.redis:
+        async def _try_defer():
             try:
-                cached_bytes = await self.redis.get(cache_key)
-                lb_log("Cache hit" if cached_bytes else "Cache miss")
+                await ctx.defer()
+            except Exception as e:
+                lb_log(f"Defer failed (non-fatal): {e}")
+
+        async def _try_get_cached_bytes(key: str):
+            if not self.redis:
+                return None
+            try:
+                data = await self.redis.get(key)
+                lb_log("Cache hit" if data else "Cache miss")
+                return data
             except Exception as e:
                 lb_log(f"Cache read failed: {e}")
+                return None
 
-        if cached_bytes:
+        async def _get_user_rank_and_coins():
             user_rank = await self.repo.get_rank(ctx.author.id, ctx.guild.id)
             user_coins = await self.repo.get_coins(ctx.author.id, ctx.guild.id)
-            formatted_coins = format_coins(user_coins)
+            return user_rank, format_coins(user_coins)
 
-            file = discord.File(io.BytesIO(cached_bytes), filename="leaderboard.png")
+        def _build_embed(file_bytes: bytes, embed_color: discord.Color):
+            file = discord.File(io.BytesIO(file_bytes), filename="leaderboard.png")
+            user_rank, formatted_coins = self._lb_user_stats  # set just before building
+
             embed = discord.Embed(
                 title=f"{ctx.guild.name}'s Top Rank List {TitleEmojis['CHAMPION']}",
-                color=discord.Color.purple(),
-                description=(f"**Your Rank**\n"
-                             f"You are ranked **#{user_rank}** on this server\n"
-                             f"with a total of **{formatted_coins}** {PC.coins_emoji()}")
+                color=embed_color,
+                description=(
+                    f"**Your Rank**\n"
+                    f"You are ranked **#{user_rank}** on this server\n"
+                    f"with a total of **{formatted_coins}** {PC.coins_emoji()}"
+                ),
             )
             if ctx.guild.icon:
                 embed.set_thumbnail(url=ctx.guild.icon.url)
             embed.set_image(url="attachment://leaderboard.png")
+            return embed, file
 
-            await self.safe_send(ctx, embed=embed, file=file)
-            lb_log(f"FAST CACHE path completed in {time.perf_counter() - start:.3f}s")
-            return
-
-        async def query_rows():
+        async def _query_rows():
             lb_log(f"Query start (guild={ctx.guild.id})")
             try:
                 rows_list = await self.repo.get_leaderboard_rows(ctx.guild.id, 10)
@@ -412,7 +417,28 @@ class Progression(commands.Cog):
                 lb_log(f"DB query failed: {e}")
                 return None
 
-        rows = await query_rows()
+        def _fire_and_forget_cache_set(key: str, data: bytes):
+            if not self.redis:
+                return
+            lb_log("Upload to Redis (fire-and-forget)")
+            try:
+                self.bot.loop.create_task(self.redis.set(key, data, ex=120))
+            except Exception as e:
+                lb_log(f"Redis set failed: {e}")
+
+        await _try_defer()
+
+        cache_key = f"lb_cache:{ctx.guild.id}"
+        cached_bytes = await _try_get_cached_bytes(cache_key)
+
+        if cached_bytes:
+            self._lb_user_stats = await _get_user_rank_and_coins()
+            embed, file = _build_embed(cached_bytes, discord.Color.purple())
+            await self.safe_send(ctx, embed=embed, file=file)
+            lb_log(f"FAST CACHE path completed in {time.perf_counter() - start:.3f}s")
+            return
+
+        rows = await _query_rows()
         if rows is None:
             return await self.safe_send(ctx, "Failed to fetch leaderboard data (check logs).")
         if not rows:
@@ -420,42 +446,20 @@ class Progression(commands.Cog):
 
         rows_data = await self._build_rows_data(ctx, rows)
         exp_icon_path = os.path.join(EMOJI_PATH, "EXP.png")
-        img_bytes = await self.render_manager.render_leaderboard(
-            rows_data, 
-            exp_icon_path, 
-            str(ctx.guild.id)
-        )
-        
+        img_bytes = await self.render_manager.render_leaderboard(rows_data, exp_icon_path, str(ctx.guild.id))
+
         if not img_bytes:
             return await self.safe_send(ctx, "Failed to generate leaderboard image (check logs).")
 
-        user_rank = await self.repo.get_rank(ctx.author.id, ctx.guild.id)
-        user_coins = await self.repo.get_coins(ctx.author.id, ctx.guild.id)
-        formatted_coins = format_coins(user_coins)
+        self._lb_user_stats = await _get_user_rank_and_coins()
 
-        embed_color = PCC.TITLE_COLORS.get(get_title(rows_data[0]["level"]) if rows_data else "Leaderboard",
-                                       discord.Color.purple())
-        file = discord.File(io.BytesIO(img_bytes), filename="leaderboard.png")
-        embed = discord.Embed(
-            title=f"{ctx.guild.name}'s Top Rank List {TitleEmojis['CHAMPION']}",
-            color=embed_color,
-            description=(f"**Your Rank**\n"
-                         f"You are ranked **#{user_rank}** on this server\n"
-                         f"with a total of **{formatted_coins}** {PC.coins_emoji()}")
-        )
-        if ctx.guild.icon:
-            embed.set_thumbnail(url=ctx.guild.icon.url)
-        embed.set_image(url="attachment://leaderboard.png")
+        top_title = get_title(rows_data[0]["level"]) if rows_data else "Leaderboard"
+        embed_color = PCC.TITLE_COLORS.get(top_title, discord.Color.purple())
 
+        embed, file = _build_embed(img_bytes, embed_color)
         await self.safe_send(ctx, embed=embed, file=file)
 
-        if self.redis:
-            lb_log("Upload to Redis (fire-and-forget)")
-            try:
-                self.bot.loop.create_task(self.redis.set(cache_key, img_bytes, ex=120))
-            except Exception as e:
-                lb_log(f"Redis set failed: {e}")
-
+        _fire_and_forget_cache_set(cache_key, img_bytes)
         lb_log(f"Completed command (total {time.perf_counter() - start:.3f}s)\n")
     
     def _get_theme_sub_label_safe(self, bg_file: str, theme_name: str) -> str:
@@ -580,19 +584,20 @@ class Progression(commands.Cog):
         user_id = message.author.id
 
         cooldown_key = f"cooldown:{guild_id}:{user_id}"
-
-        try:
-            if self.redis:
+        
+        use_fallback = True
+        
+        if self.redis:
+            try:
                 allowed = await self.redis.set(cooldown_key, b"1", ex=5, nx=True)
                 if not allowed:
-                    return
-            else:
-                raise RuntimeError("Redis not configured")
-        except Exception as e:
-            if isinstance(e, RuntimeError) and str(e) == "Redis not configured":
-                pass
-            else:
-                print(f"[cooldown] Redis check failed: {e}")
+                    return 
+                
+                use_fallback = False
+            except Exception as e:
+                logging.getLogger("progression").warning(f"Redis error during cooldown check: {e}")
+        
+        if use_fallback:
             now = discord.utils.utcnow().timestamp()
             last = self._fallback_cooldowns.get(cooldown_key, 0)
             if now - last < 5:

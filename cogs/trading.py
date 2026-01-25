@@ -1,14 +1,15 @@
-from discord.ext import commands
 import discord
 import random
-from datetime import datetime, timedelta, timezone
 import asyncio
+
+from typing import Optional
+from discord.ext import commands
+from datetime import datetime, timedelta, timezone
 
 from constants.emojis import CustomEmojis, MinoriEmojis, ShopEmojis
 from constants.configs import TradingConstants as TC, ProgressionConstants as PC
 from utils.trading_ui import format_coins, ShopView, InventoryView
 from utils.progression.profile_cards import get_title, get_title_emoji
-
 from services.user_repository import UserRepository
 from services.trading_repository import TradingRepository
 
@@ -76,9 +77,9 @@ class Trading(commands.Cog):
             bot (commands.Bot): The bot instance.
         """
         self.bot = bot
-        self.user_repo: UserRepository = None
-        self.trading_repo: TradingRepository = None
-        self.economy_service: EconomyServiceWrapper = None
+        self.user_repo: Optional[UserRepository] = None
+        self.trading_repo: Optional[TradingRepository] = None
+        self.economy_service: Optional[EconomyServiceWrapper] = None
         
         self.donate_cooldowns = {}
         self.open_inventories = {}
