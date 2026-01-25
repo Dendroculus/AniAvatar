@@ -13,15 +13,16 @@ import redis.asyncio as redis
 from utils.progression.profile_cards import (
     get_title,
     get_title_emoji,
-    TITLE_COLORS,
 )
+
 from utils.progression.profile_theme import MainThemeView
 from constants.configs import (
     BG_PATH,
     EMOJI_PATH,
-    TITLE_EMOJI_FILES,
+    AssetPaths as AP,
     REDIS_CACHING,
     ProgressionConstants as PC,
+    ProfileCardConstants as PCC,
 )
 from utils.trading_ui import format_coins
 from constants.emojis import CustomEmojis, TitleEmojis
@@ -282,7 +283,7 @@ class Progression(commands.Cog):
         coins_amount = random.randint(30, 50)
         await self.repo.add_coins(user_id, guild_id, coins_amount)
         await channel.send(
-            f"{member.display_name} received {PC.COINS_EMOJI()} {coins_amount} coins for leveling up!",
+            f"{member.display_name} received {PC.coins_emoji()} {coins_amount} coins for leveling up!",
             reference=MessageReference(message_id=lvlup_msg.id, channel_id=lvlup_msg.channel.id, guild_id=lvlup_msg.guild.id)
         )
 
@@ -342,7 +343,7 @@ class Progression(commands.Cog):
 
             file = discord.File(io.BytesIO(img_bytes), filename=PC.PROFILE_PNG)
 
-            badge_path = TITLE_EMOJI_FILES.get(title_name)
+            badge_path = AP.TITLE_EMOJI_FILES.get(title_name)
             
             # Offload file check to thread
             badge_exists = await asyncio.to_thread(self._check_badge_exists_safe, badge_path)
@@ -391,7 +392,7 @@ class Progression(commands.Cog):
                 color=discord.Color.purple(),
                 description=(f"**Your Rank**\n"
                              f"You are ranked **#{user_rank}** on this server\n"
-                             f"with a total of **{formatted_coins}** {PC.COINS_EMOJI()}")
+                             f"with a total of **{formatted_coins}** {PC.coins_emoji()}")
             )
             if ctx.guild.icon:
                 embed.set_thumbnail(url=ctx.guild.icon.url)
@@ -432,7 +433,7 @@ class Progression(commands.Cog):
         user_coins = await self.repo.get_coins(ctx.author.id, ctx.guild.id)
         formatted_coins = format_coins(user_coins)
 
-        embed_color = TITLE_COLORS.get(get_title(rows_data[0]["level"]) if rows_data else "Leaderboard",
+        embed_color = PCC.TITLE_COLORS.get(get_title(rows_data[0]["level"]) if rows_data else "Leaderboard",
                                        discord.Color.purple())
         file = discord.File(io.BytesIO(img_bytes), filename="leaderboard.png")
         embed = discord.Embed(
@@ -440,7 +441,7 @@ class Progression(commands.Cog):
             color=embed_color,
             description=(f"**Your Rank**\n"
                          f"You are ranked **#{user_rank}** on this server\n"
-                         f"with a total of **{formatted_coins}** {PC.COINS_EMOJI()}")
+                         f"with a total of **{formatted_coins}** {PC.coins_emoji()}")
         )
         if ctx.guild.icon:
             embed.set_thumbnail(url=ctx.guild.icon.url)

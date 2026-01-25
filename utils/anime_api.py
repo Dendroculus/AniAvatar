@@ -1,8 +1,10 @@
 import random
+import asyncio
 from typing import Dict, List, Optional
 import aiohttp
 import discord
 from constants.configs import ExternalAPIs as EA
+from constants.configs import AnimeAPIConstants as AC
 
 """
 anime_api.py
@@ -17,27 +19,21 @@ Design notes :
 - Network resource management: All functions REQUIRE an aiohttp.ClientSession.
   This enforces connection pooling and prevents "session leaks" (creating new sessions
   per command) which can exhaust file descriptors.
-- Timeouts: Functions accept an optional `timeout` argument.
+- Timeouts: High-level functions use `asyncio.timeout` context manager (10s default).
 - Resilience: calls are defensive — on non-200 responses or malformed payloads functions
   typically return None or raise a controlled RuntimeError.
 """
 
-DEFAULT_TIMEOUT = aiohttp.ClientTimeout(total=10)
-
-FALLBACK_NAMES = [
-    "Naruto Uzumaki", "Monkey D. Luffy", "Goku", "Light Yagami", "Eren Yeager", "Levi Ackerman",
-    "Saitama", "Edward Elric", "Spike Spiegel", "Lelouch Lamperouge", "Killua Zoldyck", "Gon Freecss"
-]
 
 
-async def fetch_random_character(session: aiohttp.ClientSession, prefer: str = "AniList", timeout: aiohttp.ClientTimeout = DEFAULT_TIMEOUT) -> Dict:
+
+async def fetch_random_character(session: aiohttp.ClientSession, prefer: str = "AniList") -> Dict:
     """
     Fetch a random popular character from either AniList or Jikan.
 
     Args:
         session: Shared aiohttp.ClientSession for requests.
         prefer: provider preference string, either "AniList" or "Jikan".
-        timeout: Timeout configuration for requests.
 
     Behavior:
     - Tries the preferred provider first, falls back to the other provider on error.
@@ -48,21 +44,22 @@ async def fetch_random_character(session: aiohttp.ClientSession, prefer: str = "
     last_err = None
     for provider in providers:
         try:
-            if provider == "AniList":
-                data = await _fetch_anilist_character_random(session, timeout)
-                data["source"] = "AniList"
-                return data
-            else:
-                data = await _fetch_jikan_character_random(session, timeout)
-                data["source"] = "Jikan (MAL)"
-                return data
+            async with asyncio.timeout(AC.AC.TIMEOUT_SECONDS):
+                if provider == "AniList":
+                    data = await _fetch_anilist_character_random(session)
+                    data["source"] = "AniList"
+                    return data
+                else:
+                    data = await _fetch_jikan_character_random(session)
+                    data["source"] = "Jikan (MAL)"
+                    return data
         except Exception as e:
             last_err = e
             continue
     raise last_err or RuntimeError("Failed to fetch character from providers")
 
 
-async def _fetch_anilist_character_random(session: aiohttp.ClientSession, timeout: aiohttp.ClientTimeout) -> Dict:
+async def _fetch_anilist_character_random(session: aiohttp.ClientSession) -> Dict:
     """
     Query AniList for a page of popular characters then pick a random entry.
     """
@@ -80,7 +77,7 @@ async def _fetch_anilist_character_random(session: aiohttp.ClientSession, timeou
     '''
     variables = {"page": random.randint(1, 20), "perPage": 50}
     
-    async with session.post(EA.ANILIST_API, json={"query": query, "variables": variables}, timeout=timeout) as resp:
+    async with session.post(EA.ANILIST_API, json={"query": query, "variables": variables}) as resp:
         resp.raise_for_status()
         payload = await resp.json()
 
@@ -93,14 +90,14 @@ async def _fetch_anilist_character_random(session: aiohttp.ClientSession, timeou
     return {"name": ch["name"]["full"], "image": ch["image"]["large"], "anime": anime_title}
 
 
-async def _fetch_jikan_character_random(session: aiohttp.ClientSession, timeout: aiohttp.ClientTimeout) -> Dict:
+async def _fetch_jikan_character_random(session: aiohttp.ClientSession) -> Dict:
     """
     Query Jikan (MAL) top characters endpoint, page-randomized, and return a random result.
     """
     page = random.randint(1, 10)
     url = f"{EA.JIKAN_TOP_CHAR_URL}?page={page}"
     
-    async with session.get(url, timeout=timeout) as resp:
+    async with session.get(url) as resp:
         resp.raise_for_status()
         payload = await resp.json()
     
@@ -113,26 +110,30 @@ async def _fetch_jikan_character_random(session: aiohttp.ClientSession, timeout:
     return {"name": ch["name"], "image": ch["images"]["jpg"]["image_url"], "anime": anime_title}
 
 
-async def fetch_character_by_name(name: str, session: aiohttp.ClientSession, prefer: str = "AniList", timeout: aiohttp.ClientTimeout = DEFAULT_TIMEOUT) -> Optional[Dict]:
+async def fetch_character_by_name(name: str, session: aiohttp.ClientSession, prefer: str = "AniList") -> Optional[Dict]:
     """
     Fetch a character by name using AniList first (by default) then Jikan as fallback.
     """
     providers = [prefer, "Jikan" if prefer == "AniList" else "AniList"]
     for prov in providers:
-        if prov == "AniList":
-            char = await _fetch_anilist_character_by_name(name, session, timeout)
-            if char:
-                char["source"] = "AniList"
-                return char
-        else:
-            char = await _fetch_jikan_character_by_name(name, session, timeout)
-            if char:
-                char["source"] = "Jikan (MAL)"
-                return char
+        try:
+            async with asyncio.timeout(AC.TIMEOUT_SECONDS):
+                if prov == "AniList":
+                    char = await _fetch_anilist_character_by_name(name, session)
+                    if char:
+                        char["source"] = "AniList"
+                        return char
+                else:
+                    char = await _fetch_jikan_character_by_name(name, session)
+                    if char:
+                        char["source"] = "Jikan (MAL)"
+                        return char
+        except Exception:
+            continue
     return None
 
 
-async def _fetch_anilist_character_by_name(name: str, session: aiohttp.ClientSession, timeout: aiohttp.ClientTimeout) -> Optional[Dict]:
+async def _fetch_anilist_character_by_name(name: str, session: aiohttp.ClientSession) -> Optional[Dict]:
     """
     Query AniList Character(search: ...) and return the raw character payload.
     """
@@ -148,7 +149,7 @@ async def _fetch_anilist_character_by_name(name: str, session: aiohttp.ClientSes
     variables = {"search": name}
 
     try:
-        async with session.post(EA.ANILIST_API, json={"query": query, "variables": variables}, timeout=timeout) as resp:
+        async with session.post(EA.ANILIST_API, json={"query": query, "variables": variables}) as resp:
             if resp.status != 200:
                 return None
             data = await resp.json()
@@ -158,7 +159,7 @@ async def _fetch_anilist_character_by_name(name: str, session: aiohttp.ClientSes
         return None
 
 
-async def _fetch_jikan_character_by_name(name: str, session: aiohttp.ClientSession, timeout: aiohttp.ClientTimeout) -> Optional[Dict]:
+async def _fetch_jikan_character_by_name(name: str, session: aiohttp.ClientSession) -> Optional[Dict]:
     """
     Query Jikan character search endpoint and convert result to a shape compatible with
     the AniList-oriented consumer code.
@@ -167,7 +168,7 @@ async def _fetch_jikan_character_by_name(name: str, session: aiohttp.ClientSessi
     url = f"{EA.JIKAN_SEARCH_CHAR_URL}?q={quote(name)}&limit=1"
 
     try:
-        async with session.get(url, timeout=timeout) as resp:
+        async with session.get(url) as resp:
             if resp.status != 200:
                 return None
             data = await resp.json()
@@ -185,14 +186,13 @@ async def _fetch_jikan_character_by_name(name: str, session: aiohttp.ClientSessi
         return None
 
 
-async def search_anime(session: aiohttp.ClientSession, query: str, timeout: aiohttp.ClientTimeout = DEFAULT_TIMEOUT) -> List[Dict]:
+async def search_anime(session: aiohttp.ClientSession, query: str) -> List[Dict]:
     """
     Search for anime by name using AniList.
 
     Args:
         session: Shared aiohttp.ClientSession.
         query: Name of the anime to search for.
-        timeout: Timeout for the request.
 
     Returns:
         List[Dict]: A list of anime metadata dictionaries.
@@ -227,23 +227,23 @@ async def search_anime(session: aiohttp.ClientSession, query: str, timeout: aioh
     variables = {"search": query}
 
     try:
-        async with session.post(EA.ANILIST_API, json={"query": query_str, "variables": variables}, timeout=timeout) as resp:
-            if resp.status != 200:
-                return []
-            data = await resp.json()
-        return data.get("data", {}).get("Page", {}).get("media", [])
+        async with asyncio.timeout(AC.TIMEOUT_SECONDS):
+            async with session.post(EA.ANILIST_API, json={"query": query_str, "variables": variables}) as resp:
+                if resp.status != 200:
+                    return []
+                data = await resp.json()
+            return data.get("data", {}).get("Page", {}).get("media", [])
     except Exception:
         return []
 
 
-async def search_characters(session: aiohttp.ClientSession, name: str, timeout: aiohttp.ClientTimeout = DEFAULT_TIMEOUT) -> List[Dict]:
+async def search_characters(session: aiohttp.ClientSession, name: str) -> List[Dict]:
     """
     Search for characters by name using AniList.
 
     Args:
         session: Shared aiohttp.ClientSession.
         name: Name of the character to search for.
-        timeout: Timeout for the request.
 
     Returns:
         List[Dict]: A list of character dictionaries containing names, images, and media info.
@@ -265,11 +265,12 @@ async def search_characters(session: aiohttp.ClientSession, name: str, timeout: 
     variables = {"search": name}
 
     try:
-        async with session.post(EA.ANILIST_API, json={"query": query_str, "variables": variables}, timeout=timeout) as resp:
-            if resp.status != 200:
-                return []
-            data = await resp.json()
-        return data.get("data", {}).get("Page", {}).get("characters", [])
+        async with asyncio.timeout(AC.TIMEOUT_SECONDS):
+            async with session.post(EA.ANILIST_API, json={"query": query_str, "variables": variables}) as resp:
+                if resp.status != 200:
+                    return []
+                data = await resp.json()
+            return data.get("data", {}).get("Page", {}).get("characters", [])
     except Exception:
         return []
 
@@ -288,15 +289,16 @@ def char_has_anime_media(char_obj: Optional[Dict]) -> bool:
     return False
 
 
-async def get_wrong_names(source: str, correct_name: str, session: aiohttp.ClientSession, timeout: aiohttp.ClientTimeout = DEFAULT_TIMEOUT) -> List[str]:
+async def get_wrong_names(source: str, correct_name: str, session: aiohttp.ClientSession) -> List[str]:
     """
     Return a small list of plausible incorrect character names.
     """
     try:
-        if source == "AniList":
-            return await _get_anilist_wrong_options(correct_name, session, timeout)
-        else:
-            return await _get_jikan_wrong_options(correct_name, session, timeout)
+        async with asyncio.timeout(AC.TIMEOUT_SECONDS):
+            if source == "AniList":
+                return await _get_anilist_wrong_options(correct_name, session)
+            else:
+                return await _get_jikan_wrong_options(correct_name, session)
     except Exception:
         return get_fallback_wrong_options(correct_name)
 
@@ -305,12 +307,12 @@ def get_fallback_wrong_options(correct_name: str, pool: Optional[List[str]] = No
     """
     Return up to 3 random names from a fallback pool excluding the correct_name.
     """
-    names = [n for n in (pool or FALLBACK_NAMES) if n != correct_name]
+    names = [n for n in (pool or AC.FALLBACK_NAMES) if n != correct_name]
     k = min(3, len(names))
     return random.sample(names, k=k) if k > 0 else []
 
 
-async def _get_anilist_wrong_options(correct_name: str, session: aiohttp.ClientSession, timeout: aiohttp.ClientTimeout) -> List[str]:
+async def _get_anilist_wrong_options(correct_name: str, session: aiohttp.ClientSession) -> List[str]:
     """
     Request a page of popular characters from AniList for distractors.
     """
@@ -323,7 +325,7 @@ async def _get_anilist_wrong_options(correct_name: str, session: aiohttp.ClientS
     '''
     variables = {"page": random.randint(1, 20), "perPage": 50}
 
-    async with session.post(EA.ANILIST_API, json={"query": query, "variables": variables}, timeout=timeout) as resp:
+    async with session.post(EA.ANILIST_API, json={"query": query, "variables": variables}) as resp:
         if resp.status != 200:
             return get_fallback_wrong_options(correct_name)
         payload = await resp.json()
@@ -334,14 +336,14 @@ async def _get_anilist_wrong_options(correct_name: str, session: aiohttp.ClientS
     return random.sample(wrong, k=k) if k > 0 else get_fallback_wrong_options(correct_name)
 
 
-async def _get_jikan_wrong_options(correct_name: str, session: aiohttp.ClientSession, timeout: aiohttp.ClientTimeout) -> List[str]:
+async def _get_jikan_wrong_options(correct_name: str, session: aiohttp.ClientSession) -> List[str]:
     """
     Query Jikan top characters for distractors.
     """
     page = random.randint(1, 10)
     url = f"{EA.JIKAN_TOP_CHAR_URL}?page={page}"
 
-    async with session.get(url, timeout=timeout) as resp:
+    async with session.get(url) as resp:
         if resp.status != 200:
             return get_fallback_wrong_options(correct_name)
         payload = await resp.json()
@@ -352,18 +354,18 @@ async def _get_jikan_wrong_options(correct_name: str, session: aiohttp.ClientSes
     return random.sample(wrong, k=k) if k > 0 else get_fallback_wrong_options(correct_name)
 
 
-async def build_character_select_options(correct_name: str, source: str, session: aiohttp.ClientSession, timeout: aiohttp.ClientTimeout = DEFAULT_TIMEOUT) -> List[discord.SelectOption]:
+async def build_character_select_options(correct_name: str, source: str, session: aiohttp.ClientSession) -> List[discord.SelectOption]:
     """
     Build a randomized list of discord.SelectOption objects.
     """
     opts = [correct_name]
-    wrong = await get_wrong_names(source, correct_name, session, timeout)
+    wrong = await get_wrong_names(source, correct_name, session)
     opts.extend(wrong)
     random.shuffle(opts)
     return [discord.SelectOption(label=o, value=o) for o in opts]
 
 
-async def _check(resp):
+def _check(resp):
     if resp.status != 200:
         return False
     ct = resp.headers.get("Content-Type", "")
@@ -376,7 +378,7 @@ async def _check(resp):
     return clen > 1000  # basic size guard: at least 1KB
 
 
-async def is_image_url_ok(session: aiohttp.ClientSession, url: str, timeout_obj: aiohttp.ClientTimeout = DEFAULT_TIMEOUT) -> bool:
+async def is_image_url_ok(session: aiohttp.ClientSession, url: str, timeout_obj: aiohttp.ClientTimeout = AC.DEFAULT_TIMEOUT) -> bool:
     """
     Check whether the given URL refers to an image and is reachable.
     """
@@ -397,7 +399,7 @@ async def is_image_url_ok(session: aiohttp.ClientSession, url: str, timeout_obj:
         return False
 
 
-async def google_image_search(query: str, api_key: str, cx: str, session: aiohttp.ClientSession, timeout: aiohttp.ClientTimeout = DEFAULT_TIMEOUT) -> List[str]:
+async def google_image_search(query: str, api_key: str, cx: str, session: aiohttp.ClientSession, timeout: aiohttp.ClientTimeout = AC.DEFAULT_TIMEOUT) -> List[str]:
     """
     Query Google Custom Search (image type) and return a filtered list of image links.
     Requires an active aiohttp.ClientSession.
@@ -426,7 +428,7 @@ async def google_image_search(query: str, api_key: str, cx: str, session: aiohtt
         return []
 
 
-async def first_reachable_image(links: List[str], session: aiohttp.ClientSession, timeout: aiohttp.ClientTimeout = DEFAULT_TIMEOUT) -> Optional[str]:
+async def first_reachable_image(links: List[str], session: aiohttp.ClientSession, timeout: aiohttp.ClientTimeout = AC.DEFAULT_TIMEOUT) -> Optional[str]:
     """
     Return the first reachable image URL from a list of links.
     Uses the provided session for all checks.

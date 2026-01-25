@@ -1,7 +1,7 @@
 import asyncpg
 from typing import Any, Optional, Iterable
 from utils.progression.profile_cards import ImageRenderer
-from constants.configs import FONTS, TITLE_EMOJI_FILES, ProgressionConstants as PC
+from constants.configs import AssetPaths as AP, ProgressionConstants as PC
 
 # Module-level global to hold the renderer instance within the worker process.
 # This replaces the dictionary context to ensure explicit state handling
@@ -42,8 +42,8 @@ def render_profile_in_process(
         level,
         exp,
         next_exp,
-        FONTS,
-        TITLE_EMOJI_FILES,
+        AP.FONTS,
+        AP.TITLE_EMOJI_FILES,
         bg_file=bg_file,
         theme_name=theme_name,
         font_color=font_color,
@@ -65,7 +65,7 @@ def render_leaderboard_in_process(
 
     return _renderer.create_leaderboard_image(
         rows=list(rows_data),
-        fonts=FONTS,
+        fonts=AP.FONTS,
         exp_icon_path=exp_icon_path,
         cache_key=cache_key,
         cache_ttl=cache_ttl,

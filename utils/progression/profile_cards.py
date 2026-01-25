@@ -1,17 +1,15 @@
-from PIL import Image, ImageDraw, ImageFont, UnidentifiedImageError
+from PIL import Image, ImageDraw, ImageFont
 import traceback
-import discord
 import os
 import io
 import random
 import colorsys
-import re
 import asyncpg
 import unicodedata
 import time
 import logging
 from typing import Optional, Dict, Tuple
-from constants.configs import BG_PATH, FONTS, ROOT_PATH, TITLE_EMOJI_FILES
+from constants.configs import BG_PATH, AssetPaths as AP, ProfileCardConstants as PCC
 from constants.emojis import TitleEmojis
 
 """
@@ -22,38 +20,6 @@ BADGE_SHIFT = +12      # move title badge right/left
 LVL_Y = -4             # move LVL text value column up/down neg is up otherwise
 ────────────────────────────
 """
-
-#  Constants 
-
-TITLE_COLORS = {
-    "Novice": discord.Color.light_gray(),
-    "Warrior": discord.Color.red(),
-    "Elite": discord.Color.orange(),
-    "Champion": discord.Color.gold(),
-    "Hero": discord.Color.green(),
-    "Legend": discord.Color.blue(),
-    "Mythic": discord.Color.purple(),
-    "Ascendant": discord.Color.teal(),
-    "Immortal": discord.Color.dark_red(),
-    "Celestial": discord.Color.dark_blue(),
-    "Transcendent": discord.Color.dark_purple(),
-    "Aetherborn": discord.Color.dark_teal(),
-    "Cosmic": discord.Color.dark_magenta(),
-    "Divine": discord.Color.green(),
-    "Eternal": discord.Color.red(),
-    "Enlightened": discord.Color.blue(),
-}
-
-DB_PATH = os.path.join(ROOT_PATH, "data", "minori.db")
-
-class AvatarError(Exception):
-    """Base exception for avatar-related issues."""
-
-class AvatarLoadError(AvatarError):
-    """Raised when avatar bytes are present but cannot be decoded/loaded."""
-
-class AvatarBytesMissing(AvatarError):
-    """Raised when avatar bytes are missing."""
 
 class ProfileCardLayout:
     WIDTH = 600
@@ -74,13 +40,15 @@ class LeaderboardLayout:
     COLUMN_SHIFT = -11         
     BADGE_SHIFT = 35           
     NAME_MAX_CHARS = 14     
+    
+class AvatarError(Exception):
+    """Base exception for avatar-related issues."""
 
-#  Stateless Utility Functions 
+class AvatarLoadError(AvatarError):
+    """Raised when avatar bytes are present but cannot be decoded/loaded."""
 
-_INVISIBLE_RE = re.compile(r'[\u200D\uFE0F\u200E\u200F\u2060-\u2064\uFEFF]', flags=re.UNICODE)
-_CTRL_RE = re.compile(r'[\x00-\x1F\x7F]', flags=re.UNICODE)
-_space_collapse_re = re.compile(r'\s+', flags=re.UNICODE)
-
+class AvatarBytesMissing(AvatarError):
+    """Raised when avatar bytes are missing."""
 
 def format_number(num: int) -> str:
     """Format a large integer into a short human-friendly string."""
@@ -98,7 +66,7 @@ def strip_emojis(s: str) -> str:
     """Remove invisible joiner/variation characters and pictographic emoji runs."""
     if not s:
         return s
-    s = _INVISIBLE_RE.sub("", s)
+    s = PCC._INVISIBLE_RE.sub("", s)
     out_chars = []
     for ch in s:
         cat = unicodedata.category(ch)
@@ -106,8 +74,8 @@ def strip_emojis(s: str) -> str:
             continue
         out_chars.append(ch)
     s = "".join(out_chars)
-    s = _CTRL_RE.sub("", s)
-    s = _space_collapse_re.sub(" ", s).strip()
+    s = PCC._CTRL_RE.sub("", s)
+    s = PCC._space_collapse_re.sub(" ", s).strip()
     return s
 
 
@@ -348,7 +316,7 @@ class AssetLoader:
             avatar = avatar.resize((int(size), int(size)), Image.Resampling.LANCZOS)
             self._avatar_cache[key] = avatar
             return avatar
-        except (UnidentifiedImageError, OSError, ValueError):
+        except (OSError, ValueError):
             return None
 
     def get_icon(self, path: str, size: int) -> Optional[Image.Image]:
@@ -366,7 +334,7 @@ class AssetLoader:
             img = Image.open(path).convert("RGBA").resize((int(size), int(size)), Image.Resampling.LANCZOS)
             self._icon_cache[key] = img
             return img
-        except (UnidentifiedImageError, OSError, ValueError):
+        except (OSError, ValueError):
             return None
 
     @staticmethod
@@ -484,6 +452,8 @@ class AssetLoader:
             
         return img
 
+#  Main Card Logic 
+
 class CardDrawer:
     """
     Coordinates rendering logic using FontManager and AssetLoader.
@@ -585,7 +555,7 @@ class CardDrawer:
             contrast_black = (max(luminance_bg, 0)+0.05)/(min(luminance_bg, 0)+0.05)
 
             return (255,255,255) if contrast_white >= contrast_black else (0,0,0)
-        except (UnidentifiedImageError, OSError, ValueError):
+        except (OSError, ValueError):
             return (255,255,255)
 
     @staticmethod
@@ -621,7 +591,7 @@ class CardDrawer:
             if os.path.exists(bg_path):
                 try:
                     bg = Image.open(bg_path).convert("RGBA").resize((width, height))
-                except (UnidentifiedImageError, OSError):
+                except OSError:
                     bg = self._profile_generate_default_bg(width, height)
             else:
                 bg = self._profile_generate_default_bg(width, height)
@@ -790,9 +760,7 @@ class CardDrawer:
 
         # Pre-calc heights
         font_rank_height = (font_rank.getbbox("Ay")[3] - font_rank.getbbox("Ay")[1])
-        # font_medium_height = (font_medium.getbbox("Ay")[3] - font_medium.getbbox("Ay")[1])
         font_bold_height = (font_bold.getbbox("Ay")[3] - font_bold.getbbox("Ay")[1])
-        # We need a font_medium for the LVL text later
         font_lvl = self.fonts.get_font(fonts.get("medium"), max(10, int(row_height * 0.45)))
         font_medium_height = (font_lvl.getbbox("Ay")[3] - font_lvl.getbbox("Ay")[1])
 
@@ -996,7 +964,7 @@ class CardDrawer:
 
         # Badge
         title_name = (r.get("title") or "").strip()
-        badge_path = TITLE_EMOJI_FILES.get(title_name) if isinstance(TITLE_EMOJI_FILES, dict) else None
+        badge_path = AP.TITLE_EMOJI_FILES.get(title_name) if isinstance(AP.TITLE_EMOJI_FILES, dict) else None
         badge_img = self.assets.get_icon(badge_path, layout["badge_size"])
         if badge_img:
             bx = lvl_x + layout["fixed_level_w"] + badge_shift
@@ -1053,7 +1021,7 @@ class CardDrawer:
             if cached is not None:
                 return cached
 
-            fonts = fonts or FONTS
+            fonts = fonts or AP.FONTS
             rows = list(rows or [])
             n = len(rows)
 
@@ -1093,8 +1061,6 @@ class CardDrawer:
                          fh.write(payload)
                 except OSError as e:
                     logging.getLogger("profile_cards").warning(f"Failed to save debug leaderboard image to {debug_save_path}: {e}")
-
-            return payload
 
             return payload
 

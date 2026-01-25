@@ -1,4 +1,7 @@
 import os
+import aiohttp
+import re
+import discord
 from dotenv import load_dotenv
 from .emojis import ShopEmojis
 
@@ -7,11 +10,8 @@ COG_PATH = os.path.join(ROOT_PATH, "cogs")
 
 FONT_DIR = os.path.join(ROOT_PATH, "assets", "fonts")
 EMOJI_PATH = os.path.join(ROOT_PATH, "assets", "RANK ICONS")
-BG_PATH = os.path.join(ROOT_PATH, "assets", "background")  # singular
+BG_PATH = os.path.join(ROOT_PATH, "assets", "background") 
 
-"""
-Load necessary environment variables
-"""
 load_dotenv()
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 GOOGLE_API = os.getenv("GOOGLE_API_KEY")
@@ -19,32 +19,60 @@ GOOGLE_SEARCH_ENGINE = os.getenv("SEARCH_ENGINE_ID")
 DATABASE = os.getenv("DATABASE_URL")
 REDIS_CACHING = os.getenv("REDIS_URL")    
 
-FONTS = {
-    "bold": os.path.join(FONT_DIR, "gg sans Bold.ttf"),
-    "medium": os.path.join(FONT_DIR, "gg sans Medium.ttf"),
-    "regular": os.path.join(FONT_DIR, "gg sans Regular.ttf"),
-    "semibold": os.path.join(FONT_DIR, "gg sans Semibold.ttf"),
-    "cjk": os.path.join(FONT_DIR, "NotoSerifCJK.ttf"),
-}
+class AssetPaths:
+    """
+    Constants for various asset file paths used in the bot.
+    """
+    FONTS = {
+        "bold": os.path.join(FONT_DIR, "gg sans Bold.ttf"),
+        "medium": os.path.join(FONT_DIR, "gg sans Medium.ttf"),
+        "regular": os.path.join(FONT_DIR, "gg sans Regular.ttf"),
+        "semibold": os.path.join(FONT_DIR, "gg sans Semibold.ttf"),
+        "cjk": os.path.join(FONT_DIR, "NotoSerifCJK.ttf"),
+    }
 
-TITLE_EMOJI_FILES = {
-    "Novice": os.path.join(EMOJI_PATH, "NOVICE.png"),
-    "Warrior": os.path.join(EMOJI_PATH, "WARRIOR.png"),
-    "Elite": os.path.join(EMOJI_PATH, "ELITE.png"),
-    "Champion": os.path.join(EMOJI_PATH, "CHAMPION.png"),
-    "Hero": os.path.join(EMOJI_PATH, "HERO.png"),
-    "Legend": os.path.join(EMOJI_PATH, "LEGEND.png"),
-    "Mythic": os.path.join(EMOJI_PATH, "MYTHIC.png"),
-    "Ascendant": os.path.join(EMOJI_PATH, "ASCENDANT.png"),
-    "Immortal": os.path.join(EMOJI_PATH, "IMMORTAL.png"),
-    "Celestial": os.path.join(EMOJI_PATH, "CELESTIAL.png"),
-    "Transcendent": os.path.join(EMOJI_PATH, "TRANSCENDENT.png"),
-    "Aetherborn": os.path.join(EMOJI_PATH, "AETHERBORN.png"),
-    "Cosmic": os.path.join(EMOJI_PATH, "COSMIC.png"),
-    "Divine": os.path.join(EMOJI_PATH, "DIVINE.png"),
-    "Eternal": os.path.join(EMOJI_PATH, "ETERNAL.png"),
-    "Enlightened": os.path.join(EMOJI_PATH, "ENLIGHTENED.png"),
-}
+    TITLE_EMOJI_FILES = {
+        "Novice": os.path.join(EMOJI_PATH, "NOVICE.png"),
+        "Warrior": os.path.join(EMOJI_PATH, "WARRIOR.png"),
+        "Elite": os.path.join(EMOJI_PATH, "ELITE.png"),
+        "Champion": os.path.join(EMOJI_PATH, "CHAMPION.png"),
+        "Hero": os.path.join(EMOJI_PATH, "HERO.png"),
+        "Legend": os.path.join(EMOJI_PATH, "LEGEND.png"),
+        "Mythic": os.path.join(EMOJI_PATH, "MYTHIC.png"),
+        "Ascendant": os.path.join(EMOJI_PATH, "ASCENDANT.png"),
+        "Immortal": os.path.join(EMOJI_PATH, "IMMORTAL.png"),
+        "Celestial": os.path.join(EMOJI_PATH, "CELESTIAL.png"),
+        "Transcendent": os.path.join(EMOJI_PATH, "TRANSCENDENT.png"),
+        "Aetherborn": os.path.join(EMOJI_PATH, "AETHERBORN.png"),
+        "Cosmic": os.path.join(EMOJI_PATH, "COSMIC.png"),
+        "Divine": os.path.join(EMOJI_PATH, "DIVINE.png"),
+        "Eternal": os.path.join(EMOJI_PATH, "ETERNAL.png"),
+        "Enlightened": os.path.join(EMOJI_PATH, "ENLIGHTENED.png"),
+    }
+    
+class ProfileCardConstants:
+    TITLE_COLORS = {
+    "Novice": discord.Color.light_gray(),
+    "Warrior": discord.Color.red(),
+    "Elite": discord.Color.orange(),
+    "Champion": discord.Color.gold(),
+    "Hero": discord.Color.green(),
+    "Legend": discord.Color.blue(),
+    "Mythic": discord.Color.purple(),
+    "Ascendant": discord.Color.teal(),
+    "Immortal": discord.Color.dark_red(),
+    "Celestial": discord.Color.dark_blue(),
+    "Transcendent": discord.Color.dark_purple(),
+    "Aetherborn": discord.Color.dark_teal(),
+    "Cosmic": discord.Color.dark_magenta(),
+    "Divine": discord.Color.green(),
+    "Eternal": discord.Color.red(),
+    "Enlightened": discord.Color.blue(),
+    }
+    _INVISIBLE_RE = re.compile(r'[\u200D\uFE0F\u200E\u200F\u2060-\u2064\uFEFF]', flags=re.UNICODE)
+    _CTRL_RE = re.compile(r'[\x00-\x1F\x7F]', flags=re.UNICODE)
+    _space_collapse_re = re.compile(r'\s+', flags=re.UNICODE)
+
 
 class ExternalAPIs:
     """
@@ -85,7 +113,7 @@ class ProgressionConstants:
     """
 
     @classmethod # use as a method to avoid issues with ShopEmojis not being defined yet
-    def COINS_EMOJI(cls):
+    def coins_emoji(cls):
         return f"{ShopEmojis['Coins']}"
     
     PROFILE_PNG = "profile.png"
@@ -128,3 +156,16 @@ class PollingConstants:
     """
     MODAL_PLACEHOLDER = "Leave empty if not needed"
     SAFETY_TIMEOUT_MS = 2000 
+    
+class AnimeAPIConstants:
+    """
+    Constants used in the Anime API utilities for managing timeouts and fallbacks.
+    These constants help ensure that API calls do not hang indefinitely and
+     provide fallback options when data is unavailable.
+    """
+    TIMEOUT_SECONDS = 10
+    DEFAULT_TIMEOUT = aiohttp.ClientTimeout(total=TIMEOUT_SECONDS)
+    FALLBACK_NAMES = [
+        "Naruto Uzumaki", "Monkey D. Luffy", "Goku", "Light Yagami", "Eren Yeager", "Levi Ackerman",
+        "Saitama", "Edward Elric", "Spike Spiegel", "Lelouch Lamperouge", "Killua Zoldyck", "Gon Freecss"
+]
