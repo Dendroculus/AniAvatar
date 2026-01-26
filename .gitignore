@@ -51,3 +51,6 @@ data/*.sqlite3
 # Logs
 logs/
 *.log
+
+# personal testing
+api_test.py
