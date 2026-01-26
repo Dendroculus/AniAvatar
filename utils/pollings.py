@@ -293,8 +293,8 @@ async def reconstruct_poll(bot: commands.Bot, row: Dict[str, Any]) -> None:
     if ended:
         return
 
-    options = await _parse_options(options_json)
-    votes_raw = await _parse_votes(votes_json)
+    options = _parse_options(options_json)
+    votes_raw =  _parse_votes(votes_json)
     sanitized_votes = _sanitize_votes(options, votes_raw)
     remaining_seconds = _remaining_seconds(end_time)
 
@@ -405,34 +405,39 @@ class PollView(discord.ui.View):
         if not self.ended:
             await self.on_timeout()
 
+    async def _send_poll_error(self, interaction: discord.Interaction, message: str):
+        """Helper to send ephemeral error messages safely."""
+        try:
+            if not interaction.response.is_done():
+                await interaction.response.send_message(message, ephemeral=True)
+            else:
+                await interaction.followup.send(message, ephemeral=True)
+        except Exception:
+            pass
+
+    async def _handle_poll_expiration(self):
+        """Helper to handle the cleanup when a poll expires naturally."""
+        if self.updater_task and not self.updater_task.done():
+            try:
+                self.updater_task.cancel()
+            except Exception:
+                pass
+        await self.on_timeout()
+
     async def _ensure_poll_active(self, interaction: discord.Interaction) -> bool:
         """
         Ensure the poll is still active before processing an interaction.
+        Refactored to reduce Cognitive Complexity.
         """
         if self.ended:
-            try:
-                await interaction.response.send_message("⚠️ Poll already closed.", ephemeral=True)
-            except discord.errors.InteractionResponded:
-                try:
-                    await interaction.followup.send("⚠️ Poll already closed.", ephemeral=True)
-                except Exception:
-                    pass
+            await self._send_poll_error(interaction, "⚠️ Poll already closed.")
             return False
+
         if self.end_time and datetime.now(timezone.utc) >= self.end_time:
-            if self.updater_task and not self.updater_task.done():
-                try:
-                    self.updater_task.cancel()
-                except Exception:
-                    pass
-            await self.on_timeout()
-            try:
-                await interaction.response.send_message("⚠️ Poll has already ended.", ephemeral=True)
-            except discord.errors.InteractionResponded:
-                try:
-                    await interaction.followup.send("⚠️ Poll has already ended.", ephemeral=True)
-                except Exception:
-                    pass
+            await self._handle_poll_expiration()
+            await self._send_poll_error(interaction, "⚠️ Poll has already ended.")
             return False
+
         return True
 
     def _cancel_updater_if_needed(self):
@@ -600,70 +605,76 @@ class PollView(discord.ui.View):
         await interaction.response.defer(ephemeral=True)
         await self.on_timeout()
 
+    async def _respond_to_interaction(self, interaction: discord.Interaction, msg: str):
+        """Helper to safely send the ephemeral confirmation."""
+        try:
+            if not interaction.response.is_done():
+                await interaction.response.send_message(msg, ephemeral=True)
+            else:
+                await interaction.followup.send(msg, ephemeral=True)
+        except Exception:
+            pass
+
+    async def _resend_poll_message(self, embed: discord.Embed):
+        """Helper to send a new message if editing fails completely."""
+        try:
+            if self.message and self.message.channel:
+                self.message = await self.message.channel.send(embed=embed, view=self)
+        except Exception as ex:
+            print(f"[update_poll] failed to send new message: {ex}")
+
+    async def _recover_message_state(self, embed: discord.Embed):
+        """Helper to attempt re-fetching the message before editing, falling back to resend."""
+        try:
+            if self.message and self.message.channel:
+                self.message = await self.message.channel.fetch_message(self.message.id)
+                await self.message.edit(embed=embed, view=self)
+        except Exception:
+            await self._resend_poll_message(embed)
+
+    async def _retry_with_smaller_embeds(self) -> bool:
+        """Helper to retry editing with smaller visual elements to satisfy size limits."""
+        for bl in (8, 6, 4, 2):
+            try:
+                smaller_embed = self.make_poll_embed(bar_len=bl)
+                if self.message:
+                    await self.message.edit(embed=smaller_embed, view=self)
+                return True
+            except Exception:
+                continue
+        return False
+
+    async def _handle_update_error(self, error: Exception, embed: discord.Embed):
+        """Dispatches error handling logic based on exception type."""
+        err_str = str(error).lower()
+        if isinstance(error, discord.errors.HTTPException) and ("embed size" in err_str or "exceeds" in err_str):
+            if await self._retry_with_smaller_embeds():
+                return
+
+        # Fallback for non-size errors or if size retry failed
+        await self._recover_message_state(embed)
+
     async def update_poll(self, interaction: discord.Interaction, ephemeral_msg: str):
         """
         Update the Discord message embed and respond to the interaction with an
         ephemeral confirmation.
+        Refactored to reduce Cognitive Complexity.
         """
         embed = self.make_poll_embed()
+        
         if self.message:
             try:
                 await self.message.edit(embed=embed, view=self)
-            except discord.errors.HTTPException as e:
-                # Retry logic for embed size limits
-                err_str = str(e).lower()
-                if "embed size" in err_str or "exceeds" in err_str:
-                    for bl in (8, 6, 4, 2):
-                        try:
-                            smaller = self.make_poll_embed(bar_len=bl)
-                            await self.message.edit(embed=smaller, view=self)
-                            embed = smaller
-                            break
-                        except Exception:
-                            continue
-                    else:
-                        try:
-                            fetched = await self.message.channel.fetch_message(self.message.id)
-                            self.message = fetched
-                            await self.message.edit(embed=embed, view=self)
-                        except Exception:
-                            try:
-                                new_msg = await self.message.channel.send(embed=embed, view=self)
-                                self.message = new_msg
-                            except Exception as ex:
-                                print(f"[update_poll] failed to update/send poll message: {ex}")
-                else:
-                    try:
-                        fetched = await self.message.channel.fetch_message(self.message.id)
-                        self.message = fetched
-                        await self.message.edit(embed=embed, view=self)
-                    except Exception:
-                        try:
-                            new_msg = await self.message.channel.send(embed=embed, view=self)
-                            self.message = new_msg
-                        except Exception as ex:
-                            print(f"[update_poll] failed to recover from HTTPException: {ex}")
-            except Exception :
-                try:
-                    new_msg = await self.message.channel.send(embed=embed, view=self)
-                    self.message = new_msg
-                except Exception as ex:
-                    print(f"[update_poll] unexpected failure editing/sending message: {ex}")
+            except Exception as e:
+                await self._handle_update_error(e, embed)
         else:
+            # First time sending or lost reference
             try:
-                sent = await interaction.channel.send(embed=embed, view=self)
-                self.message = sent
+                self.message = await interaction.channel.send(embed=embed, view=self)
             except Exception:
                 pass
-        try:
-            await interaction.response.send_message(ephemeral_msg, ephemeral=True)
-        except discord.errors.InteractionResponded:
-            try:
-                await interaction.followup.send(ephemeral_msg, ephemeral=True)
-            except Exception:
-                pass
-        except Exception:
-            pass
+
+        await self._respond_to_interaction(interaction, ephemeral_msg)
 
     def make_poll_embed(self, closed: bool = False, bar_len: int = 10):
         """

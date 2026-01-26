@@ -1,7 +1,7 @@
 import discord
 import asyncio
 from constants.configs import TradingConstants as TC, ProgressionConstants as PC
-from constants.emojis import MinoriEmojis, ShopEmojis
+from constants.emojis import MinoriEmojis, ShopEmojis, CustomEmojis
 
 """
 tradingUI.py
@@ -84,85 +84,97 @@ class InventorySelect(discord.ui.Select):
         if hasattr(self, "message") and self.message:
             await self.message.edit(view=self)
 
+    async def _check_level_cap(self, interaction: discord.Interaction, item: str) -> bool:
+        """Helper to check if the user is at max level before using EXP items."""
+        if item not in TC.POTION_ITEMS:
+            return False
+            
+        _, level = await self.cog.user_repo.get_user(self.user_id, self.guild_id)
+        if level >= PC.MAX_LEVEL:
+            await interaction.followup.send(
+                f"{MinoriEmojis['MinoriWink']} You’ve already reached the max level! You can’t use {CustomEmojis['EXP']} items anymore.", 
+                ephemeral=True
+            )
+            return True
+        return False
+
+    async def _apply_item_effects(self, interaction: discord.Interaction, item: str, emoji: str) -> str:
+        """Helper to apply the specific effects of an item and generate feedback text."""
+        feedback = f"You used {emoji} **{item}**!"
+
+        if item in TC.POTION_ITEMS:
+            gain, extra_msg = await self.cog.apply_potion_effect(
+                self.user_id, self.guild_id, item, interaction.channel
+            )
+            feedback = f"You used {emoji} **{item}** and gained {gain} {TC.EXP_EMOJI}!"
+            if extra_msg:
+                feedback += f"\n{extra_msg}"
+
+        elif item == TC.MYSTERY_BOX_NAME:
+            rewards = await self.cog.apply_mystery_box(self.user_id, self.guild_id)
+            if rewards:
+                lines = []
+                for r_item, r_qty in rewards:
+                    d = await self.cog.trading_repo.get_item_details(r_item)
+                    em = d["emoji"] if d else "📦"
+                    lines.append(f"{r_qty}x {em} {r_item}")
+                feedback = f"{ShopEmojis['MysteryBox']} You opened a {TC.MYSTERY_BOX_NAME} and got:\n" + "\n".join(lines)
+        
+        return feedback
+
+    async def _update_inventory_ui(self, interaction: discord.Interaction, feedback_msg: str):
+        """Helper to fetch updated inventory and refresh the Discord view."""
+        items = await self.cog.trading_repo.get_user_inventory(self.user_id, self.guild_id)
+
+        if not items:
+            await interaction.edit_original_response(
+                embed=None, view=None, content="🧯 Your inventory is now empty."
+            )
+            await interaction.followup.send(feedback_msg, ephemeral=True)
+            return
+
+        inventory_text = "\n".join(f"{emoji} {name} x{qty}" for name, qty, emoji in items)
+        embed = discord.Embed(
+            title=f"{interaction.user.display_name}'s Inventory",
+            description=inventory_text,
+            color=discord.Color.dark_purple()
+        )
+        embed.set_thumbnail(url=interaction.user.display_avatar.url)
+
+        new_view = InventoryView(self.cog, self.user_id, self.guild_id, items)
+        await interaction.edit_original_response(embed=embed, view=new_view)
+        await interaction.followup.send(feedback_msg, ephemeral=True)
+
     async def callback(self, interaction: discord.Interaction):
         """Process item usage, deduct from DB, and apply effects."""
         if hasattr(self.parent_view, "reset_timer"):
             self.parent_view.reset_timer()
+            
         if interaction.user.id != self.user_id:
-            await interaction.response.send_message("⚠️ This is not your inventory!", ephemeral=True)
+            return await interaction.response.send_message("⚠️ This is not your inventory!", ephemeral=True)
+
+        selected_item = self.values[0]
+        await interaction.response.defer()
+        
+        # 1. Check Level Cap
+        if await self._check_level_cap(interaction, selected_item):
             return
 
-        try:
-            selected_item = self.values[0]
-            await interaction.response.defer()
-            
-            repo = self.cog.trading_repo
-            
-            # Fetch item emoji for feedback
-            details = await repo.get_item_details(selected_item)
-            selected_emoji = details["emoji"] if details else "📦"
+        # 2. Use Item (Deduct quantity)
+        repo = self.cog.trading_repo
+        new_qty = await repo.use_item(self.user_id, self.guild_id, selected_item)
+        
+        if new_qty is None:
+            return await interaction.followup.send("❌ You don't own this item anymore.", ephemeral=True)
 
-            # Check level cap for potions BEFORE consuming
-            if selected_item in TC.POTION_ITEMS:
-                # Use economy service (passed as progression_cog in ShopView, but here self.cog is Trading)
-                # self.cog.economy_service gives access to user data
-                _, level = await self.cog.user_repo.get_user(self.user_id, self.guild_id)
-                if level >= PC.MAX_LEVEL:
-                    await interaction.followup.send(f"{MinoriEmojis['MinoriWink']} You’ve already reached the max level! You can’t use {TC.EXP_EMOJI} items anymore.", ephemeral=True)
-                    return
+        # 3. Apply Effects
+        details = await repo.get_item_details(selected_item)
+        selected_emoji = details["emoji"] if details else "📦"
+        
+        feedback_msg = await self._apply_item_effects(interaction, selected_item, selected_emoji)
 
-            # Use item via Repository (Handles SQL UPDATE/DELETE)
-            new_qty = await repo.use_item(self.user_id, self.guild_id, selected_item)
-            
-            if new_qty is None:
-                await interaction.followup.send("❌ You don't own this item anymore.", ephemeral=True)
-                return
-
-            feedback_msg = f"You used {selected_emoji} **{selected_item}**!"
-
-            if selected_item in TC.POTION_ITEMS:
-                gain, extra_msg = await self.cog.apply_potion_effect(
-                    self.user_id, self.guild_id, selected_item, interaction.channel
-                )
-                feedback_msg = f"You used {selected_emoji} **{selected_item}** and gained {gain} {TC.EXP_EMOJI}!"
-                if extra_msg:
-                    feedback_msg += f"\n{extra_msg}" 
-                    
-            if selected_item == TC.MYSTERY_BOX_NAME:
-                rewards = await self.cog.apply_mystery_box(self.user_id, self.guild_id)
-                if rewards:
-                    reward_lines = []
-                    # We need to look up emojis for the rewards
-                    # Optimization: create a small map or fetch individually
-                    for item, qty in rewards:
-                        d = await repo.get_item_details(item)
-                        em = d["emoji"] if d else "📦"
-                        reward_lines.append(f"{qty}x {em} {item}")
-                    feedback_msg = f"{ShopEmojis['MysteryBox']} You opened a {TC.MYSTERY_BOX_NAME} and got:\n" + "\n".join(reward_lines)
-
-            # Reload inventory for the UI update
-            items = await repo.get_user_inventory(self.user_id, self.guild_id)
-
-            if not items:
-                await interaction.edit_original_response(embed=None, view=None, content="🧯 Your inventory is now empty.")
-                await interaction.followup.send(feedback_msg, ephemeral=True)
-                return
-
-            inventory_text = "\n".join(f"{emoji} {name} x{qty}" for name, qty, emoji in items)
-            embed = discord.Embed(
-                title=f"{interaction.user.display_name}'s Inventory",
-                description=inventory_text,
-                color=discord.Color.dark_purple()
-            )
-            embed.set_thumbnail(url=interaction.user.display_avatar.url)
-
-            new_view = InventoryView(self.cog, self.user_id, self.guild_id, items)
-            await interaction.edit_original_response(embed=embed, view=new_view)
-            await interaction.followup.send(feedback_msg)
-
-        finally:
-            pass
-
+        # 4. Refresh UI
+        await self._update_inventory_ui(interaction, feedback_msg)
 
 class InventoryView(discord.ui.View):
     """
