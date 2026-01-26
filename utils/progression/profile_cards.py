@@ -122,77 +122,29 @@ def split_into_runs(text: str):
     runs.append((current_run, current_is_cjk))
     return runs
 
-
-def get_title(level: int):
-    """Map a numeric level to a human-friendly title string."""
-    if level < 5:
-         return "Novice"
-    elif level < 10:
-         return "Warrior"
-    elif level < 15:
-         return "Elite"
-    elif level < 20:
-         return "Champion"
-    elif level < 25:
-         return "Hero"
-    elif level < 30:
-         return "Legend"
-    elif level < 35:
-         return "Mythic"
-    elif level < 40:
-         return "Ascendant"
-    elif level < 50:
-         return "Immortal"
-    elif level < 60:
-         return "Celestial"
-    elif level < 70:
-         return "Transcendent"
-    elif level < 80:
-         return "Aetherborn"
-    elif level < 90:
-         return "Cosmic"
-    elif level < 100:
-         return "Divine"
-    elif level < 125:
-         return "Eternal"
-    else:
-         return "Enlightened"
+def get_title(level: int) -> str:
+    """
+    Map a numeric level to a human-friendly title string.
+    Args:
+        level (int): The user's level.
+    Returns:
+        str: The corresponding title.
+    """
+    for threshold, title in PCC._TITLE_THRESHOLDS:
+        if level < threshold:
+            return title
+    return "Enlightened"
 
 def get_title_emoji(level: int):
-    """Return a compact emoji token representing the title tier."""
-    if level < 5:
-         return TitleEmojis["NOVICE"]
-    elif level < 10:
-         return TitleEmojis["WARRIOR"]
-    elif level < 15:
-         return TitleEmojis["ELITE"]
-    elif level < 20:
-         return TitleEmojis["CHAMPION"]
-    elif level < 25:
-         return TitleEmojis["HERO"]
-    elif level < 30:
-         return TitleEmojis["LEGEND"]
-    elif level < 35:
-         return TitleEmojis["MYTHIC"]
-    elif level < 40:
-         return TitleEmojis["ASCENDANT"]
-    elif level < 50:
-         return TitleEmojis["IMMORTAL"]
-    elif level < 60:
-         return TitleEmojis["CELESTIAL"]
-    elif level < 70:
-         return TitleEmojis["TRANSCENDENT"]
-    elif level < 80:
-         return TitleEmojis["AETHERBORN"]
-    elif level < 90:
-         return TitleEmojis["COSMIC"]
-    elif level < 100:
-         return TitleEmojis["DIVINE"]
-    elif level < 125:
-         return TitleEmojis["ETERNAL"]
-    else:
-         return TitleEmojis["ENLIGHTENED"]
-
+    """
+    Return a compact emoji token representing the title tier.
+    Args:
+        level (int): The user's level.
+    Returns:
+        str: The corresponding emoji.
+    """
+    title_key = get_title(level).upper()
+    return TitleEmojis.get(title_key, TitleEmojis["NOVICE"])
 
 async def get_user_rank(pool: asyncpg.Pool, user_id: int, guild_id: int, max_level: int):
      """Query the users table for ordering by level/exp and return the 1-based rank."""
@@ -484,25 +436,67 @@ class CardDrawer:
             oldest_key = min(self._leaderboard_cache.items(), key=lambda kv: kv[1][0])[0]
             self._leaderboard_cache.pop(oldest_key, None)
 
-    #  Drawing Helpers 
+    @staticmethod
+    def _draw_run_styled(draw, x, y, text, font, fill, small, is_cjk_mode, stroke_width, stroke_fill) -> None:
+        """
+        Helper to handle the specific drawing style commands.
+        
+        Args:
+            draw (ImageDraw.Draw): The drawing context.
+            x (int): The x-coordinate.
+            y (int): The y-coordinate.
+            text (str): The text to draw.
+            font (ImageFont.FreeTypeFont): The font to use.
+            fill (tuple): The fill color.
+            small (bool): Whether to use small text style.
+            is_cjk_mode (bool): Whether the current run is CJK.
+            stroke_width (int): Stroke width for non-small text.
+            stroke_fill (tuple): Stroke fill color for non-small text.
+
+        Returns:
+            None
+        """
+        if small:
+            draw.text((x + 1, y), text, font=font, fill=(0, 0, 0, 100))
+            if is_cjk_mode:
+                draw.text((x, y), text, font=font, fill=fill, stroke_width=int(round(1.1)), stroke_fill=(255, 255, 255, 255))
+            else:
+                draw.text((x, y), text, font=font, fill=fill)
+        else:
+            draw.text((x + 2, y + 2), text, font=font, fill=(0, 0, 0, 180))
+            draw.text((x, y), text, font=font, fill=fill, stroke_width=stroke_width, stroke_fill=stroke_fill)
 
     @staticmethod
-    def _draw_cjk_profile(draw, pos, text, primary_font, cjk_font, fill, small=False, stroke_width=2, stroke_fill=(0,0,0,255)):
+    def _draw_cjk_profile(draw, pos, text, primary_font, cjk_font, fill, small=False, stroke_width=2, stroke_fill=(0,0,0,255)) -> None:
+        """ 
+        Handle mixed CJK and non-CJK text drawing for profile cards.
+        
+        Args:
+            draw (ImageDraw.Draw): The drawing context.
+            pos (tuple): The (x, y) position to start drawing.
+            text (str): The text to draw.
+            primary_font (ImageFont.FreeTypeFont): The primary font for non-CJK text.
+            cjk_font (ImageFont.FreeTypeFont): The CJK font for CJK text.
+            fill (tuple): The fill color.
+            small (bool): Whether to use small text style.
+            stroke_width (int): Stroke width for non-small text.
+            stroke_fill (tuple): Stroke fill color for non-small text.
+        
+        Returns:
+            None
+        """
         x0, y0 = pos
         runs = split_into_runs(text)
+        
         for run_text, is_cjk in runs:
-            font_to_use = cjk_font if (is_cjk and cjk_font) else primary_font
+            is_cjk_mode = bool(is_cjk and cjk_font)
+            font_to_use = cjk_font if is_cjk_mode else primary_font
             y_offset = -3 if is_cjk else 0
 
-            if small:
-                draw.text((x0+1, y0 + y_offset), run_text, font=font_to_use, fill=(0,0,0,100))
-                if is_cjk and cjk_font:
-                    draw.text((x0, y0 + y_offset), run_text, font=font_to_use, fill=fill, stroke_width=int(round(1.1)), stroke_fill=(255,255,255,255))
-                else:
-                    draw.text((x0, y0 + y_offset), run_text, font=font_to_use, fill=fill)
-            else:
-                draw.text((x0+2, y0+2 + y_offset), run_text, font=font_to_use, fill=(0,0,0,180))
-                draw.text((x0, y0 + y_offset), run_text, font=font_to_use, fill=fill, stroke_width=stroke_width, stroke_fill=stroke_fill)
+            CardDrawer._draw_run_styled(
+                draw, x0, y0 + y_offset, run_text, font_to_use, fill, 
+                small, is_cjk_mode, stroke_width, stroke_fill
+            )
 
             try:
                 w = draw.textlength(run_text, font=font_to_use)
@@ -857,143 +851,193 @@ class CardDrawer:
             "level_col_start": level_col_start, "name_area_width": name_area_width,
         }
 
-    def _draw_leaderboard_row(self, im, draw, r, i, layout, res, rank_offset):
-        # Extract resources
-        font_rank = res["font_rank"]
-        font_name = res["font_name"]
-        font_medium = res["font_medium"]
-        font_bold = res["font_bold"]
-        cjk_font_name = res["cjk_font_name"]
-        cjk_font_medium = res["cjk_font_medium"]
-        cjk_font_bold = res["cjk_font_bold"]
-        exp_icon = res["exp_icon"]
-
-        # Extract layout
-        left_x = layout["left_x"]
-        row_height = layout["row_height"]
-        panel_radius = layout["panel_radius"]
-        panel_color = layout["panel_color"]
-        gradient_direction = layout["gradient_direction"]
-        avatar_size = layout["avatar_size"]
-        bullet_r = layout["bullet_r"]
-        bullet_vertical_nudge = layout["bullet_vertical_nudge"]
-        name_area_width = layout["name_area_width"]
-        badge_shift = LeaderboardLayout.BADGE_SHIFT
-
-        try:
-            rank_idx = int(r.get("rank", i+1))
-        except (ValueError, TypeError):
-            rank_idx = i+1
+    def _draw_row_background(self, im, draw, x, y, w, h, rank_idx, i, layout):
+        """
+        Helper to render the row background (gradient for top 3, solid for others).
+       
+       Args:
+            im (PIL.Image.Image): The image to draw on.
+            draw (PIL.ImageDraw.Draw): The drawing context.
+            x (int): The x-coordinate for the panel.
+            y (int): The y-coordinate for the panel.
+            w (int): The width of the panel.
+            h (int): The height of the panel.
+            rank_idx (int): The rank index (1-based).
+            i (int): The row index (0-based).
+            layout (dict): The precomputed layout parameters.
             
-        y = layout["start_y"] + i * (row_height + max(8, int(row_height * 0.2)))
-        panel_w = layout["right_x"] - left_x
-        panel_h = row_height
-        
-        # Panel Background
-        colors = None
-        if rank_idx == 1:
-             colors = [(255,223,0),(255,140,0)]
-        elif rank_idx == 2:
-             colors = [(220,220,220),(169,169,169)]
-        elif rank_idx == 3:
-             colors = [(205,127,50),(139,69,19)]
+        Returns:
+            None
+        """
+        rank_colors = {
+            1: [(255, 223, 0), (255, 140, 0)],
+            2: [(220, 220, 220), (169, 169, 169)],
+            3: [(205, 127, 50), (139, 69, 19)]
+        }
+        colors = rank_colors.get(rank_idx)
 
         if colors:
-            grad_panel = self.assets.get_linear_gradient((panel_w, panel_h), colors, direction=gradient_direction or "horizontal")
-            mask = Image.new("L", (panel_w, panel_h), 0)
-            ImageDraw.Draw(mask).rounded_rectangle((0,0,panel_w,panel_h), radius=panel_radius, fill=255)
-            im.paste(grad_panel, (left_x, y), mask)
+            grad_panel = self.assets.get_linear_gradient(
+                (w, h), colors, direction=layout["gradient_direction"] or "horizontal"
+            )
+            mask = Image.new("L", (w, h), 0)
+            ImageDraw.Draw(mask).rounded_rectangle((0, 0, w, h), radius=layout["panel_radius"], fill=255)
+            im.paste(grad_panel, (x, y), mask)
         else:
-            panel_fill = panel_color if i % 2 == 0 else tuple(max(0, c-6) for c in panel_color)
-            draw.rounded_rectangle((left_x, y, left_x + panel_w, y + panel_h), radius=panel_radius, fill=panel_fill)
+            panel_color = layout["panel_color"]
+            panel_fill = panel_color if i % 2 == 0 else tuple(max(0, c - 6) for c in panel_color)
+            draw.rounded_rectangle((x, y, x + w, y + h), radius=layout["panel_radius"], fill=panel_fill)
 
-        # Avatar
-        center_y = y + panel_h // 2
-        av_x = left_x + layout["avatar_x_offset"]
-        av_y = int(center_y - avatar_size / 2)
-        avatar_bytes = r.get("avatar_bytes")
+    def _draw_row_avatar(self, im, draw, avatar_bytes, x, y, size) -> None:
+        """
+        Helper to render the user avatar or a fallback placeholder.
         
+        Args:
+            im (PIL.Image.Image): The image to draw on.
+            draw (PIL.ImageDraw.Draw): The drawing context.
+            avatar_bytes (bytes): The avatar image bytes.
+            x (int): The x-coordinate for the avatar.
+            y (int): The y-coordinate for the avatar.
+            size (int): The size of the avatar.
+            
+        Returns:
+            None
+        """
         avatar_loaded = False
         if avatar_bytes:
-            avatar = self.assets.get_avatar(avatar_bytes, avatar_size)
+            avatar = self.assets.get_avatar(avatar_bytes, size)
             if avatar:
-                mask = Image.new("L", (avatar_size, avatar_size), 0)
-                ImageDraw.Draw(mask).ellipse((0,0,avatar_size,avatar_size), fill=255)
-                im.paste(avatar, (av_x, av_y), mask)
+                mask = Image.new("L", (size, size), 0)
+                ImageDraw.Draw(mask).ellipse((0, 0, size, size), fill=255)
+                im.paste(avatar, (x, y), mask)
                 avatar_loaded = True
 
         if not avatar_loaded:
-            draw.ellipse((av_x, av_y, av_x + avatar_size, av_y + avatar_size), fill=(100,100,100))
+            draw.ellipse((x, y, x + size, y + size), fill=(100, 100, 100))
 
-        # Rank
-        rank_color = {1:(255,255,255),2:(255,255,255),3:(255,255,255)}.get(rank_idx,(200,200,200))
-        rank_str = f"#{rank_idx}"
-        rank_w = draw.textlength(rank_str, font=font_rank)
-        rank_box_x = av_x + avatar_size + layout["between_avatar_and_rank"]
-        rx = int(rank_box_x + (layout["max_rank_w"] - rank_w) / 2)
-        ry = int(center_y - res["font_rank_height"]/2) + rank_offset
-        draw.text((rx, ry), rank_str, font=font_rank, fill=rank_color)
-
-        # Bullet 1
-        bullet1_x = rank_box_x + layout["max_rank_w"] + layout["after_rank_gap"]
-        bullet1_y = int(center_y - bullet_r + bullet_vertical_nudge)
-        draw.ellipse((bullet1_x, bullet1_y, bullet1_x + bullet_r*2, bullet1_y + bullet_r*2), fill=(255,255,255))
-
-        # Name
-        name_raw = str(r.get("name") or "Unknown")
-        nm = strip_emojis(name_raw) or name_raw.strip()
-        if len(nm) > LeaderboardLayout.NAME_MAX_CHARS:
-            nm = nm[:LeaderboardLayout.NAME_MAX_CHARS-3]+ "..."
-        if draw.textlength(nm, font=font_name) > name_area_width: 
-            nm = truncate_to_width(nm, font=font_name, max_w=name_area_width, draw=draw)
+    def _draw_row_exp(self, im, draw, r, center_y, layout, res) -> None:
+        """
+        Helper to calculate and render the Experience points text and icon.
         
-        name_start_x = bullet1_x + bullet_r*2 + 12
-        self._draw_lb_cjk(draw, (name_start_x, ry), nm, font_name, cjk_font_name, (255,255,255))
-
-        # Bullet 2
-        bullet2_x = int(layout["level_col_start"] - layout["bullet_spacing"] - bullet_r*2)
-        bullet2_y = int(center_y - bullet_r + bullet_vertical_nudge) - 2
-        draw.ellipse((bullet2_x, bullet2_y, bullet2_x + bullet_r*2, bullet2_y + bullet_r*2), fill=(255,255,255))
-
-        # Level
-        lvl_x = int(layout["level_col_start"]) + 2
-        lvl_y = int(center_y - (res["font_medium_height"]) / 2) - 4
-        level_val = int(r.get("level", 0))
-        level_text = f"LVL {level_val}"
-        self._draw_lb_cjk(draw, (lvl_x, lvl_y), level_text, font_medium, cjk_font_medium, (255,255,255))
-
-        # Badge
-        title_name = (r.get("title") or "").strip()
-        badge_path = AP.TITLE_EMOJI_FILES.get(title_name) if isinstance(AP.TITLE_EMOJI_FILES, dict) else None
-        badge_img = self.assets.get_icon(badge_path, layout["badge_size"])
-        if badge_img:
-            bx = lvl_x + layout["fixed_level_w"] + badge_shift
-            by = int(center_y - layout["badge_size"]/2)
-            im.paste(badge_img, (int(bx), int(by)), badge_img)
-
-        # EXP
+        Args:
+            im (PIL.Image.Image): The image to draw on.
+            draw (PIL.ImageDraw.Draw): The drawing context.
+            r (dict): The row data.
+            center_y (int): The vertical center position for the row.
+            layout (dict): The precomputed layout parameters.
+            res (dict): The preloaded resources (fonts, icons).
+            
+        Returns:
+            None
+        """
         try:
             exp_val = int(r.get("exp", 0) or 0)
             next_val = int(r.get("next_exp")) if r.get("next_exp") is not None else None
         except (ValueError, TypeError):
             exp_val, next_val = 0, None
-            
+
         exp_text = "MAXED" if next_val is None else f"{format_number(exp_val)}/{format_number(next_val)}"
+        
+        font_bold = res["font_bold"]
+        exp_icon = res["exp_icon"]
+        
         exp_text_w = draw.textlength(exp_text, font=font_bold)
         icon_gap = (exp_icon.width + 6) if exp_icon else 0
         exp_block_w = exp_text_w + icon_gap
         exp_start = int(layout["exp_center_x"] - exp_block_w // 2) + 12
-        
+
         if exp_icon:
             icon_y = int(center_y - exp_icon.height / 2)
             im.paste(exp_icon, (int(exp_start), icon_y), exp_icon)
             text_x = exp_start + exp_icon.width + 6
         else:
             text_x = exp_start
-            
-        text_y = int(center_y - res["font_bold_height"] / 2) - 4
-        self._draw_lb_cjk(draw, (text_x, text_y), exp_text, font_bold, cjk_font_bold, (255,255,255))
 
+        text_y = int(center_y - res["font_bold_height"] / 2) - 4
+        self._draw_lb_cjk(draw, (text_x, text_y), exp_text, font_bold, res["cjk_font_bold"], (255, 255, 255))
+
+    def _draw_leaderboard_row(self, im, draw, r, i, layout, res, rank_offset) -> None:
+        """
+        Renders a single row on the leaderboard image.
+        Refactored to reduce Cognitive Complexity.
+        
+        Args:
+            im (PIL.Image.Image): The image to draw on.
+            draw (PIL.ImageDraw.Draw): The drawing context.
+            r (dict): The row data.
+            i (int): The row index.
+            layout (dict): The precomputed layout parameters.
+            res (dict): The preloaded resources (fonts, icons).
+            rank_offset (int): Vertical offset for the rank text.
+            
+        Returns:
+            None
+        """
+        # Layout Calculations
+        left_x = layout["left_x"]
+        row_height = layout["row_height"]
+        y = layout["start_y"] + i * (row_height + max(8, int(row_height * 0.2)))
+        panel_w = layout["right_x"] - left_x
+        center_y = y + row_height // 2
+
+        try:
+            rank_idx = int(r.get("rank", i + 1))
+        except (ValueError, TypeError):
+            rank_idx = i + 1
+
+        # 1. Draw Panel Background
+        self._draw_row_background(im, draw, left_x, y, panel_w, row_height, rank_idx, i, layout)
+
+        # 2. Draw Avatar
+        av_x = left_x + layout["avatar_x_offset"]
+        av_y = int(center_y - layout["avatar_size"] / 2)
+        self._draw_row_avatar(im, draw, r.get("avatar_bytes"), av_x, av_y, layout["avatar_size"])
+
+        # 3. Draw Rank
+        font_rank = res["font_rank"]
+        rank_color = {1: (255, 255, 255), 2: (255, 255, 255), 3: (255, 255, 255)}.get(rank_idx, (200, 200, 200))
+        rank_str = f"#{rank_idx}"
+        rank_box_x = av_x + layout["avatar_size"] + layout["between_avatar_and_rank"]
+        rx = int(rank_box_x + (layout["max_rank_w"] - draw.textlength(rank_str, font=font_rank)) / 2)
+        ry = int(center_y - res["font_rank_height"] / 2) + rank_offset
+        draw.text((rx, ry), rank_str, font=font_rank, fill=rank_color)
+
+        # 4. Draw Name (with bullet separators)
+        bullet_r = layout["bullet_r"]
+        bullet1_x = rank_box_x + layout["max_rank_w"] + layout["after_rank_gap"]
+        bullet1_y = int(center_y - bullet_r + layout["bullet_vertical_nudge"])
+        draw.ellipse((bullet1_x, bullet1_y, bullet1_x + bullet_r * 2, bullet1_y + bullet_r * 2), fill=(255, 255, 255))
+
+        name_raw = str(r.get("name") or "Unknown")
+        nm = strip_emojis(name_raw) or name_raw.strip()
+        if len(nm) > LeaderboardLayout.NAME_MAX_CHARS:
+            nm = nm[:LeaderboardLayout.NAME_MAX_CHARS - 3] + "..."
+        if draw.textlength(nm, font=res["font_name"]) > layout["name_area_width"]:
+            nm = truncate_to_width(nm, font=res["font_name"], max_w=layout["name_area_width"], draw=draw)
+
+        name_start_x = bullet1_x + bullet_r * 2 + 12
+        self._draw_lb_cjk(draw, (name_start_x, ry), nm, res["font_name"], res["cjk_font_name"], (255, 255, 255))
+
+        # 5. Draw Level & Badge
+        bullet2_x = int(layout["level_col_start"] - layout["bullet_spacing"] - bullet_r * 2)
+        draw.ellipse((bullet2_x, int(center_y - bullet_r + layout["bullet_vertical_nudge"]) - 2, 
+                      bullet2_x + bullet_r * 2, int(center_y - bullet_r + layout["bullet_vertical_nudge"]) - 2 + bullet_r * 2), 
+                     fill=(255, 255, 255))
+
+        lvl_x = int(layout["level_col_start"]) + 2
+        lvl_y = int(center_y - (res["font_medium_height"]) / 2) - 4
+        level_text = f"LVL {int(r.get('level', 0))}"
+        self._draw_lb_cjk(draw, (lvl_x, lvl_y), level_text, res["font_medium"], res["cjk_font_medium"], (255, 255, 255))
+
+        badge_path = AP.TITLE_EMOJI_FILES.get((r.get("title") or "").strip()) if isinstance(AP.TITLE_EMOJI_FILES, dict) else None
+        badge_img = self.assets.get_icon(badge_path, layout["badge_size"])
+        if badge_img:
+            bx = lvl_x + layout["fixed_level_w"] + LeaderboardLayout.BADGE_SHIFT
+            by = int(center_y - layout["badge_size"] / 2)
+            im.paste(badge_img, (int(bx), int(by)), badge_img)
+
+        # 6. Draw EXP
+        self._draw_row_exp(im, draw, r, center_y, layout, res)
 
     def create_leaderboard_image(
         self,
