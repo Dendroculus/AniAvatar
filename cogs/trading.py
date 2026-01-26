@@ -10,6 +10,7 @@ from constants.emojis import CustomEmojis, MinoriEmojis, ShopEmojis
 from constants.configs import TradingConstants as TC, ProgressionConstants as PC
 from utils.trading_ui import format_coins, ShopView, InventoryView
 from utils.progression.profile_cards import get_title, get_title_emoji
+from utils.donate import DonateView, DonateSelect
 from services.user_repository import UserRepository
 from services.trading_repository import TradingRepository
 
@@ -342,196 +343,114 @@ class Trading(commands.Cog):
         view.message = msg
         self.open_inventories.setdefault(guild_id, {})[user_id] = msg
 
+    async def _execute_donation(self, interaction, view, item_name, amount, donor_id, receiver_id, guild_id, items):
+        """
+        Executes the donation DB transaction.
+        Args:
+            interaction: The interaction object.
+            view: The DonateView instance.
+            item_name: The name of the item being donated.
+            amount: The amount of the item being donated.
+            donor_id: The ID of the donor.
+            receiver_id: The ID of the receiver.
+            guild_id: The ID of the guild.
+            items: The list of items in the donor's inventory.
+        
+        Returns:
+            None
+        """
+        async with self.bot.pool.acquire() as conn:
+            try:
+                await conn.execute(f"SET LOCAL statement_timeout = {TC.STMT_TIMEOUT_MS}")
+            except Exception:
+                pass
+            
+            async with conn.transaction():
+                row = await conn.fetchrow(
+                    "SELECT quantity FROM user_inventory WHERE user_id = $1 AND guild_id = $2 AND item_name = $3 FOR UPDATE",
+                    donor_id, guild_id, item_name
+                )
+                
+                if not row or row["quantity"] < amount:
+                    error_text = "❌ You don't have enough of this item."
+                    if interaction.response.is_done():
+                         if view.message:
+                             await view.message.edit(content=error_text, view=view)
+                    else:
+                        await interaction.response.edit_message(content=error_text, view=view)
+                    return
+
+                await conn.execute(
+                    "UPDATE user_inventory SET quantity = quantity - $1 WHERE user_id = $2 AND guild_id = $3 AND item_name = $4",
+                    amount, donor_id, guild_id, item_name
+                )
+                await conn.execute(
+                    "DELETE FROM user_inventory WHERE user_id = $1 AND guild_id = $2 AND item_name = $3 AND quantity <= 0",
+                    donor_id, guild_id, item_name
+                )
+                await conn.execute(
+                    """
+                    INSERT INTO user_inventory (user_id, guild_id, item_name, quantity)
+                    VALUES ($1, $2, $3, $4)
+                    ON CONFLICT(user_id, guild_id, item_name) DO UPDATE SET quantity = user_inventory.quantity + EXCLUDED.quantity
+                    """,
+                    receiver_id, guild_id, item_name, amount
+                )
+
+        self.donate_cooldowns[donor_id] = datetime.now(timezone.utc) + timedelta(hours=2)
+        for child in view.children:
+            child.disabled = True
+        
+        emoji = next((em for nm, _, em in items if nm == item_name), '📦')
+        member = interaction.guild.get_member(receiver_id)
+        name = member.display_name if member else "User"
+
+        success_msg = f"You donated {amount}x {emoji} {item_name} to {name}!"
+        
+        try:
+            if not interaction.response.is_done():
+                await interaction.response.edit_message(content=success_msg, view=view)
+            elif view.message:
+                await view.message.edit(content=success_msg, view=view)
+        except Exception:
+            pass
+
     @commands.hybrid_command(name="donate", description="Give an item to another user")
     @commands.guild_only()
     async def donate(self, ctx: commands.Context, member: discord.Member):
         """
         Donate an item from the user's inventory to another member.
-
-        Args:
-            ctx (commands.Context): The command context.
-            member (discord.Member): The member to donate the item to.
         """
-        if member.bot:
-            await ctx.send(f"{MinoriEmojis['MinoriConfused']} You cannot donate to bots.")
-            return
+        if member.bot or ctx.author.id == member.id:
+            return await ctx.send(f"{MinoriEmojis['MinoriConfused']} Invalid target.")
 
-        donor_id = ctx.author.id
-        receiver_id = member.id
-
-        if donor_id == receiver_id:
-            await ctx.send(f"{MinoriEmojis['MinoriConfused']} You cannot donate to yourself.")
-            return
-
-        guild_id = ctx.guild.id
+        donor_id, guild_id = ctx.author.id, ctx.guild.id
         
         now = datetime.now(timezone.utc)
         if donor_id in self.donate_cooldowns and now < self.donate_cooldowns[donor_id]:
             remaining = self.donate_cooldowns[donor_id] - now
-            await ctx.send(f"{CustomEmojis['TIME']} You can donate again in {str(remaining).split('.')[0]}")
-            return
+            return await ctx.send(f"{CustomEmojis['TIME']} You can donate again in {str(remaining).split('.')[0]}")
 
         items = await self.trading_repo.get_user_inventory(donor_id, guild_id)
         if not items:
-            await ctx.send("🧯 Your inventory is empty, cannot donate.")
-            return
+            return await ctx.send("🧯 Your inventory is empty, cannot donate.")
 
         caps = {
-            TC.MYSTERY_BOX_NAME: 1,
-            TC.LEVEL_SKIP_TOKEN: 1,
-            TC.LARGE_EXP_POTION: 2,
-            TC.MEDIUM_EXP_POTION: 3,
-            TC.SMALL_EXP_POTION: 5
+            TC.MYSTERY_BOX_NAME: 1, TC.LEVEL_SKIP_TOKEN: 1,
+            TC.LARGE_EXP_POTION: 2, TC.MEDIUM_EXP_POTION: 3, TC.SMALL_EXP_POTION: 5
         }
 
         options = [
             discord.SelectOption(
-                label=name,
-                description=f"You have {qty}",
-                emoji=emoji,
-                value=name
+                label=name, description=f"You have {qty}", emoji=emoji, value=name
             ) for name, qty, emoji in items
         ]
 
-        class DonateView(discord.ui.View):
-            """View for handling donation interaction."""
-            def __init__(self, author_id, *args, **kwargs):
-                super().__init__(*args, **kwargs)
-                self.author_id = author_id
-
-            async def interaction_check(self, interaction: discord.Interaction) -> bool:
-                """Ensure only the command author can interact."""
-                if interaction.user.id != self.author_id:
-                    await interaction.response.send_message(
-                        "⚠️ This is not your donate menu!", ephemeral=True
-                    )
-                    return False
-                return True
-
-        class DonateAmountModal(discord.ui.Modal):
-            """Modal for entering donation amount."""
-            def __init__(self, item_name, max_amount=None):
-                super().__init__(title=f"Donate {item_name}")
-                self.item_name = item_name
-                self.max_amount = max_amount
-                self.amount_input = discord.ui.TextInput(
-                    label="Amount",
-                    placeholder=f"Max {max_amount}" if max_amount else "Enter amount",
-                    style=discord.TextStyle.short
-                )
-                self.add_item(self.amount_input)
-
-            async def on_submit(self, interaction: discord.Interaction):
-                """Handle modal submission."""
-                try:
-                    amt = int(self.amount_input.value)
-                except (ValueError, TypeError):
-                    await interaction.response.edit_message(content="❌ Invalid number.", view=view)
-                    return
-
-                if amt <= 0:
-                    await interaction.response.edit_message(content="❌ Amount must be at least 1.", view=view)
-                    return
-                if self.max_amount is not None and amt > self.max_amount:
-                    await interaction.response.edit_message(
-                        content=f"❌ You can only donate up to {self.max_amount} of this item.", 
-                        view=view
-                    )
-                    return
-
-                await finalize_donate(self.item_name, amt, interaction)
-
-        class DonateSelect(discord.ui.Select):
-            """Dropdown menu for selecting donation item."""
-            def __init__(self):
-                super().__init__(placeholder="Select an item to donate", min_values=1, max_values=1, options=options)
-
-            async def callback(self, interaction: discord.Interaction):
-                """Handle item selection."""
-                selected_item = self.values[0]
-                max_cap = caps.get(selected_item, None)
-
-                if max_cap == 1:
-                    await finalize_donate(selected_item, 1, interaction)
-                else:
-                    await interaction.response.send_modal(DonateAmountModal(selected_item, max_cap))
-
-        message: discord.Message = None
-
-        async def finalize_donate(item_name: str, amount: int, interaction: discord.Interaction):
-            """
-            Execute the donation transaction and update the UI.
-
-            Args:
-                item_name (str): The name of the item to donate.
-                amount (int): The quantity to donate.
-                interaction (discord.Interaction): The interaction context.
-            """
-            async with self.bot.pool.acquire() as conn:
-                try:
-                    await conn.execute(f"SET LOCAL statement_timeout = {TC.STMT_TIMEOUT_MS}")
-                except Exception:
-                    pass
-                    
-                async with conn.transaction():
-                    row = await conn.fetchrow(
-                        "SELECT quantity FROM user_inventory WHERE user_id = $1 AND guild_id = $2 AND item_name = $3 FOR UPDATE",
-                        donor_id, guild_id, item_name
-                    )
-                    
-                    if not row or row["quantity"] < amount:
-                        error_text = "❌ You don't have enough of this item."
-                        try:
-                            await interaction.response.edit_message(content=error_text, view=view)
-                        except discord.errors.InteractionResponded:
-                            if message:
-                                await message.edit(content=error_text, view=view)
-                            else:
-                                await interaction.followup.send(error_text, ephemeral=True)
-                        return
-
-                    await conn.execute(
-                        "UPDATE user_inventory SET quantity = quantity - $1 WHERE user_id = $2 AND guild_id = $3 AND item_name = $4",
-                        amount, donor_id, guild_id, item_name
-                    )
-                    await conn.execute(
-                        "DELETE FROM user_inventory WHERE user_id = $1 AND guild_id = $2 AND item_name = $3 AND quantity <= 0",
-                        donor_id, guild_id, item_name
-                    )
-                    await conn.execute(
-                        """
-                        INSERT INTO user_inventory (user_id, guild_id, item_name, quantity)
-                        VALUES ($1, $2, $3, $4)
-                        ON CONFLICT(user_id, guild_id, item_name) DO UPDATE SET quantity = user_inventory.quantity + EXCLUDED.quantity
-                        """,
-                        receiver_id, guild_id, item_name, amount
-                    )
-
-            self.donate_cooldowns[donor_id] = datetime.now(timezone.utc) + timedelta(hours=2)
-
-            for child in view.children:
-                child.disabled = True
-            
-            emoji = next((em for nm, _, em in items if nm == item_name), '📦')
-            
-            try:
-                await interaction.response.edit_message(
-                    content=f"You donated {amount}x {emoji} {item_name} to {member.display_name}!",
-                    view=view
-                )
-            except Exception:
-                if not interaction.response.is_done():
-                    await interaction.response.defer()
-                if message:
-                    await message.edit(
-                        content=f"You donated {amount}x {emoji} {item_name} to {member.display_name}!",
-                        view=view
-                    )
-
-        view = DonateView(ctx.author.id, timeout=180)
-        view.add_item(DonateSelect())
-        message = await ctx.send(f"Select an item to donate to {member.display_name}:", view=view)
-
+        view = DonateView(ctx.author.id, self, donor_id, member.id, guild_id, items, timeout=180)
+        view.add_item(DonateSelect(options, caps))
+        
+        view.message = await ctx.send(f"Select an item to donate to {member.display_name}:", view=view)
+        
     @commands.Cog.listener()
     async def on_guild_remove(self, guild: discord.Guild):
         """

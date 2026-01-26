@@ -1,7 +1,6 @@
 import discord
 from discord.ext import commands
 from discord.ui import View, Select
-import aiohttp
 from collections import deque
 from async_lru import alru_cache
 
@@ -74,20 +73,10 @@ class Search(commands.Cog):
             session=self.bot.session
         )
 
-    async def _find_official_image(self, original_query: str):
-        """
-        Attempt to find the official character image from AniList or Jikan.
-        
-        Args:
-            original_query (str): The search term.
-
-        Returns:
-            tuple: (character_data_dict, image_url_str)
-        """
-        cleaned_query = self._strip_noise(original_query)
-
-        # Use shared session
+    async def _resolve_anilist_char(self, original_query: str, cleaned_query: str):
+        """Helper to fetch and refine the AniList character result."""
         char = await fetch_character_by_name(original_query, prefer="AniList", session=self.bot.session)
+        
         if (
             char
             and char.get("source") == "AniList"
@@ -96,33 +85,50 @@ class Search(commands.Cog):
         ):
             alt = await fetch_character_by_name(cleaned_query, prefer="AniList", session=self.bot.session)
             if alt and char_has_anime_media(alt):
-                char = alt
+                return alt
+        
+        return char
+
+    async def _extract_valid_image(self, char: dict) -> str | None:
+        """Helper to extract and validate a character's image URL."""
+        if not char:
+            return None
+            
+        candidate = (char.get("image") or {}).get("large") or (char.get("image") or {}).get("medium")
+        if not candidate:
+            return None
+
+        try:
+            # Note: is_image_url_ok handles timeouts internally via asyncio.timeout context
+            if await is_image_url_ok(self.bot.session, candidate):
+                return candidate
+        except Exception:
+            pass
+            
+        return None
+
+    async def _find_official_image(self, original_query: str):
+        """
+        Attempt to find the official character image from AniList or Jikan.
+        Refactored to reduce Cognitive Complexity.
+        """
+        cleaned_query = self._strip_noise(original_query)
+
+        char = await self._resolve_anilist_char(original_query, cleaned_query)
 
         if char and char.get("source") == "AniList" and not char_has_anime_media(char):
             return char, None
 
-        official_image = None
-        if char:
-            candidate = (char.get("image") or {}).get("large") or (char.get("image") or {}).get("medium")
-            if candidate:
-                try:
-                    # Timeout is now handled internally by is_image_url_ok
-                    ok = await is_image_url_ok(self.bot.session, candidate)
-                    if ok:
-                        official_image = candidate
-                except Exception:
-                    official_image = None
-
+        official_image = await self._extract_valid_image(char)
         if not char or not official_image:
             jikan_char = await fetch_character_by_name(original_query, prefer="Jikan", session=self.bot.session)
-            if jikan_char and not official_image:
-                candidate = (jikan_char.get("image") or {}).get("large") or (jikan_char.get("image") or {}).get("medium")
-                if candidate:
-                    # Use shared session
-                    ok = await is_image_url_ok(self.bot.session, candidate)
-                    if ok:
-                        char = jikan_char
-                        official_image = candidate
+            
+            # Only switch to Jikan if it provides a valid image that we are missing
+            if jikan_char:
+                jikan_image = await self._extract_valid_image(jikan_char)
+                if jikan_image:
+                    char = jikan_char
+                    official_image = jikan_image
 
         return char, official_image
 
@@ -293,30 +299,74 @@ class Search(commands.Cog):
 
         return await reply(embeds=embeds)
 
+    def _create_anime_embed(self, anime_data: dict) -> discord.Embed:
+        """Helper to build the anime detail embed."""
+        title = anime_data["title"]["english"] or anime_data["title"]["romaji"]
+        url = anime_data.get("siteUrl")
+        
+        description = anime_data.get("description") or "No description available."
+        description = description.replace("<br>", "\n").replace("<i>", "").replace("</i>", "")
+        if len(description) > 4096:
+            description = description[:4093] + "..."
+
+        embed = discord.Embed(title=title, url=url, description=description, color=discord.Color.blurple())
+        
+        if anime_data.get("coverImage", {}).get("medium"):
+            embed.set_thumbnail(url=anime_data["coverImage"]["medium"])
+        if anime_data.get("bannerImage"):
+            embed.set_image(url=anime_data["bannerImage"])
+
+        embed.add_field(name="Episodes", value=anime_data.get("episodes", "N/A"), inline=True)
+        embed.add_field(name="Status", value=anime_data.get("status", "N/A").title(), inline=True)
+
+        start = anime_data.get("startDate", {})
+        end = anime_data.get("endDate", {})
+        start_str = f"{start.get('year','N/A')}-{start.get('month','??')}-{start.get('day','??')}" if start.get("year") else "N/A"
+        end_str = f"{end.get('year','N/A')}-{end.get('month','??')}-{end.get('day','??')}" if end.get("year") else "N/A"
+        
+        embed.add_field(name="Start Date", value=start_str, inline=True)
+        embed.add_field(name="End Date", value=end_str, inline=True)
+
+        embed.add_field(name="Duration", value=f"{anime_data.get('duration', 'N/A')} min/ep", inline=True)
+        
+        studios = anime_data.get("studios", {}).get("nodes", [])
+        studio_name = studios[0]["name"] if studios else "N/A"
+        embed.add_field(name="Studio", value=studio_name, inline=True)
+        
+        embed.add_field(name="Source", value=anime_data.get("source", "N/A"), inline=True)
+        embed.add_field(name="Score", value=f"{anime_data.get('averageScore', 'N/A')}%", inline=True)
+        embed.add_field(name="Popularity", value=str(anime_data.get("popularity", "N/A")), inline=True)
+        embed.add_field(name="Favourites", value=str(anime_data.get("favourites", "N/A")), inline=True)
+
+        genres = anime_data.get("genres", [])
+        genres_str = " ".join(f"`{g}`" for g in genres) if genres else "N/A"
+        embed.add_field(name="Genres", value=genres_str, inline=False)
+
+        embed.set_footer(
+            text="Provided by AniList",
+            icon_url="https://anilist.co/img/icons/android-chrome-512x512.png",
+        )
+        return embed
+
     @commands.hybrid_command(name="anime", description="Search for an anime by name")
     @commands.cooldown(1, 15, commands.BucketType.user)
     async def anime(self, ctx: commands.Context, *, query: str):
         """
         Interactive search for anime metadata using AniList.
         """
-        # Parsing logic moved to utils/anime_api.py
         results = await search_anime(self.bot.session, query)
 
         if not results:
             return await ctx.send(f"❌ No results found for `{query}`.")
 
-        options = []
-        for anime in results:
-            title = anime["title"]["english"] or anime["title"]["romaji"]
-            episodes = anime.get("episodes") or "N/A"
-            season = anime.get("season") or "N/A"
-            options.append(
-                discord.SelectOption(
-                    label=title[:100],
-                    description=f"Episodes: {episodes} | Season: {season}"[:100],
-                    value=str(anime["id"]),
-                )
+        options = [
+            discord.SelectOption(
+                label=(a["title"]["english"] or a["title"]["romaji"])[:100],
+                description=f"Episodes: {a.get('episodes', 'N/A')} | Season: {a.get('season', 'N/A')}"[:100],
+                value=str(a["id"]),
             )
+            for a in results
+        ]
 
         async def select_callback(interaction: discord.Interaction):
             if interaction.user != ctx.author:
@@ -326,50 +376,8 @@ class Search(commands.Cog):
             await interaction.response.defer()
             anime_id = int(interaction.data["values"][0])
             anime_data = next(a for a in results if a["id"] == anime_id)
-
-            title = anime_data["title"]["english"] or anime_data["title"]["romaji"]
-            url = anime_data.get("siteUrl")
-            description = anime_data.get("description") or "No description available."
-            description = description.replace("<br>", "\n").replace("<i>", "").replace("</i>", "")
-            if len(description) > 4096:
-                description = description[:4093] + "..."
-
-            embed = discord.Embed(title=title, url=url, description=description, color=discord.Color.blurple())
-            if anime_data.get("coverImage", {}).get("medium"):
-                embed.set_thumbnail(url=anime_data["coverImage"]["medium"])
-            if anime_data.get("bannerImage"):
-                embed.set_image(url=anime_data["bannerImage"])
-
-            embed.add_field(name="Episodes", value=anime_data.get("episodes", "N/A"), inline=True)
-            embed.add_field(name="Status", value=anime_data.get("status", "N/A").title(), inline=True)
-
-            start = anime_data.get("startDate", {})
-            end = anime_data.get("endDate", {})
-            start_str = f"{start.get('year','N/A')}-{start.get('month','??')}-{start.get('day','??')}" if start.get("year") else "N/A"
-            end_str = f"{end.get('year','N/A')}-{end.get('month','??')}-{end.get('day','??')}" if end.get("year") else "N/A"
-            embed.add_field(name="Start Date", value=start_str, inline=True)
-            embed.add_field(name="End Date", value=end_str, inline=True)
-
-            embed.add_field(name="Duration", value=f"{anime_data.get('duration', 'N/A')} min/ep", inline=True)
-            embed.add_field(
-                name="Studio",
-                value=anime_data["studios"]["nodes"][0]["name"] if anime_data["studios"]["nodes"] else "N/A",
-                inline=True,
-            )
-            embed.add_field(name="Source", value=anime_data.get("source", "N/A"), inline=True)
-
-            embed.add_field(name="Score", value=f"{anime_data.get('averageScore', 'N/A')}%", inline=True)
-            embed.add_field(name="Popularity", value=str(anime_data.get("popularity", "N/A")), inline=True)
-            embed.add_field(name="Favourites", value=str(anime_data.get("favourites", "N/A")), inline=True)
-
-            genres = anime_data.get("genres", [])
-            genres_str = " ".join(f"`{g}`" for g in genres) if genres else "N/A"
-            embed.add_field(name="Genres", value=genres_str, inline=False)
-
-            embed.set_footer(
-                text="Provided by AniList",
-                icon_url="https://anilist.co/img/icons/android-chrome-512x512.png",
-            )
+            
+            embed = self._create_anime_embed(anime_data)
             await interaction.edit_original_response(content=None, embed=embed, view=None)
 
         select = Select(placeholder="Choose an anime...", options=options)
@@ -378,51 +386,19 @@ class Search(commands.Cog):
         view.add_item(select)
         await ctx.send("Select an anime from the search results:", view=view)
 
-    @commands.hybrid_command(
-        name="animepfp",
-        description="Fetch an anime character PFP (use the full character name for best results)",
-    )
-    @commands.guild_only()
-    @commands.cooldown(1, 15, commands.BucketType.user)
-    async def animepfp(self, ctx: commands.Context, name: str, count: int = 1):
-        """
-        Fetch an anime character profile picture using AniList and Google Images.
-
-        Args:
-            name (str): The full name of the character.
-            count (int): Number of images to return (max 4).
-        """
-        name = (name or "").strip()
-        if not name:
-            return await ctx.send("❌ Please provide a character name.")
-
-        count_was_clamped = count > 4
-        original_count = count
-        count = min(4, count)
-        if count < 1:
-            count = 1
-
+    async def _defer_interaction(self, ctx) -> bool:
+        """Helper to defer interaction if available."""
         interaction = getattr(ctx, "interaction", None)
-        deferred = False
         if interaction is not None:
             try:
                 await interaction.response.defer()
-                deferred = True
+                return True
             except Exception:
-                deferred = False
+                return False
+        return False
 
-        characters = await search_characters(self.bot.session, name)
-
-        anime_characters = [c for c in characters if c.get("media", {}).get("nodes")]
-
-        if not anime_characters:
-            return await ctx.send(f"❌ No anime characters found for `{name}`.")
-
-        if len(anime_characters) == 1:
-            char = anime_characters[0]
-            char["source"] = "AniList"
-            return await self._process_character_selection(ctx, char, count, count_was_clamped, original_count, deferred)
-
+    async def _handle_animepfp_selection(self, ctx, anime_characters, count, count_was_clamped, original_count, deferred):
+        """Helper to handle user selection when multiple characters match."""
         options = []
         for char in anime_characters[:25]:
             char_name = char["name"]["full"]
@@ -463,10 +439,47 @@ class Search(commands.Cog):
         view = View()
         view.add_item(select)
 
-        if deferred and interaction is not None:
-            await interaction.followup.send("Multiple characters found. Please pick one:", view=view)
+        if deferred and getattr(ctx, "interaction", None) is not None:
+            await ctx.interaction.followup.send("Multiple characters found. Please pick one:", view=view)
         else:
             await ctx.send("Multiple characters found. Please pick one:", view=view)
+
+    @commands.hybrid_command(
+        name="animepfp",
+        description="Fetch an anime character PFP (use the full character name for best results)",
+    )
+    @commands.guild_only()
+    @commands.cooldown(1, 15, commands.BucketType.user)
+    async def animepfp(self, ctx: commands.Context, name: str, count: int = 1):
+        """
+        Fetch an anime character profile picture using AniList and Google Images.
+
+        Args:
+            name (str): The full name of the character.
+            count (int): Number of images to return (max 4).
+        """
+        name = (name or "").strip()
+        if not name:
+            return await ctx.send("❌ Please provide a character name.")
+
+        count_was_clamped = count > 4
+        original_count = count
+        count = max(1, min(4, count))
+
+        deferred = await self._defer_interaction(ctx)
+
+        characters = await search_characters(self.bot.session, name)
+        anime_characters = [c for c in characters if c.get("media", {}).get("nodes")]
+
+        if not anime_characters:
+            return await ctx.send(f"❌ No anime characters found for `{name}`.")
+
+        if len(anime_characters) == 1:
+            char = anime_characters[0]
+            char["source"] = "AniList"
+            return await self._process_character_selection(ctx, char, count, count_was_clamped, original_count, deferred)
+
+        await self._handle_animepfp_selection(ctx, anime_characters, count, count_was_clamped, original_count, deferred)
 
 async def setup(bot):
     await bot.add_cog(Search(bot))
