@@ -74,13 +74,12 @@ class Search(commands.Cog):
             session=self.bot.session
         )
 
-    async def _find_official_image(self, original_query: str, timeout: aiohttp.ClientTimeout):
+    async def _find_official_image(self, original_query: str):
         """
         Attempt to find the official character image from AniList or Jikan.
         
         Args:
             original_query (str): The search term.
-            timeout (aiohttp.ClientTimeout): Timeout object for requests.
 
         Returns:
             tuple: (character_data_dict, image_url_str)
@@ -107,7 +106,8 @@ class Search(commands.Cog):
             candidate = (char.get("image") or {}).get("large") or (char.get("image") or {}).get("medium")
             if candidate:
                 try:
-                    ok = await is_image_url_ok(self.bot.session, candidate, timeout)
+                    # Timeout is now handled internally by is_image_url_ok
+                    ok = await is_image_url_ok(self.bot.session, candidate)
                     if ok:
                         official_image = candidate
                 except Exception:
@@ -119,21 +119,20 @@ class Search(commands.Cog):
                 candidate = (jikan_char.get("image") or {}).get("large") or (jikan_char.get("image") or {}).get("medium")
                 if candidate:
                     # Use shared session
-                    ok = await is_image_url_ok(self.bot.session, candidate, timeout)
+                    ok = await is_image_url_ok(self.bot.session, candidate)
                     if ok:
                         char = jikan_char
                         official_image = candidate
 
         return char, official_image
 
-    async def _find_google_image(self, character_name: str, cache_key: str | None, timeout: aiohttp.ClientTimeout):
+    async def _find_google_image(self, character_name: str, cache_key: str | None):
         """
         Search for a single image on Google Images.
         
         Args:
             character_name (str): The character name to search.
             cache_key (str): Legacy cache key (unused in logic but kept for signature).
-            timeout (aiohttp.ClientTimeout): Timeout configuration.
 
         Returns:
             str | None: The URL of the found image or None.
@@ -149,7 +148,6 @@ class Search(commands.Cog):
         self,
         character_name: str,
         cache_key: str | None,
-        timeout: aiohttp.ClientTimeout,
         count: int,
         exclude: set[str],
         search_variation: int = 0,
@@ -160,7 +158,6 @@ class Search(commands.Cog):
         Args:
             character_name: Name of the character to search for
             cache_key: Legacy cache key (unused).
-            timeout: HTTP timeout for requests
             count: Number of images to fetch
             exclude: Set of image URLs to exclude
             search_variation: Search variation number (0-2) to try different queries
@@ -189,7 +186,8 @@ class Search(commands.Cog):
             try:
                 # Use shared session; note that is_image_url_ok handles exceptions internally mostly, 
                 # but we catch here just in case.
-                ok = await is_image_url_ok(self.bot.session, candidate, timeout)
+                # UPDATED: Removed timeout parameter here
+                ok = await is_image_url_ok(self.bot.session, candidate)
                 if ok:
                     found_images.append(candidate)
             except Exception:
@@ -199,8 +197,7 @@ class Search(commands.Cog):
 
     async def _process_character_selection(self, ctx: commands.Context, char: dict, count: int, count_was_clamped: bool, original_count: int, interaction_deferred: bool):
         """Process the selected character and send the PFP embeds."""
-        per_call_timeout = aiohttp.ClientTimeout(total=10)
-
+        
         interaction = getattr(ctx, "interaction", None)
         user_id = ctx.author.id
         char_id = char.get("id")
@@ -237,8 +234,8 @@ class Search(commands.Cog):
         candidate = (char.get("image") or {}).get("large") or (char.get("image") or {}).get("medium")
         if candidate:
             try:
-                # Use shared session
-                ok = await is_image_url_ok(self.bot.session, candidate, per_call_timeout)
+                # Use shared session - timeout handled internally
+                ok = await is_image_url_ok(self.bot.session, candidate)
                 if ok:
                     official_image = candidate
             except Exception:
@@ -260,7 +257,7 @@ class Search(commands.Cog):
                     break
 
                 google_images = await self._find_multiple_google_images(
-                    char_name, cache_key, per_call_timeout, remaining, exclude, search_variation=variation
+                    char_name, cache_key, remaining, exclude, search_variation=variation
                 )
 
                 for img_url in google_images:
@@ -414,7 +411,6 @@ class Search(commands.Cog):
             except Exception:
                 deferred = False
 
-        # Parsing logic moved to utils/anime_api.py
         characters = await search_characters(self.bot.session, name)
 
         anime_characters = [c for c in characters if c.get("media", {}).get("nodes")]

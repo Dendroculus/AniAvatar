@@ -348,7 +348,6 @@ class Roles(commands.Cog):
             async with self._sync_sem:
                 try:
                     await self._ensure_guild_titles_and_hierarchy(guild)
-                    # TODO: Iterate through active users in Database and enqueue role updates
                 except Exception as e:
                     print(f"[Roles] Error during guild sync {guild.id}: {e}")
 
