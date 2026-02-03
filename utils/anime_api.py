@@ -1,5 +1,6 @@
 import random
 import asyncio
+import logging
 from typing import Dict, List, Optional
 import aiohttp
 import discord
@@ -430,7 +431,8 @@ async def google_image_search(query: str, api_key: str, cx: str, session: aiohtt
                 if isinstance(item.get("link"), str) and item["link"].lower().endswith(image_extensions)
             ]
             return links
-    except Exception:
+    except Exception as e:
+        logging.warning(f"Google Image Search failed for query '{query}': {e}")
         return []
 
 

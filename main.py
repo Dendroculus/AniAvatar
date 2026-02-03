@@ -1,11 +1,14 @@
-from dotenv import load_dotenv
-import discord
-from discord.ext import commands
 import logging
 import aiohttp
 import asyncpg
-from loggers.bot_logging import setup_logging
-from constants.configs import DISCORD_TOKEN, DATABASE
+import discord
+from discord.ext import commands
+from dotenv import load_dotenv
+
+load_dotenv()
+
+from loggers.bot_logging import setup_logging  # noqa: E402
+from constants.configs import DISCORD_TOKEN, DATABASE  # noqa: E402
 
 """
 main.py
@@ -125,6 +128,5 @@ class Minori(commands.AutoShardedBot):
         self.logger.info("Logged in as %s", self.user, extra={"user": str(self.user)})
 
 if __name__ == "__main__":
-    load_dotenv()
     bot = Minori()
     bot.run(DISCORD_TOKEN)

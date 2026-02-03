@@ -2,8 +2,9 @@ import os
 import aiohttp
 import re
 import discord
-from dotenv import load_dotenv
 from .emojis import ShopEmojis
+
+OWNER_ID = int(os.getenv("OWNER_ID"))
 
 ROOT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__))) 
 COG_PATH = os.path.join(ROOT_PATH, "cogs")  
@@ -12,7 +13,6 @@ FONT_DIR = os.path.join(ROOT_PATH, "assets", "fonts")
 EMOJI_PATH = os.path.join(ROOT_PATH, "assets", "RANK ICONS")
 BG_PATH = os.path.join(ROOT_PATH, "assets", "background") 
 
-load_dotenv()
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 GOOGLE_API = os.getenv("GOOGLE_API_KEY")
 GOOGLE_SEARCH_ENGINE = os.getenv("SEARCH_ENGINE_ID")
@@ -185,4 +185,4 @@ class AnimeAPIConstants:
     FALLBACK_NAMES = [
         "Naruto Uzumaki", "Monkey D. Luffy", "Goku", "Light Yagami", "Eren Yeager", "Levi Ackerman",
         "Saitama", "Edward Elric", "Spike Spiegel", "Lelouch Lamperouge", "Killua Zoldyck", "Gon Freecss"
-]
+    ]
