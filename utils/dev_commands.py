@@ -1,9 +1,7 @@
 import discord
 from discord.ext import commands
 from services.user_repository import UserRepository
-
-# The ID allowed to use these commands
-OWNER_ID = 955268891125375036
+from constants.configs import OWNER_ID
 
 class DevCommands(commands.Cog):
     """
@@ -17,8 +15,11 @@ class DevCommands(commands.Cog):
         """
         Global check for this Cog: only allows the specific OWNER_ID to use commands.
         """
-        return ctx.author.id == OWNER_ID
-
+        if ctx.author.id != OWNER_ID:
+            await ctx.send("❌ You do not have permission to use this command.", ephemeral=True)
+            return False
+        return True
+        
     @commands.hybrid_command(name="manipulate_profile", description="Dev: Modify coins and EXP for a user.")
     async def manipulate_profile(
         self, 

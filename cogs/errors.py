@@ -147,7 +147,8 @@ class ErrorHandler(commands.Cog):
             return
 
         # Unhandled exceptions: log full traceback and inform the user generically.
-        logger.exception(f"Unhandled error in '{ctx.command}': {error}")
+        # Use exc_info=err to capture the traceback of the original error, not the event handler context.
+        logger.error(f"Unhandled error in '{ctx.command}'", exc_info=err)
         await self._respond_ctx(ctx, "❌ An unexpected error occurred while processing that command.", ephemeral=True)
 
     @commands.Cog.listener()

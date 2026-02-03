@@ -1,7 +1,7 @@
 import discord
 from discord.ext import commands
 from discord import app_commands
-from utils.discord_helpers import create_choices
+from utils.discord_helpers import create_choices, is_admin
 from utils.announce_modal import AnnounceModal
 
 """
@@ -16,14 +16,6 @@ Design considerations:
 - Observability: failures are surfaced to the invoking admin ephemerally so they can
   diagnose permission or delivery issues without spamming public channels.
 """
-
-def is_admin():
-    """
-    Custom check decorator to ensure the user has manage_guild permissions.
-    """
-    def predicate(ctx: commands.Context) -> bool:
-        return ctx.author.guild_permissions.manage_guild
-    return commands.check(predicate)
 
 class Admin(commands.Cog):
     def __init__(self, bot: commands.Bot):

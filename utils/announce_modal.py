@@ -1,4 +1,6 @@
 import discord
+import logging
+
 class AnnounceModal(discord.ui.Modal):
     def __init__(self, channel: discord.TextChannel, author: discord.Member, mention: bool):
         super().__init__(title="📢 Create Announcement")
@@ -44,5 +46,8 @@ class AnnounceModal(discord.ui.Modal):
                 content=content,
                 allowed_mentions=discord.AllowedMentions(everyone=self.mention)
             )
+        except discord.HTTPException as e:
+            await interaction.followup.send(f"❌ Failed to send announcement: {e}", ephemeral=True)
         except Exception as e:
+            logging.getLogger("announce_modal").error(f"Unexpected error sending announcement: {e}")
             await interaction.followup.send(f"❌ Failed to send announcement: {e}", ephemeral=True)
