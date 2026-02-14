@@ -2,11 +2,24 @@ import aiohttp
 import asyncio
 
 class HTTPValidator:
+    """
+    Validates URLs by checking if they are reachable (HTTP 200).
+    Uses a semaphore to limit concurrent connections.
+    """
     def __init__(self, timeout: float = 3.0, max_concurrent: int = 10):
         self.timeout = timeout
         self.semaphore = asyncio.Semaphore(max_concurrent)
     
     async def validate_urls(self, urls: list[str]) -> tuple[list[str], list[str]]:
+        """
+        Concurrently validate a list of URLs.
+
+        Args:
+            urls (list[str]): List of URLs to check.
+
+        Returns:
+            tuple[list[str], list[str]]: A tuple containing (valid_urls, dead_urls).
+        """
         async def check(url):
             async with self.semaphore:
                 try:

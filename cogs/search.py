@@ -3,10 +3,7 @@ from discord.ext import commands
 from discord.ui import View, Select
 import logging
 
-# --- 1. IMPORTS FOR ANIME API & VALIDATION ---
 from utils.anime_api import search_anime, fetch_character_by_name, char_has_anime_media
-
-# --- 2. SEARCH ENGINE IMPORTS ---
 from search_engine.config import settings
 from search_engine.database.connection import DatabasePool
 from search_engine.database.queries import INSERT_SEARCH_HISTORY
@@ -20,6 +17,12 @@ from search_engine.utils.http_validator import HTTPValidator
 logger = logging.getLogger(__name__)
 
 class Search(commands.Cog):
+    """
+    Cog providing anime metadata search and the smart Pinterest PFP Search Engine.
+    
+    Attributes:
+        bot (commands.Bot): The Discord bot instance.
+    """
     def __init__(self, bot):
         self.bot = bot
         self.db = None
@@ -28,24 +31,25 @@ class Search(commands.Cog):
         self.google_worker = None
 
     async def cog_load(self):
+        """
+        Initialize the Search Engine services, database connection, and workers
+        when the Cog is loaded.
+        """
         logger.info("⚙️ Loading Search Engine components...")
         
         if not self.bot.session:
             logger.error("Bot session is not initialized. Search engine may fail.")
         
-        # 1. Database
         self.db = await DatabasePool.get_instance(
             settings.database_url, 
             settings.min_pool_size, 
             settings.max_pool_size
         )
         
-        # 2. Services
         cache = CacheService(self.db)
         validator = HTTPValidator()
         limiter = TokenBucketRateLimiter(rate=2.0, burst=5)
         
-        # 3. Workers
         self.pinterest_worker = PinterestWorker(limiter)
         await self.pinterest_worker.initialize()
         
@@ -55,7 +59,6 @@ class Search(commands.Cog):
             cx=settings.google_search_engine_id
         )
 
-        # 4. Orchestrator
         self.orchestrator = SearchOrchestrator(
             cache, 
             self.pinterest_worker, 
@@ -65,24 +68,25 @@ class Search(commands.Cog):
         logger.info("✅ Search Engine Ready.")
 
     async def cog_unload(self):
+        """
+        Clean up resources when the Cog is unloaded.
+        """
         if self.pinterest_worker:
             await self.pinterest_worker.close()
 
-    # ==================================================================
-    # /ANIMEPFP COMMAND
-    # ==================================================================
-
     @commands.hybrid_command(
         name="animepfp",
-        description="Fetch anime character PFPs.",
+        description="Fetch an anime character PFP (Powered by Pinterest Engine)",
     )
     @commands.guild_only()
     @commands.cooldown(1, 10, commands.BucketType.user)
     async def animepfp(self, ctx: commands.Context, name: str, count: int = 1):
         """
-        Fetch anime profile pictures.
+        Fetch anime profile pictures. Returns unique images per user history.
+        
         Args:
-            name (str): The character name.
+            ctx (commands.Context): The command context.
+            name (str): The character name (e.g. "Naruto Uzumaki", "Rem Re:Zero").
             count (int): How many images to send (Max 5).
         """
         name = (name or "").strip()
@@ -122,13 +126,11 @@ class Search(commands.Cog):
         # 3. Handle Empty/Exhausted State
         if not response.images:
             if response.exhausted:
-                # User has seen everything we have
                 return await ctx.send(
                     f"⚠️ **You have seen all available images for {search_query}!**\n"
                     "I couldn't find any new ones right now. Try again later or search for a different character."
                 )
             else:
-                # Generic failure (e.g., rate limits or worker error)
                 return await ctx.send(f"❌ No images found for **{search_query}**.")
 
         # 4. Output Logic
@@ -144,12 +146,26 @@ class Search(commands.Cog):
             embed.set_image(url=img.image_url)
             
             source_text = f"Source: {img.source.capitalize()}"
+            if response.from_cache:
+                source_text += " • Cached (New for you)"
+            else:
+                source_text += " • Freshly Scraped"
+                
             embed.set_footer(text=source_text)
             embeds.append(embed)
         
         await ctx.send(embeds=embeds)
 
     def _create_anime_embed(self, anime_data: dict) -> discord.Embed:
+        """
+        Helper to build a Discord Embed for anime metadata.
+
+        Args:
+            anime_data (dict): Dictionary containing anime details from AniList.
+
+        Returns:
+            discord.Embed: The formatted embed.
+        """
         title = anime_data["title"]["english"] or anime_data["title"]["romaji"]
         url = anime_data.get("siteUrl")
         
@@ -199,6 +215,13 @@ class Search(commands.Cog):
     @commands.hybrid_command(name="anime", description="Search for an anime by name")
     @commands.cooldown(1, 15, commands.BucketType.user)
     async def anime(self, ctx: commands.Context, *, query: str):
+        """
+        Interactive search for anime metadata using AniList.
+
+        Args:
+            ctx (commands.Context): The command context.
+            query (str): The name of the anime to search for.
+        """
         results = await search_anime(self.bot.session, query)
 
         if not results:
