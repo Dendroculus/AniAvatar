@@ -1,4 +1,7 @@
+<div align="center">
+
 EN | [中文](docs/readmeCN.md)
+</div>
 
 <h1 align="center">AniAvatar Discord Bot (Minori)</h1>
 
@@ -13,12 +16,18 @@ EN | [中文](docs/readmeCN.md)
   <img src="assets/MinoriBG.png" width="1000" height="900">
 </p>
 
-**AniAvatar** (appearing on Discord as **Minori**) is a feature-rich bot built with Python and `discord.py`. It automates a wide range of anime-related tasks, including searching for information, fetching profile pictures, hosting trivia games, and managing a server-wide leveling and economy system.
+**AniAvatar** (appearing on Discord as **Minori**) is a feature-rich bot built with Python and `discord.py`. It automates a wide range of anime-related tasks, utilizing a custom-built Smart Search Engine for high-quality image retrieval, while also hosting trivia games and managing a server-wide leveling economy.
 
 
 ## ✨ Features
 
-### Progression & Economy
+### 🔍 Smart Search Engine
+- **Pinterest Integration**: Scrapes high-resolution anime art directly from Pinterest using a headless browser engine (Playwright).
+- **Smart Caching**: Implements a "User-Aware Cache" that remembers which images you've seen. Searching for the same character won't show you duplicate images until you've seen everything available.
+- **Reliable Fallback**: Automatically switches to Google Images if Pinterest results are insufficient.
+- **Auto-Upscaling**: Intelligent logic to find and serve the highest resolution version of an image (e.g., converting thumbnails to originals).
+
+### 💰 Progression & Economy
 - **EXP & Leveling**: Gain EXP by chatting and playing games.
 - **Level Up Alerts**: Receive public notifications on level-ups and rank changes.
 - **Automatic Role Assignment**: The bot auto-creates and manages title roles (from *Novice* to *Enlightened*) based on user level.
@@ -34,7 +43,7 @@ EN | [中文](docs/readmeCN.md)
   <img src="docs/screenshots/shop&inventory_command.png" width="600">
 </details>
 
-### Games & Fun
+### 🎮 Games & Fun
 - **Anime Quiz & Guessing Games**: Test your knowledge with a multiple-choice quiz or a guess-the-character game to earn EXP and coins.
 - **Coin Gambling**: Gamble your coins with a dynamic win chance.
 - **Waifu & Quotes**: Get random waifu images or memorable quotes from various anime.
@@ -47,11 +56,10 @@ EN | [中文](docs/readmeCN.md)
   <img src="docs/screenshots/gamble_command.png" width="600">
 </details>
 
-### Anime & Utilities
-- **Anime & Character Search**: Get detailed information about any anime or find the perfect profile picture for any character.
+### ⚙️ Anime & Utilities
+- **Anime Metadata**: Get detailed information about any anime from AniList.
 - **Server Announcements**: Admins can easily create and send formatted announcements.
 - **Dynamic Help Command**: Get a clean, organized list of all available commands.
-- **Presence Rotation**: The bot's status rotates every 20 minutes, "watching" a random anime.
 
 <details>
   <summary><b>View Utility Previews</b></summary>
@@ -65,6 +73,8 @@ EN | [中文](docs/readmeCN.md)
 
 | Command | Category | Description |
 | :--- | :--- | :--- |
+| `/animepfp <name> [count]` | Search | (Updated) Fetches up to 5 unique, high-quality profile pictures for a character. |
+| `/anime <query>` | Search | Fetches detailed information about an anime from AniList. |
 | `/profile [user]` | Progression | Displays your or another user's profile card. |
 | `/leaderboard` | Progression | Shows the server's top 10 users by EXP. |
 | `/profiletheme` | Progression | Choose a custom background theme for your profile card. |
@@ -72,9 +82,7 @@ EN | [中文](docs/readmeCN.md)
 | `/shop` | Trading | Opens the item shop to buy consumables like EXP potions. |
 | `/inventory` | Trading | Check your inventory and use your items. |
 | `/donate <member>` | Trading | Give an item from your inventory to another user. |
-| `/anime <query>` | Search | Fetches detailed information about an anime from AniList. |
-| `/animepfp <name>` | Search | Finds a profile picture of an anime character. |
-| `/animequiz <questions>`| Games | Starts a multiple-choice anime trivia quiz. |
+| `/animequiz <questions>` | Games | Starts a multiple-choice anime trivia quiz. |
 | `/guesscharacter` | Games | Starts a guess-the-character from an image game. |
 | `/gamble` | Fun | Gamble your coins with a dynamic win chance. |
 | `/waifu` | Fun | Fetches a random waifu image. |
@@ -91,9 +99,8 @@ To run your own instance of Minori, follow these steps.
 
 ### 1. Prerequisites
 - Python 3.11+
-- Git
-- A Discord Bot Token from the [Discord Developer Portal](https://discord.com/developers/applications).
-- PostgreSQL (production) or local Postgres (for development). See notes below for Docker quick-start.
+- PostgreSQL (Required for the Search Engine cache).
+- Chromium (Required for the Pinterest scraper via Playwright).
 
 ### 2. Installation
 ```bash
@@ -108,98 +115,51 @@ python -m venv .venv
 .venv\Scripts\activate   # Windows
 source .venv/bin/activate  # macOS / Linux
 
-# Install the required dependencies
+# Install Python dependencies
 pip install -r requirements.txt
+
+# Install Playwright Browsers (Required for Search Engine)
+playwright install chromium
 ```
 
 ### 3. Configuration
 
-This bot requires several API keys and custom emojis to function correctly.
-
-#### A. Environment Setup
 In your project directory, create a `.env` file and add the following keys. This file is included in `.gitignore` to prevent you from accidentally sharing your secrets.
 
 ```env
 DISCORD_TOKEN=your_discord_token
 GOOGLE_API_KEY=your_google_api_key
-GOOGLE_CSE_ID=your_google_cse_id
+SEARCH_ENGINE_ID=your_google_cse_id
 
 # Database (PostgreSQL)
-DATABASE_URL=postgresql://<user>:<encoded_password>@<host>:5432/<database>
+# Required for caching and user history
+DATABASE_URL=postgresql://<user>:<password>@<host>:5432/<database>
 
-# REDIS (FOR CACHING)
-REDIS_URL=YOUR_REDIS_URL
+# Optional Configuration
+LOG_LEVEL=INFO
+CACHE_TTL_HOURS=24
 ```
 
-Notes on DATABASE_URL:
-- Example: postgresql://postgres:secret%4023@localhost:5432/MinoriDB
-- Percent-encode special characters in the password (use Python's urllib.parse.quote_plus or other URL-encoding tools).
+#### Google API Setup (Fallback)
+The `/animepfp` command uses Google as a backup if Pinterest fails.
 
-#### B. Google Custom Search API
-The `/animepfp` command requires a Google API Key and a Custom Search Engine ID.
 <details>
-  <summary>Click here for instructions on how to get your Google API keys</summary>
+  <summary>Click here for instructions</summary>
   
-  1.  **Get an API Key**
-      - Go to the [Google Cloud Console](https://console.cloud.google.com/).
-      - Create a new project (or use an existing one).
-      - Navigate to **APIs & Services → Credentials**.
-      - Click **Create Credentials → API key** and copy the key.
-
-  2.  **Create a Custom Search Engine (CSE)**
-      - Visit the [Google Programmable Search Engine](https://programmablesearchengine.google.com/) control panel.
-      - Click **Add** to create a new search engine.
-      - Under “Sites to search”, enter image-hosting sites like `myanimelist.net`, `anilist.co`, and `zerochan.net`.
-      - Create the engine and copy the **Search Engine ID (cx)**.
+  1. Get an API Key from the [Google Cloud Console](https://console.cloud.google.com/).
+  2. Create a Custom Search Engine (CSE) at [Google Programmable Search Engine](https://programmablesearchengine.google.com/).
+  3. Enable "Image search" in the CSE settings.
+  4. Copy the **Search Engine ID (cx)** into `SEARCH_ENGINE_ID` in your `.env`.
 </details>
 
-#### C. Custom Emojis
-The bot uses custom emojis for its UI.
-1.  Upload all emojis from the `/assets/other essentials emojis/` directory to a Discord server where your bot is present.
-2.  Enable Developer Mode in Discord, right-click each emoji, and copy its ID.
-3.  Update the emoji IDs in the code (primarily in `games.py`, `progression.py`, and `cogs/utils/emojis.py`) to match the uploaded emoji IDs.
+### 4. Database Setup
 
-### 4. Database (Postgres) & Migration from SQLite
+Minori uses PostgreSQL. The bot will automatically create the necessary tables (`image_cache`, `search_history`, `user_seen_images`) on the first run.
 
-This project originally used SQLite for local storage. The bot now uses PostgreSQL (asyncpg) in production/development. If you have an existing SQLite DB (data/minori.db) and want to migrate:
-
-A. Quick local Postgres (Docker)
-```bash
-# Run a local Postgres container
-docker run --name ani-pg -e POSTGRES_PASSWORD=postgres -e POSTGRES_USER=postgres -e POSTGRES_DB=MinoriDB -p 5432:5432 -d postgres
-
-# Example DATABASE_URL for local Docker:
-# postgresql://postgres:postgres@127.0.0.1:5432/MinoriDB
-```
-
-B. Migration script (included)
-A migration helper script migrate_sqlite_to_postgres.py is included to convert your SQLite file to Postgres schema + rows.
-
-Recommended flow:
-
-1. Stop the bot (ensure no writes to the SQLite DB)
-2. Backup your SQLite DB:
-```cmd
-copy data\minori.db data\minori.db.bak
-```
-3. Checkpoint WAL (if present) to ensure consistency:
-```cmd
-python -c "import sqlite3; c=sqlite3.connect('data\\minori.db'); c.execute('pragma wal_checkpoint(FULL)'); c.close(); print('checkpoint done')"
-```
-4. Dry-run to preview DDL (no data copied):
-```cmd
-python migrate_sqlite_to_postgres.py --sqlite-file data\minori.db --database-url "%DATABASE_URL%" --dry-run
-```
-5. Run the real migration (copies data):
-```cmd
-python migrate_sqlite_to_postgres.py --sqlite-file data\minori.db --database-url "%DATABASE_URL%"
-```
-6. Optional: convert columns to more specific types (BIGINT, INTEGER, JSONB) and add indexes — instructions and SQL are available in the docs or migration script comments.
-
-C. If you don't need to migrate (fresh install)
-- Create the Postgres database and user, set DATABASE_URL, and the bot's cog initialization will create required tables automatically (init code uses CREATE TABLE IF NOT EXISTS).
+Ensure your `DATABASE_URL` is correct and the PostgreSQL server is running.
 
 ### 5. Run the Bot
+
 Once configured, you can start the bot with:
 ```bash
 python main.py
@@ -207,9 +167,11 @@ python main.py
 
 
 ## 🛠 Built With
-- **Framework & Libraries**: Python 3.11+, [discord.py](https://pypi.org/project/discord.py/), [aiohttp](https://docs.aiohttp.org/), [Pillow (PIL)](https://pillow.readthedocs.io/en/stable/)
-- **APIs**: [AniList API (GraphQL)](https://anilist.co/graphiql), [Google Custom Search API](https://developers.google.com/custom-search)
-- **Database**: PostgreSQL (asyncpg). A lightweight migration helper is provided to import legacy SQLite data.
+- **Frameworks**: [discord.py](https://pypi.org/project/discord.py/), [aiohttp](https://docs.aiohttp.org/)
+- **Search Engine**: Playwright (Headless Browser), Google Custom Search
+- **Database**: PostgreSQL (via asyncpg)
+- **APIs**: [AniList API (GraphQL)](https://anilist.co/graphiql)
+- **Imaging**: [Pillow (PIL)](https://pillow.readthedocs.io/en/stable/)
 
 
 ## 📜 License
@@ -218,4 +180,4 @@ This project is licensed under the **MIT License**. See the [LICENSE](LICENSE) f
 
 ## 🙌 Acknowledgements
 - Thanks to [Noto Fonts](https://github.com/notofonts/noto-cjk/releases) for providing CJK font support for the profile cards.
-- This project is an independent creation and is **not affiliated with, supported by, or endorsed by Discord Inc., AniList, or Google.** All original assets are created by me.
+- This project is an independent creation and is **not affiliated with, supported by, or endorsed by Discord Inc., AniList, Pinterest, or Google.** All original assets are created by me.
