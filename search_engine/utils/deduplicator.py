@@ -14,20 +14,24 @@ class URLDeduplicator:
     @staticmethod
     def normalize_url(url: str) -> str:
         """
-        Normalize a URL by removing tracking parameters and standardizing formatting.
-
-        Args:
-            url (str): The input URL.
-
-        Returns:
-            str: The normalized URL.
+        Normalize a URL to ensure stable deduplication.
+        
+        Actions:
+        - Force HTTPS scheme.
+        - Lowercase netloc (domain).
+        - Strip tracking parameters.
+        - Remove trailing slash.
         """
         try:
             parsed = urlparse(url)
             query_params = parse_qsl(parsed.query)
             filtered = sorted([(k, v) for k, v in query_params if k.lower() not in URLDeduplicator.TRACKING_PARAMS])
+            
+            # Force HTTPS for consistency
+            scheme = "https" if parsed.scheme in ("http", "https") else parsed.scheme.lower()
+            
             return urlunparse((
-                parsed.scheme.lower(), 
+                scheme, 
                 parsed.netloc.lower(), 
                 parsed.path.rstrip("/"), 
                 parsed.params, 
@@ -41,7 +45,7 @@ class URLDeduplicator:
     def deduplicate(images: list[ImageResult]) -> list[ImageResult]:
         """
         Remove duplicate images based on their normalized URL hash.
-
+        
         Args:
             images (list[ImageResult]): The list of images to process.
 

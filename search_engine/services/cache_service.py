@@ -8,6 +8,7 @@ from ..database.queries import (
     MARK_IMAGES_DEAD, 
     UPDATE_VALIDATION_TIME
 )
+import unicodedata
 
 class CacheService:
     """
@@ -21,15 +22,25 @@ class CacheService:
         """
         Normalize a search query string.
         
-        Example: "  Mahiru   Shiina " -> "mahiru shiina"
+        Performs:
+        1. NFKD decomposition to separate characters and diacritics.
+        2. ASCII encoding to strip accents (e.g. 'é' -> 'e', 'ø' -> 'o').
+        3. Lowercasing and whitespace collapsing.
+        
+        Example: "  Tétø   Kàsâné " -> "teto kasane"
 
         Args:
             query (str): Raw input query.
 
         Returns:
-            str: Normalized query string.
+            str: Normalized query string for stable caching.
         """
-        return " ".join(query.lower().strip().split())
+        # Strip accents and normalize unicode
+        nfkd_form = unicodedata.normalize('NFKD', query)
+        only_ascii = nfkd_form.encode('ASCII', 'ignore').decode('utf-8')
+        
+        # Lowercase and collapse whitespace
+        return " ".join(only_ascii.lower().strip().split())
     
     async def get_unseen_images(self, query: str, user_id: int, limit: int = 5) -> list[ImageResult]:
         """
