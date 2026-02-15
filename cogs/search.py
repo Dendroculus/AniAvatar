@@ -77,7 +77,7 @@ class Search(commands.Cog):
         """
         name = (name or "").strip()
         count = max(1, min(5, count))
-        
+
         if not name:
             return await ctx.send("❌ Please provide a character name.")
 
@@ -86,61 +86,79 @@ class Search(commands.Cog):
 
         await ctx.defer()
 
-        # 1. Validation (AniList Check)
-        try:
-            char = await fetch_character_by_name(name, session=self.bot.session, prefer="AniList")
-            
-            if not char:
-                return await ctx.send(f"❌ Could not find character **{name}** on AniList.")
-            
-            if not char_has_anime_media(char):
-                return await ctx.send(f"❌ **{char.get('name', {}).get('full', name)}** is not associated with an Anime.")
-                
-            search_query = char.get("name", {}).get("full", name)
-            
-        except Exception as e:
-            logger.error(f"Validation error: {e}")
-            search_query = name
+        search_query = await self._validate_character(ctx, name)
+        if search_query is None:
+            return
 
-        # 2. Search Execution (Passing User ID for tracking)
         response = await self.orchestrator.search(
-            query=search_query, 
-            user_id=ctx.author.id, 
+            query=search_query,
+            user_id=ctx.author.id,
             count=count
         )
 
-        # 3. Handle Empty/Exhausted State
-        if not response.images:
-            if response.exhausted:
-                return await ctx.send(
-                    f"⚠️ **You have seen all available images for {search_query}!**\n"
-                    "I couldn't find any new ones right now. Try again later or search for a different character."
-                )
-            else:
-                return await ctx.send(f"❌ No images found for **{search_query}**.")
+        error_message = self._get_empty_response_message(response, search_query)
+        if error_message:
+            return await ctx.send(error_message)
 
-        # 4. Output Logic
+        embeds = self._build_image_embeds(response, search_query, count)
+        await ctx.send(embeds=embeds)
+
+
+    async def _validate_character(self, ctx: commands.Context, name: str) -> str | None:
+        """Validate character exists on AniList and is from an anime. Returns search query or None."""
+        try:
+            char = await fetch_character_by_name(name, session=self.bot.session, prefer="AniList")
+
+            if not char:
+                await ctx.send(f"❌ Could not find character **{name}** on AniList.")
+                return None
+
+            if not char_has_anime_media(char):
+                full_name = char.get("name", {}).get("full", name)
+                await ctx.send(f"❌ **{full_name}** is not associated with an Anime.")
+                return None
+
+            return char.get("name", {}).get("full", name)
+
+        except Exception as e:
+            logger.error(f"Validation error: {e}")
+            return name
+
+
+    def _get_empty_response_message(self, response, search_query: str) -> str | None:
+        """Return error message if response has no images, or None if images exist."""
+        if response.images:
+            return None
+
+        if response.exhausted:
+            return (
+                f"⚠️ **You have seen all available images for {search_query}!**\n"
+                "I couldn't find any new ones right now. Try again later or search for a different character."
+            )
+
+        return f"❌ No images found for **{search_query}**."
+
+
+    def _build_image_embeds(self, response, search_query: str, count: int) -> list:
+        """Build embed objects for the image response."""
         embeds = []
-        for i, img in enumerate(response.images):
-            if i >= count: 
-                break
-            
+        for i, img in enumerate(response.images[:count]):
             embed = discord.Embed(color=discord.Color.purple())
+
             if i == 0:
                 embed.set_author(name=f"Anime PFP: {search_query}")
-                
+
             embed.set_image(url=img.image_url)
-            
-            source_text = f"Source: {img.source.capitalize()}"
-            if response.from_cache:
-                source_text += " • Cached (New for you)"
-            else:
-                source_text += " • Freshly Scraped"
-                
-            embed.set_footer(text=source_text)
+            embed.set_footer(text=self._build_source_text(img, response.from_cache))
             embeds.append(embed)
-        
-        await ctx.send(embeds=embeds)
+
+        return embeds
+
+
+    def _build_source_text(self, img, from_cache: bool) -> str:
+        """Build the footer source text for an image embed."""
+        cache_status = " • Cached (New for you)" if from_cache else " • Freshly Scraped"
+        return f"Source: {img.source.capitalize()}{cache_status}"
 
     def _create_anime_embed(self, anime_data: dict) -> discord.Embed:
         """Helper to build a Discord Embed for anime metadata."""
