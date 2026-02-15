@@ -19,9 +19,6 @@ logger = logging.getLogger(__name__)
 class Search(commands.Cog):
     """
     Cog providing anime metadata search and the smart Pinterest PFP Search Engine.
-    
-    Attributes:
-        bot (commands.Bot): The Discord bot instance.
     """
     def __init__(self, bot):
         self.bot = bot
@@ -31,10 +28,7 @@ class Search(commands.Cog):
         self.google_worker = None
 
     async def cog_load(self):
-        """
-        Initialize the Search Engine services, database connection, and workers
-        when the Cog is loaded.
-        """
+        """Initialize the Search Engine services."""
         logger.info("⚙️ Loading Search Engine components...")
         
         if not self.bot.session:
@@ -68,9 +62,6 @@ class Search(commands.Cog):
         logger.info("✅ Search Engine Ready.")
 
     async def cog_unload(self):
-        """
-        Clean up resources when the Cog is unloaded.
-        """
         if self.pinterest_worker:
             await self.pinterest_worker.close()
 
@@ -83,11 +74,6 @@ class Search(commands.Cog):
     async def animepfp(self, ctx: commands.Context, name: str, count: int = 1):
         """
         Fetch anime profile pictures. Returns unique images per user history.
-        
-        Args:
-            ctx (commands.Context): The command context.
-            name (str): The character name (e.g. "Naruto Uzumaki", "Rem Re:Zero").
-            count (int): How many images to send (Max 5).
         """
         name = (name or "").strip()
         count = max(1, min(5, count))
@@ -157,17 +143,11 @@ class Search(commands.Cog):
         await ctx.send(embeds=embeds)
 
     def _create_anime_embed(self, anime_data: dict) -> discord.Embed:
-        """
-        Helper to build a Discord Embed for anime metadata.
-
-        Args:
-            anime_data (dict): Dictionary containing anime details from AniList.
-
-        Returns:
-            discord.Embed: The formatted embed.
-        """
-        title = anime_data["title"]["english"] or anime_data["title"]["romaji"]
-        url = anime_data.get("siteUrl")
+        """Helper to build a Discord Embed for anime metadata."""
+        # Safe title extraction with fallbacks
+        title_dict = anime_data.get("title", {})
+        title = title_dict.get("english") or title_dict.get("romaji") or "Unknown Title"
+        url = anime_data.get("siteUrl", "")
         
         description = anime_data.get("description") or "No description available."
         description = description.replace("<br>", "\n").replace("<i>", "").replace("</i>", "")
@@ -181,7 +161,7 @@ class Search(commands.Cog):
         if anime_data.get("bannerImage"):
             embed.set_image(url=anime_data["bannerImage"])
 
-        embed.add_field(name="Episodes", value=anime_data.get("episodes", "N/A"), inline=True)
+        embed.add_field(name="Episodes", value=str(anime_data.get("episodes", "N/A")), inline=True)
         embed.add_field(name="Status", value=anime_data.get("status", "N/A").title(), inline=True)
 
         start = anime_data.get("startDate", {})
@@ -215,13 +195,7 @@ class Search(commands.Cog):
     @commands.hybrid_command(name="anime", description="Search for an anime by name")
     @commands.cooldown(1, 15, commands.BucketType.user)
     async def anime(self, ctx: commands.Context, *, query: str):
-        """
-        Interactive search for anime metadata using AniList.
-
-        Args:
-            ctx (commands.Context): The command context.
-            query (str): The name of the anime to search for.
-        """
+        """Interactive search for anime metadata using AniList."""
         results = await search_anime(self.bot.session, query)
 
         if not results:
@@ -229,7 +203,7 @@ class Search(commands.Cog):
 
         options = [
             discord.SelectOption(
-                label=(a["title"]["english"] or a["title"]["romaji"])[:100],
+                label=(a.get("title", {}).get("english") or a.get("title", {}).get("romaji") or "Unknown")[:100],
                 description=f"Episodes: {a.get('episodes', 'N/A')} | Season: {a.get('season', 'N/A')}"[:100],
                 value=str(a["id"]),
             )
@@ -242,11 +216,13 @@ class Search(commands.Cog):
                 return
 
             await interaction.response.defer()
-            anime_id = int(interaction.data["values"][0])
-            anime_data = next(a for a in results if a["id"] == anime_id)
-            
-            embed = self._create_anime_embed(anime_data)
-            await interaction.edit_original_response(content=None, embed=embed, view=None)
+            try:
+                anime_id = int(interaction.data["values"][0])
+                anime_data = next(a for a in results if a["id"] == anime_id)
+                embed = self._create_anime_embed(anime_data)
+                await interaction.edit_original_response(content=None, embed=embed, view=None)
+            except Exception:
+                await interaction.edit_original_response(content="❌ Failed to load anime data.", view=None)
 
         select = Select(placeholder="Choose an anime...", options=options)
         select.callback = select_callback
