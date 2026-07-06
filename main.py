@@ -7,8 +7,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from loggers.bot_logging import setup_logging  # noqa: E402
-from constants.configs import DISCORD_TOKEN, DATABASE  # noqa: E402
+from bot.core.logging_config.bot_logging import setup_logging  # noqa: E402
+from bot.config.configs import DISCORD_TOKEN, DATABASE  # noqa: E402
 
 """
 main.py
@@ -82,17 +82,17 @@ class Minori(commands.AutoShardedBot):
             raise
 
         extensions = [
-            "cogs.general",
-            "cogs.search",
-            "cogs.progression",
-            "cogs.roles",
-            "cogs.events",
-            "cogs.games",
-            "cogs.fun",
-            "cogs.errors",
-            "cogs.trading",
-            "cogs.admin",
-            "utils.dev_commands"
+            "bot.cogs.general",
+            "bot.cogs.search",
+            "bot.cogs.progression",
+            "bot.cogs.roles",
+            "bot.cogs.events",
+            "bot.cogs.games",
+            "bot.cogs.fun",
+            "bot.cogs.errors",
+            "bot.cogs.trading",
+            "bot.cogs.admin",
+            "bot.utils.dev_commands"
         ]
         for ext in extensions:
             try:
