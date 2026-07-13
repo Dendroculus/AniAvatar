@@ -7,7 +7,7 @@ import json
 import time
 from itertools import cycle
 from typing import Dict, Optional, Any, List
-from bot.features.polling.views import PollInputModal
+from bot.features.polling.modals import PollInputModal
 from bot.config.emojis import MinoriEmojis, ShopEmojis
 from bot.config.configs import FunConstants as FC, ExternalAPIs as EC
 from bot.config.paths import DATA_PATH
