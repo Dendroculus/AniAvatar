@@ -9,7 +9,11 @@ from typing import List, Optional
 import asyncpg
 import discord
 
-from bot.config.emojis import CustomEmojis, MinoriEmojis
+from bot.config.emojis import CustomEmojis
+from bot.features.polling.presenter import (
+    build_poll_embed,
+    compute_poll_results,
+)
 from bot.features.polling.repository import (
     delete_vote,
     record_poll_result,
@@ -147,32 +151,12 @@ class PollView(discord.ui.View):
                 pass
 
     def _compute_results(self):
-        """
-        Compute result aggregates for the poll.
-        """
-        results = {opt: len(users) for opt, users in self.votes.items()}
-        winners = []
-        winner_text = ""
-        if results:
-            max_votes = max(results.values())
-            winners = [opt for opt, count in results.items() if count == max_votes]
-            if max_votes > 0:
-                if len(winners) == 1:
-                    winner_text = (
-                        f"\n\n{MinoriEmojis['MinoriPray']} Polling for `{self.question}` ended. "
-                        f"The highest vote goes to **{winners[0]}** with {max_votes} vote{'s' if max_votes != 1 else ''}."
-                    )
-                else:
-                    winner_text = (
-                        f"\n\n{MinoriEmojis['MinoriPray']} Polling for `{self.question}` ended. "
-                        f"It's a tie between {', '.join(winners)} — each with {max_votes} votes."
-                    )
-            else:
-                winner_text = (
-                    f"\n\n{MinoriEmojis['MinoriWink']} Polling for `{self.question}` ended. "
-                    "No votes were cast."
-                )
-        return results, winners, winner_text
+        """Compute the current result summary."""
+
+        return compute_poll_results(
+            question=self.question,
+            votes=self.votes,
+        )
 
     async def _persist_results(self, results, winners):
         """
@@ -386,48 +370,17 @@ class PollView(discord.ui.View):
 
         await self._respond_to_interaction(interaction, ephemeral_msg)
 
-    def make_poll_embed(self, closed: bool = False, bar_len: int = 10):
-        """
-        Build and return a Discord embed representation of the poll.
-        """
-        total_votes = sum(len(v) for v in self.votes.values())
-        colors = ["🟦", "🟥", "🟩", "🟨", "🟪", "🟧", "🟫"]
+    def make_poll_embed(
+        self,
+        closed: bool = False,
+        bar_len: int = 10,
+    ) -> discord.Embed:
+        """Build the current poll embed."""
 
-        embed = discord.Embed(
-            title=f"{CustomEmojis['CHART']}  {self.question}",
-            color=discord.Color.blurple(),
+        return build_poll_embed(
+            question=self.question,
+            votes=self.votes,
+            end_time=self.end_time,
+            closed=closed,
+            bar_len=bar_len,
         )
-
-        for i, (opt, users) in enumerate(self.votes.items(), 1):
-            count = len(users)
-            percent = (count / total_votes * 100) if total_votes > 0 else 0
-            filled = int(percent / 100 * bar_len) if bar_len > 0 else 0
-            empty = max(0, bar_len - filled)
-            color = colors[i % len(colors)]
-            bar = color * filled + f"{CustomEmojis['Gray_Large_Square']}" * empty
-
-            embed.add_field(
-                name=opt, value=f"{bar} `{percent:.0f}% ({count})`", inline=False
-            )
-
-        if closed:
-            if self.end_time:
-                status = (
-                    f"{CustomEmojis['Locked']} Poll closed <t:{int(self.end_time.timestamp())}:R>\n"
-                    f"{CustomEmojis['SecretBox']} Votes are anonymous\n"
-                    f"With total of `{total_votes} votes`"
-                )
-            else:
-                status = f"{CustomEmojis['Locked']} Poll closed\n{CustomEmojis['SecretBox']} Votes are anonymous\n{total_votes} votes"
-        elif self.end_time:
-            status = (
-                f"{CustomEmojis['TIME']} Poll closes <t:{int(self.end_time.timestamp())}:R>\n"
-                f"{CustomEmojis['SecretBox']} Votes are anonymous\n"
-                f"Total Votes: `{total_votes}` votes"
-            )
-        else:
-            status = (
-                f"{CustomEmojis['SecretBox']} Votes are anonymous\n{total_votes} votes"
-            )
-        embed.add_field(name="\u200b", value=status, inline=False)
-        return embed
