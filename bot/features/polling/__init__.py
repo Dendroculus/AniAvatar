@@ -1,10 +1,8 @@
-"""Backward-compatible polling repository facade.
+"""Polling feature package."""
 
-New code should import from ``bot.features.polling.repository``.
-"""
-
-from bot.features.polling.models import PollData
-from bot.features.polling.repository import (
+from .models import PollData
+from .recovery import reconstruct_poll
+from .repository import (
     delete_vote,
     init_db,
     load_active_polls,
@@ -13,13 +11,18 @@ from bot.features.polling.repository import (
     save_active_poll,
     upsert_vote,
 )
+from .views import AddOptionModal, PollInputModal, PollView
 
 __all__ = [
+    "AddOptionModal",
     "PollData",
+    "PollInputModal",
+    "PollView",
     "delete_vote",
     "init_db",
     "load_active_polls",
     "purge_finished_polls",
+    "reconstruct_poll",
     "record_poll_result",
     "save_active_poll",
     "upsert_vote",

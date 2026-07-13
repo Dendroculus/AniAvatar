@@ -4,13 +4,13 @@ from discord.ext import commands
 import asyncio
 import random
 import json
-import os
 import time
 from itertools import cycle
 from typing import Dict, Optional, Any, List
-from bot.utils.pollings import PollInputModal
+from bot.features.polling.views import PollInputModal
 from bot.config.emojis import MinoriEmojis, ShopEmojis
 from bot.config.configs import FunConstants as FC, ExternalAPIs as EC
+from bot.config.paths import DATA_PATH
 from bot.utils.gamble_helpers import GambleView
 
 
@@ -42,7 +42,7 @@ class QuoteManager:
     """
     def __init__(self, bot):
         self.bot = bot
-        self.data_path = os.path.join(os.path.dirname(__file__), "..", "data", "quotes.json")
+        self.data_path = DATA_PATH / "quotes.json"
         self.quotes_dict: Dict[str, List[Dict[str, str]]] = {"Mixed": []}
         self.used_quotes = set()
         self.lock = asyncio.Lock()
@@ -58,7 +58,7 @@ class QuoteManager:
             except FileNotFoundError:
                 return {}
 
-        data = await self.bot.loop.run_in_executor(None, _read_json)
+        data = await asyncio.to_thread(_read_json)
 
         if isinstance(data, dict):
             self.quotes_dict = data
