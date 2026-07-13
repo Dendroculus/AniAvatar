@@ -1,27 +1,21 @@
 import discord
 from discord.ext import commands
-import random
 import io
 import redis.asyncio as redis
 import logging
 from typing import Optional, Tuple
-from discord import MessageReference
 
-from bot.features.progression.domain.levels import (
-    get_title,
-    get_title_emoji,
-)
 
 from bot.utils.progression.profile_theme import MainThemeView
 from bot.config.configs import (
     REDIS_CACHING,
     ProgressionConstants as PC,
 )
-from bot.config.emojis import CustomEmojis
 from bot.services.render_manager import RenderManager
 from bot.features.progression.leaderboard_workflow import LeaderboardWorkflow
 from bot.features.progression.profile_workflow import ProfileWorkflow
 from bot.services.user_repository import UserRepository
+from bot.features.progression.experience_workflow import ExperienceWorkflow
 
 """
 progression.py
@@ -42,6 +36,7 @@ class Progression(commands.Cog):
         self.render_manager = RenderManager()
         self.profile_workflow: ProfileWorkflow | None = None
         self.leaderboard_workflow: LeaderboardWorkflow | None = None
+        self.experience_workflow: ExperienceWorkflow | None = None
 
         self.redis_url = REDIS_CACHING
         self.redis: redis.Redis | None = None
@@ -58,8 +53,6 @@ class Progression(commands.Cog):
                     f"Failed to connect to Redis: {e}"
                 )
                 self.redis = None
-
-        self._fallback_cooldowns: dict[str, float] = {}
 
     async def cog_load(self):
         """Initialize database tables and repository."""
@@ -78,6 +71,11 @@ class Progression(commands.Cog):
             render_manager=self.render_manager,
             redis_client=self.redis,
             avatar_fetcher=(self.profile_workflow.fetch_avatar_bytes),
+        )
+        self.experience_workflow = ExperienceWorkflow(
+            bot=self.bot,
+            repository=self.repo,
+            redis_client=self.redis,
         )
 
     async def cog_unload(self):
@@ -198,57 +196,6 @@ class Progression(commands.Cog):
                 return await interaction.followup.send(*args, **kwargs)
         else:
             return await ctx.send(*args, **kwargs)
-
-    async def announce_level_up(
-        self,
-        guild_id: int,
-        user_id: int,
-        new_level: int,
-        old_level: int,
-        channel: discord.abc.Messageable,
-    ):
-        """Send a level-up announcement and award bonus coins."""
-        guild = self.bot.get_guild(guild_id)
-        if not guild:
-            return
-        member = guild.get_member(user_id)
-        if not member:
-            return
-        old_title = get_title(old_level)
-        new_title = get_title(new_level)
-        old_emoji = get_title_emoji(old_level)
-        new_emoji = get_title_emoji(new_level)
-        if new_title != old_title:
-            embed_title = f"{member.display_name} {CustomEmojis['UPWARDARROW']} {new_level}    {old_emoji} {CustomEmojis['RIGHTWARDARROW']} {new_emoji}"
-            embed_description = (
-                f"```Congratulations {member.display_name}! You have reached level {new_level} and ascended to {new_title}. ```\n"
-                f"Title: `{new_title}` {new_emoji}"
-            )
-        else:
-            embed_title = (
-                f"{member.display_name} {CustomEmojis['UPWARDARROW']} {new_level}"
-            )
-            embed_description = (
-                f"```Congratulations {member.display_name}! You have reached level {new_level}.```\n"
-                f"Title: `{new_title}` {new_emoji}"
-            )
-        embed = discord.Embed(
-            title=embed_title,
-            description=embed_description,
-            color=discord.Color.green(),
-        )
-        embed.set_thumbnail(url=member.display_avatar.url)
-        lvlup_msg = await channel.send(embed=embed)
-        coins_amount = random.randint(30, 50)
-        await self.repo.add_coins(user_id, guild_id, coins_amount)
-        await channel.send(
-            f"{member.display_name} received {PC.coins_emoji()} {coins_amount} coins for leveling up!",
-            reference=MessageReference(
-                message_id=lvlup_msg.id,
-                channel_id=lvlup_msg.channel.id,
-                guild_id=lvlup_msg.guild.id,
-            ),
-        )
 
     @commands.Cog.listener()
     async def on_guild_remove(self, guild: discord.Guild):
@@ -409,58 +356,11 @@ class Progression(commands.Cog):
 
     @commands.Cog.listener()
     async def on_message(self, message):
-        """Listener to award EXP on message sent, subject to cooldown."""
-        if message.author.bot or not message.guild:
+        """Delegate message-based EXP progression."""
+        if self.experience_workflow is None:
             return
 
-        guild_id = message.guild.id
-        user_id = message.author.id
-
-        cooldown_key = f"cooldown:{guild_id}:{user_id}"
-
-        use_fallback = True
-
-        if self.redis:
-            try:
-                allowed = await self.redis.set(cooldown_key, b"1", ex=5, nx=True)
-                if not allowed:
-                    return
-
-                use_fallback = False
-            except Exception as e:
-                logging.getLogger("progression").warning(
-                    f"Redis error during cooldown check: {e}"
-                )
-
-        if use_fallback:
-            now = discord.utils.utcnow().timestamp()
-            last = self._fallback_cooldowns.get(cooldown_key, 0)
-            if now - last < 5:
-                return
-            self._fallback_cooldowns[cooldown_key] = now
-
-        exp, level = await self.repo.get_user(user_id, guild_id)
-        old_level = level
-
-        exp_gain = random.randint(5 + level * 8, 10 + level * 12)
-        level, new_exp, leveled_up = await self.repo.add_exp(
-            user_id, guild_id, exp_gain
-        )
-
-        if leveled_up:
-            await self.announce_level_up(
-                guild_id, user_id, level, old_level, message.channel
-            )
-            old_rank = await self.repo.get_rank_for(guild_id, old_level, exp)
-            new_rank = await self.repo.get_rank_for(guild_id, level, new_exp)
-            if new_rank < old_rank:
-                embed = discord.Embed(
-                    title=f"{CustomEmojis['UPWARDARROW']} Rank Up! {message.author.display_name}",
-                    description=f"```{message.author.display_name} has ranked up to #{new_rank} in the server leaderboard! 🎉```",
-                    color=discord.Color.gold(),
-                )
-                embed.set_thumbnail(url=message.author.display_avatar.url)
-                await message.channel.send(embed=embed)
+        await self.experience_workflow.handle_message(message)
 
 
 async def setup(bot):
