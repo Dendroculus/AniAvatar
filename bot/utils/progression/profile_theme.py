@@ -62,7 +62,7 @@ class MainThemeSelect(discord.ui.Select):
 
         if interaction.user.id != self.user_id:
             await interaction.response.send_message(
-                ("?? You can only select a background for yourself."),
+                ("⚠️ You can only select a background for yourself."),
                 ephemeral=True,
             )
             return
@@ -164,7 +164,7 @@ class SubThemeSelect(discord.ui.Select):
 
         if interaction.user.id != self.user_id:
             await interaction.response.send_message(
-                ("?? You can only select a background for yourself."),
+                ("⚠️ You can only select a background for yourself."),
                 ephemeral=True,
             )
             return
@@ -173,7 +173,7 @@ class SubThemeSelect(discord.ui.Select):
 
         if background is None:
             await interaction.response.send_message(
-                ("? That background is no longer available."),
+                ("❌ That background is no longer available."),
                 ephemeral=True,
             )
             return
@@ -219,7 +219,7 @@ class SubThemeSelect(discord.ui.Select):
 
         if interaction.guild is None:
             await interaction.followup.send(
-                ("? Profile themes can only be changed inside a server."),
+                ("⚠️ Profile themes can only be changed inside a server."),
                 ephemeral=True,
             )
             return
@@ -248,7 +248,7 @@ class SubThemeSelect(discord.ui.Select):
 
         if not result.image_bytes:
             await interaction.followup.send(
-                ("?? The theme was saved, but the preview could not be rendered."),
+                ("⚠️ The theme was saved, but the preview could not be rendered."),
                 ephemeral=True,
             )
             return

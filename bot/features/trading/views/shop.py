@@ -5,6 +5,7 @@ import asyncio
 import discord
 
 from bot.config.configs import TradingConstants as TC
+from bot.features.trading.view_registry import TradingViewRegistry
 from bot.features.trading.views.common import (
     CloseButton,
     format_coins,
@@ -37,7 +38,7 @@ class ShopSelect(discord.ui.Select):
 
         if interaction.user.id != self.user_id:
             await interaction.response.send_message(
-                ("?? You can only buy items for yourself."),
+                ("⚠️ You can only buy items for yourself."),
                 ephemeral=True,
             )
             return
@@ -90,7 +91,7 @@ class ShopSelect(discord.ui.Select):
 
             if not details:
                 await interaction.followup.send(
-                    ("? This item no longer exists in the shop."),
+                    ("❌ This item no longer exists in the shop."),
                     ephemeral=True,
                 )
                 return
@@ -179,7 +180,15 @@ class ShopView(discord.ui.View):
     """
 
     def __init__(
-        self, progression_cog, user_id, guild_id, options, parent_cog, timeout=180
+        self,
+        progression_cog,
+        user_id,
+        guild_id,
+        options,
+        parent_cog,
+        *,
+        registry: TradingViewRegistry,
+        timeout=180,
     ):
         super().__init__(timeout=None)
         self.progression_cog = progression_cog
@@ -187,6 +196,7 @@ class ShopView(discord.ui.View):
         self.guild_id = guild_id
         self.options = options
         self.parent_cog = parent_cog
+        self.registry = registry
         self.message = None
         self.timeout_seconds = timeout
         self._timeout_task = None
@@ -201,9 +211,10 @@ class ShopView(discord.ui.View):
             owner_id=self.user_id,
             close_text="❌ Shop closed.",
             label="Close Shop",
-            menu_type="shop",
-            cog=self.parent_cog,
-            guild_id=self.guild_id,
+            on_close=lambda: self.registry.remove_shop(
+                self.guild_id,
+                self.user_id,
+            ),
         )
 
         self.add_item(close_button)
@@ -255,13 +266,7 @@ class ShopView(discord.ui.View):
             if timeout_task:
                 timeout_task.cancel()
 
-            self.parent_cog.open_shops.get(
-                self.guild_id,
-                {},
-            ).pop(
-                self.user_id,
-                None,
-            )
+            self.registry.remove_shop(self.guild_id, self.user_id)
 
             if self.message:
                 await self.message.edit(
@@ -278,7 +283,7 @@ class ShopView(discord.ui.View):
         )
 
         embed = discord.Embed(
-            title="?? Minori Bargains",
+            title="🛒 Minori Bargains",
             description=(f"Your Coins: **{format_coins(balance)}**"),
             color=discord.Color.dark_purple(),
         )
@@ -333,8 +338,7 @@ class ShopView(discord.ui.View):
             except (discord.HTTPException, discord.NotFound, discord.Forbidden):
                 pass
 
-        if self.parent_cog:
-            self.parent_cog.open_shops.get(self.guild_id, {}).pop(self.user_id, None)
+        self.registry.remove_shop(self.guild_id, self.user_id)
 
     def reset_timer(self):
         """Reset the internal timer."""

@@ -12,6 +12,7 @@ from bot.services.user_repository import UserRepository
 from bot.services.trading_repository import TradingRepository
 from bot.features.trading.item_effects import ItemEffectService
 from bot.features.trading.donation_service import DonationService
+from bot.features.trading.view_registry import TradingViewRegistry
 
 """
 trading.py
@@ -85,8 +86,7 @@ class Trading(commands.Cog):
         self.item_effect_service: Optional[ItemEffectService] = None
         self.donation_service: Optional[DonationService] = None
 
-        self.open_inventories = {}
-        self.open_shops = {}
+        self.view_registry = TradingViewRegistry()
         self._maintenance_task = None
 
     async def _start_maintenance_loop(self):
@@ -206,12 +206,10 @@ class Trading(commands.Cog):
     ) -> None:
         """Refresh an existing inventory view from database state."""
 
-        inventory_views = self.open_inventories.get(
+        current_view = self.view_registry.get_inventory(
             guild_id,
-            {},
+            user_id,
         )
-
-        current_view = inventory_views.get(user_id)
 
         if current_view is None:
             return
@@ -223,10 +221,7 @@ class Trading(commands.Cog):
         )
 
         if message is None:
-            inventory_views.pop(
-                user_id,
-                None,
-            )
+            self.view_registry.remove_inventory(guild_id, user_id)
             return
 
         items = await self.trading_repo.get_user_inventory(
@@ -245,15 +240,12 @@ class Trading(commands.Cog):
 
         if not items:
             await message.edit(
-                content="?? Your inventory is now empty.",
+                content="🧯 Your inventory is now empty.",
                 embed=None,
                 view=None,
             )
 
-            inventory_views.pop(
-                user_id,
-                None,
-            )
+            self.view_registry.remove_inventory(guild_id, user_id)
             return
 
         inventory_text = "\n".join(
@@ -273,6 +265,7 @@ class Trading(commands.Cog):
             user_id,
             guild_id,
             items,
+            registry=self.view_registry,
         )
 
         new_view.message = message
@@ -301,7 +294,11 @@ class Trading(commands.Cog):
 
             raise
 
-        inventory_views[user_id] = new_view
+        self.view_registry.register_inventory(
+            guild_id,
+            user_id,
+            new_view,
+        )
 
     @commands.hybrid_command(name="shop", description="View the shop and buy items!")
     @commands.guild_only()
@@ -319,7 +316,7 @@ class Trading(commands.Cog):
         user_id = ctx.author.id
         guild_id = ctx.guild.id
 
-        if self.open_shops.get(guild_id, {}).get(user_id):
+        if self.view_registry.get_shop(guild_id, user_id) is not None:
             await ctx.send(
                 "⚠️ You already have a shop open! Close it first.", ephemeral=True
             )
@@ -360,13 +357,14 @@ class Trading(commands.Cog):
             guild_id,
             options,
             parent_cog=self,
+            registry=self.view_registry,
             timeout=180,
         )
         msg = await ctx.send(embed=embed, view=view)
 
         view.message = msg
         view.select.message = msg
-        self.open_shops.setdefault(guild_id, {})[user_id] = view
+        self.view_registry.register_shop(guild_id, user_id, view)
 
     @commands.hybrid_command(
         name="inventory", description="Check your inventory and items"
@@ -385,7 +383,7 @@ class Trading(commands.Cog):
 
         user_id = ctx.author.id
         guild_id = ctx.guild.id
-        if self.open_inventories.get(guild_id, {}).get(user_id):
+        if self.view_registry.get_inventory(guild_id, user_id) is not None:
             await ctx.send(
                 "⚠️ You already have an inventory open! Close it first.", ephemeral=True
             )
@@ -407,10 +405,16 @@ class Trading(commands.Cog):
         )
         embed.set_thumbnail(url=ctx.author.display_avatar.url)
 
-        view = InventoryView(self, user_id, guild_id, items)
+        view = InventoryView(
+            self,
+            user_id,
+            guild_id,
+            items,
+            registry=self.view_registry,
+        )
         msg = await ctx.send(embed=embed, view=view)
         view.message = msg
-        self.open_inventories.setdefault(guild_id, {})[user_id] = view
+        self.view_registry.register_inventory(guild_id, user_id, view)
 
     @commands.hybrid_command(
         name="donate",
@@ -429,18 +433,16 @@ class Trading(commands.Cog):
 
         if member.bot:
             await ctx.send(
-                f"{MinoriEmojis['MinoriConfused']} "
-                "You cannot donate to a bot."
+                f"{MinoriEmojis['MinoriConfused']} You cannot donate to a bot."
             )
             return
 
         if ctx.author.id == member.id:
             await ctx.send(
-                f"{MinoriEmojis['MinoriConfused']} "
-                "You cannot donate to yourself."
+                f"{MinoriEmojis['MinoriConfused']} You cannot donate to yourself."
             )
             return
-        
+
         donor_id = ctx.author.id
         guild_id = ctx.guild.id
 
@@ -460,7 +462,7 @@ class Trading(commands.Cog):
         )
 
         if not items:
-            await ctx.send("?? Your inventory is empty, cannot donate.")
+            await ctx.send("🧯 Your inventory is empty, cannot donate.")
             return
 
         caps = {

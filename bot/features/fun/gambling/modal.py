@@ -63,7 +63,7 @@ class CustomGambleModal(discord.ui.Modal):
             await parent.fun._send(
                 parent.ctx,
                 interaction,
-                "? Invalid number.",
+                "❌ Invalid number.",
                 ephemeral=True,
             )
             await parent._clear_selection()
@@ -78,7 +78,7 @@ class CustomGambleModal(discord.ui.Modal):
             await parent.fun._send(
                 parent.ctx,
                 interaction,
-                (f"? Invalid amount. You have {latest_balance} {ShopEmojis['Coins']}."),
+                (f"❌ Invalid amount. You have {latest_balance} {ShopEmojis['Coins']}."),
                 ephemeral=True,
             )
             await parent._clear_selection()

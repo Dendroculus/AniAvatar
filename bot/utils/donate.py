@@ -42,14 +42,14 @@ class DonateAmountModal(discord.ui.Modal):
         except (TypeError, ValueError):
             await self.parent_view.edit_message(
                 interaction,
-                content="? Invalid number.",
+                content="❌ Invalid number.",
             )
             return
 
         if amount <= 0:
             await self.parent_view.edit_message(
                 interaction,
-                content=("? Amount must be at least 1."),
+                content=("❌ Amount must be at least 1."),
             )
             return
 
@@ -57,7 +57,7 @@ class DonateAmountModal(discord.ui.Modal):
             await self.parent_view.edit_message(
                 interaction,
                 content=(
-                    f"? You can only donate up to {self.max_amount} of this item."
+                    f"❌ You can only donate up to {self.max_amount} of this item."
                 ),
             )
             return
@@ -142,7 +142,7 @@ class DonateView(discord.ui.View):
         """Allow only the menu owner to donate."""
         if interaction.user.id != self.author_id:
             await interaction.response.send_message(
-                ("?? This is not your donate menu!"),
+                ("⚠️ This is not your donate menu!"),
                 ephemeral=True,
             )
             return False
@@ -193,7 +193,7 @@ class DonateView(discord.ui.View):
         if not result.success:
             await self.edit_message(
                 interaction,
-                content=("? You don't have enough of this item."),
+                content=("❌ You don't have enough of this item."),
             )
             return
 
@@ -210,7 +210,7 @@ class DonateView(discord.ui.View):
                 ) in self.items
                 if name == item_name
             ),
-            "??",
+            "📦",
         )
 
         member = (

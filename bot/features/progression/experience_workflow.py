@@ -251,7 +251,7 @@ class ExperienceWorkflow:
                 "```"
                 f"{message.author.display_name} "
                 f"has ranked up to #{new_rank} "
-                "in the server leaderboard! ??"
+                "in the server leaderboard! 🎉"
                 "```"
             ),
             color=discord.Color.gold(),

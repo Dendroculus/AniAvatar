@@ -1,5 +1,7 @@
 """Shared helpers for trading Discord views."""
 
+from collections.abc import Callable
+
 import discord
 
 
@@ -18,43 +20,38 @@ def format_coins(coins: int) -> str:
 
 
 class CloseButton(discord.ui.Button):
-    """
-    A reusable 'Close' button for shop and inventory views.
-    """
+    """A reusable close button for trading views."""
 
     def __init__(
         self,
         owner_id: int,
         close_text: str,
+        *,
+        on_close: Callable[[], None],
         label: str = "Close",
-        menu_type: str = None,
-        cog=None,
-        guild_id: int = None,
-    ):
-        self.guild_id = guild_id
+    ) -> None:
         super().__init__(label=label, style=discord.ButtonStyle.danger)
         self.owner_id = owner_id
         self.close_text = close_text
-        self.menu_type = menu_type
-        self.cog = cog
+        self.on_close = on_close
 
-    async def callback(self, interaction: discord.Interaction):
-        """Handle button click to close the menu."""
+    async def callback(self, interaction: discord.Interaction) -> None:
+        """Close the menu when its owner clicks the button."""
         if interaction.user.id != self.owner_id:
             await interaction.response.send_message(
-                "⚠️ This is not your menu!", ephemeral=True
+                "⚠️ This is not your menu!",
+                ephemeral=True,
             )
             return
 
-        if self.menu_type == "shop":
-            self.cog.open_shops.get(self.guild_id, {}).pop(self.owner_id, None)
-        elif self.menu_type == "inventory":
-            self.cog.open_inventories.get(self.guild_id, {}).pop(self.owner_id, None)
+        self.on_close()
 
-        t = getattr(self.view, "_timeout_task", None)
-        if t:
-            t.cancel()
+        timeout_task = getattr(self.view, "_timeout_task", None)
+        if timeout_task:
+            timeout_task.cancel()
 
         await interaction.response.edit_message(
-            content=self.close_text, embed=None, view=None
+            content=self.close_text,
+            embed=None,
+            view=None,
         )

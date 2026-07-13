@@ -13,6 +13,7 @@ from bot.config.emojis import (
     MinoriEmojis,
     ShopEmojis,
 )
+from bot.features.trading.view_registry import TradingViewRegistry
 from bot.features.trading.views.common import CloseButton
 
 
@@ -27,6 +28,7 @@ class InventorySelect(discord.ui.Select):
         self.guild_id = guild_id
         self.items_data = items
         self.parent_view = parent_view
+        self.registry = parent_view.registry
 
         options = [
             discord.SelectOption(
@@ -120,22 +122,16 @@ class InventorySelect(discord.ui.Select):
         if timeout_task:
             timeout_task.cancel()
 
-        inventory_views = self.cog.open_inventories.setdefault(
-            self.guild_id,
-            {},
-        )
+        registry = self.registry
 
         if not items:
             await interaction.edit_original_response(
                 embed=None,
                 view=None,
-                content="?? Your inventory is now empty.",
+                content="🧯 Your inventory is now empty.",
             )
 
-            inventory_views.pop(
-                self.user_id,
-                None,
-            )
+            registry.remove_inventory(self.guild_id, self.user_id)
 
             await interaction.followup.send(
                 feedback_msg,
@@ -160,6 +156,7 @@ class InventorySelect(discord.ui.Select):
             self.user_id,
             self.guild_id,
             items,
+            registry=registry,
         )
 
         updated_message = await interaction.edit_original_response(
@@ -170,7 +167,11 @@ class InventorySelect(discord.ui.Select):
 
         new_view.message = updated_message
 
-        inventory_views[self.user_id] = new_view
+        registry.register_inventory(
+            self.guild_id,
+            self.user_id,
+            new_view,
+        )
 
         await interaction.followup.send(
             feedback_msg,
@@ -220,9 +221,19 @@ class InventoryView(discord.ui.View):
     A view presenting the user's inventory with auto-timeout logic.
     """
 
-    def __init__(self, cog, user_id, guild_id, items, timeout=180):
+    def __init__(
+        self,
+        cog,
+        user_id,
+        guild_id,
+        items,
+        *,
+        registry: TradingViewRegistry,
+        timeout=180,
+    ):
         super().__init__(timeout=None)
         self.cog = cog
+        self.registry = registry
         self.user_id = user_id
         self.guild_id = guild_id
         self.items = items
@@ -236,9 +247,10 @@ class InventoryView(discord.ui.View):
             owner_id=user_id,
             close_text="❌ Inventory closed.",
             label="Close Inventory",
-            menu_type="inventory",
-            cog=self.cog,
-            guild_id=self.guild_id,
+            on_close=lambda: self.registry.remove_inventory(
+                self.guild_id,
+                self.user_id,
+            ),
         )
         self.add_item(close_button)
 
@@ -261,8 +273,7 @@ class InventoryView(discord.ui.View):
             except (discord.HTTPException, discord.NotFound, discord.Forbidden):
                 pass
 
-        if self.cog:
-            self.cog.open_inventories.get(self.guild_id, {}).pop(self.user_id, None)
+        self.registry.remove_inventory(self.guild_id, self.user_id)
 
     def reset_timer(self):
         """Reset the internal timer to prevent premature closing."""

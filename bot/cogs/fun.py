@@ -191,10 +191,10 @@ class Fun(
         try:
             image_url = await self.waifu_client.fetch_image_url()
         except WaifuAPIError:
-            await ctx.send("? Couldn't fetch a waifu image. Try again.")
+            await ctx.send("❌ Couldn't fetch a waifu image. Try again.")
             return
         except WaifuImageMissing:
-            await ctx.send("? No image found!")
+            await ctx.send("❌ No image found!")
             return
 
         embed = discord.Embed(title="Here's a random waifu for you!")

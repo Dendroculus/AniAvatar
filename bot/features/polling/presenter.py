@@ -48,7 +48,7 @@ def compute_poll_results(
             f"\n\n{MinoriEmojis['MinoriPray']} "
             f"Polling for `{question}` ended. "
             f"It's a tie between {', '.join(winners)} "
-            f"? each with {max_votes} votes."
+            f"— each with {max_votes} votes."
         )
 
     return results, winners, winner_text
@@ -67,13 +67,13 @@ def build_poll_embed(
     total_votes = sum(len(user_ids) for user_ids in votes.values())
 
     colors = [
-        "??",
-        "??",
-        "??",
-        "??",
-        "??",
-        "??",
-        "??",
+        "🟦",
+        "🟥",
+        "🟩",
+        "🟨",
+        "🟪",
+        "🟧",
+        "🟫",
     ]
 
     embed = discord.Embed(
