@@ -195,6 +195,111 @@ class Trading(commands.Cog):
             guild_id,
         )
 
+    async def refresh_open_inventory(
+        self,
+        user_id: int,
+        guild_id: int,
+        user,
+    ) -> None:
+        """Refresh an existing inventory view from database state."""
+
+        inventory_views = self.open_inventories.get(
+            guild_id,
+            {},
+        )
+
+        current_view = inventory_views.get(user_id)
+
+        if current_view is None:
+            return
+
+        message = getattr(
+            current_view,
+            "message",
+            None,
+        )
+
+        if message is None:
+            inventory_views.pop(
+                user_id,
+                None,
+            )
+            return
+
+        items = await self.trading_repo.get_user_inventory(
+            user_id,
+            guild_id,
+        )
+
+        old_timeout = getattr(
+            current_view,
+            "_timeout_task",
+            None,
+        )
+
+        if old_timeout:
+            old_timeout.cancel()
+
+        if not items:
+            await message.edit(
+                content="?? Your inventory is now empty.",
+                embed=None,
+                view=None,
+            )
+
+            inventory_views.pop(
+                user_id,
+                None,
+            )
+            return
+
+        inventory_text = "\n".join(
+            f"{emoji} {name} x{qty}" for name, qty, emoji in items
+        )
+
+        embed = discord.Embed(
+            title=(f"{user.display_name}'s Inventory"),
+            description=inventory_text,
+            color=discord.Color.dark_purple(),
+        )
+
+        embed.set_thumbnail(url=user.display_avatar.url)
+
+        new_view = InventoryView(
+            self,
+            user_id,
+            guild_id,
+            items,
+        )
+
+        new_view.message = message
+
+        try:
+            await message.edit(
+                content=None,
+                embed=embed,
+                view=new_view,
+            )
+        except Exception:
+            timeout_task = getattr(
+                new_view,
+                "_timeout_task",
+                None,
+            )
+
+            if timeout_task:
+                timeout_task.cancel()
+
+            if hasattr(
+                current_view,
+                "start_timeout",
+            ):
+                current_view.start_timeout()
+
+            raise
+
+        inventory_views[user_id] = new_view
+
     @commands.hybrid_command(name="shop", description="View the shop and buy items!")
     @commands.guild_only()
     async def shop(self, ctx: commands.Context):
@@ -302,7 +407,7 @@ class Trading(commands.Cog):
         view = InventoryView(self, user_id, guild_id, items)
         msg = await ctx.send(embed=embed, view=view)
         view.message = msg
-        self.open_inventories.setdefault(guild_id, {})[user_id] = msg
+        self.open_inventories.setdefault(guild_id, {})[user_id] = view
 
     async def _execute_donation(
         self,

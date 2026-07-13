@@ -153,33 +153,82 @@ class InventorySelect(discord.ui.Select):
         return feedback
 
     async def _update_inventory_ui(
-        self, interaction: discord.Interaction, feedback_msg: str
-    ):
-        """Helper to fetch updated inventory and refresh the Discord view."""
+        self,
+        interaction: discord.Interaction,
+        feedback_msg: str,
+    ) -> None:
+        """Refresh the inventory from current database state."""
+
         items = await self.cog.trading_repo.get_user_inventory(
-            self.user_id, self.guild_id
+            self.user_id,
+            self.guild_id,
+        )
+
+        timeout_task = getattr(
+            self.parent_view,
+            "_timeout_task",
+            None,
+        )
+
+        if timeout_task:
+            timeout_task.cancel()
+
+        inventory_views = self.cog.open_inventories.setdefault(
+            self.guild_id,
+            {},
         )
 
         if not items:
             await interaction.edit_original_response(
-                embed=None, view=None, content="🧯 Your inventory is now empty."
+                embed=None,
+                view=None,
+                content="?? Your inventory is now empty.",
             )
-            await interaction.followup.send(feedback_msg, ephemeral=True)
+
+            inventory_views.pop(
+                self.user_id,
+                None,
+            )
+
+            await interaction.followup.send(
+                feedback_msg,
+                ephemeral=True,
+            )
             return
 
         inventory_text = "\n".join(
             f"{emoji} {name} x{qty}" for name, qty, emoji in items
         )
+
         embed = discord.Embed(
-            title=f"{interaction.user.display_name}'s Inventory",
+            title=(f"{interaction.user.display_name}'s Inventory"),
             description=inventory_text,
             color=discord.Color.dark_purple(),
         )
+
         embed.set_thumbnail(url=interaction.user.display_avatar.url)
 
-        new_view = InventoryView(self.cog, self.user_id, self.guild_id, items)
-        await interaction.edit_original_response(embed=embed, view=new_view)
-        await interaction.followup.send(feedback_msg, ephemeral=True)
+        new_view = InventoryView(
+            self.cog,
+            self.user_id,
+            self.guild_id,
+            items,
+        )
+
+        updated_message = await interaction.edit_original_response(
+            content=None,
+            embed=embed,
+            view=new_view,
+        )
+
+        new_view.message = updated_message
+
+        inventory_views[self.user_id] = new_view
+
+        await interaction.followup.send(
+            feedback_msg,
+            ephemeral=True,
+        )
 
     async def callback(self, interaction: discord.Interaction):
         """Process item usage, deduct from DB, and apply effects."""
@@ -291,111 +340,148 @@ class ShopSelect(discord.ui.Select):
             options=options,
         )
 
-    async def callback(self, interaction: discord.Interaction):
-        """Handle purchase logic: validate funds, deduct cost, add item."""
+    async def callback(
+        self,
+        interaction: discord.Interaction,
+    ) -> None:
+        """Purchase exactly one freshly selected shop item."""
+
         if interaction.user.id != self.user_id:
             await interaction.response.send_message(
-                "⚠️ You can only buy items for yourself.", ephemeral=True
+                ("?? You can only buy items for yourself."),
+                ephemeral=True,
             )
             return
 
-        if hasattr(self.parent_view, "reset_timer"):
+        if hasattr(
+            self.parent_view,
+            "reset_timer",
+        ):
             self.parent_view.reset_timer()
 
-        if getattr(self.parent_view, "processing", False):
+        if getattr(
+            self.parent_view,
+            "processing",
+            False,
+        ):
             await interaction.response.send_message(
-                "A purchase is already being processed. Please wait.", ephemeral=True
+                ("A purchase is already being processed. Please wait."),
+                ephemeral=True,
             )
             return
+
+        selected_item = self.values[0]
 
         self.parent_view.processing = True
         self.disabled = True
-        msg_to_edit = getattr(self, "message", None) or getattr(
-            self.parent_view, "message", None
+
+        message = (
+            getattr(self, "message", None)
+            or getattr(
+                self.parent_view,
+                "message",
+                None,
+            )
+            or interaction.message
         )
 
         await interaction.response.defer()
-        if msg_to_edit:
-            await msg_to_edit.edit(view=self.parent_view)
+
+        if message:
+            await message.edit(
+                view=self.parent_view,
+            )
 
         try:
-            selected_item = self.values[0]
-            # Access Repo via Parent Cog
-            repo = self.parent_view.parent_cog.trading_repo
+            parent_cog = self.parent_view.parent_cog
 
-            # Fetch Price/Emoji via Repo
+            repo = parent_cog.trading_repo
+
             details = await repo.get_item_details(selected_item)
 
             if not details:
                 await interaction.followup.send(
-                    "❌ This item no longer exists in the shop.", ephemeral=True
+                    ("? This item no longer exists in the shop."),
+                    ephemeral=True,
                 )
                 return
-            price, selected_emoji = details["price"], details["emoji"]
 
-            # Check coins using the wrapper passed in __init__ (EconomyServiceWrapper)
-            coins = await self.progression_cog.get_coins(self.user_id, self.guild_id)
+            price = details["price"]
+            selected_emoji = details["emoji"]
+
+            coins = await self.progression_cog.get_coins(
+                self.user_id,
+                self.guild_id,
+            )
+
             if coins < price:
-                await interaction.followup.send(TC.NOT_ENOUGH_COINS_MSG, ephemeral=True)
+                await interaction.followup.send(
+                    TC.NOT_ENOUGH_COINS_MSG,
+                    ephemeral=True,
+                )
                 return
 
-            ok = await self.progression_cog.remove_coins(
-                self.user_id, self.guild_id, price
+            removed = await self.progression_cog.remove_coins(
+                self.user_id,
+                self.guild_id,
+                price,
             )
-            if not ok:
-                await interaction.followup.send(TC.NOT_ENOUGH_COINS_MSG, ephemeral=True)
+
+            if not removed:
+                await interaction.followup.send(
+                    TC.NOT_ENOUGH_COINS_MSG,
+                    ephemeral=True,
+                )
                 return
 
-            # Add Item via Repo
-            await repo.add_item(self.user_id, self.guild_id, selected_item, 1)
-
-            # Refresh Data
-            new_balance = await self.progression_cog.get_coins(
-                self.user_id, self.guild_id
+            await repo.add_item(
+                self.user_id,
+                self.guild_id,
+                selected_item,
+                1,
             )
-            items = await repo.get_shop_items()
-
-            embed = discord.Embed(
-                title="🛒 Minori Bargains",
-                description=f"Your Coins: **{format_coins(new_balance)}**",
-                color=discord.Color.dark_purple(),
-            )
-            embed.set_thumbnail(url=TC.SHOP_ICON_URL)
-
-            new_options = []
-            for r in items:
-                name, item_price, item_emoji = r["name"], r["price"], r["emoji"]
-                embed.add_field(
-                    name=f"{item_emoji} {name}",
-                    value=f"{item_price} coins",
-                    inline=False,
-                )
-                new_options.append(
-                    discord.SelectOption(
-                        label=name,
-                        description=f"Buy {name} for {item_price} coins",
-                        emoji=item_emoji,
-                        value=name,
-                    )
-                )
-            self.options = new_options
-
-            if msg_to_edit:
-                await msg_to_edit.edit(embed=embed, view=self.parent_view)
-            else:
-                await interaction.followup.edit_message(
-                    interaction.message.id, embed=embed, view=self.parent_view
-                )
 
             await interaction.followup.send(
-                f"You bought **1x {selected_item}** {selected_emoji}!", ephemeral=True
+                (f"You bought **1x {selected_item}** {selected_emoji}!"),
+                ephemeral=True,
             )
 
         finally:
-            self.disabled = False
             self.parent_view.processing = False
-            if msg_to_edit:
-                await msg_to_edit.edit(view=self.parent_view)
+
+            try:
+                await self.parent_view.refresh()
+            except (
+                discord.HTTPException,
+                discord.Forbidden,
+                discord.NotFound,
+            ):
+                self.disabled = False
+
+                if message:
+                    try:
+                        await message.edit(
+                            view=self.parent_view,
+                        )
+                    except (
+                        discord.HTTPException,
+                        discord.Forbidden,
+                        discord.NotFound,
+                    ):
+                        pass
+
+            try:
+                await self.parent_view.parent_cog.refresh_open_inventory(
+                    self.user_id,
+                    self.guild_id,
+                    interaction.user,
+                )
+            except (
+                discord.HTTPException,
+                discord.Forbidden,
+                discord.NotFound,
+            ):
+                pass
 
 
 class ShopView(discord.ui.View):
@@ -433,6 +519,113 @@ class ShopView(discord.ui.View):
 
         self.add_item(close_button)
         self.start_timeout()
+
+    def reset_select(
+        self,
+        options: list[discord.SelectOption],
+    ) -> None:
+        """Replace the select to clear its interaction state."""
+
+        old_select = getattr(
+            self,
+            "select",
+            None,
+        )
+
+        if old_select is not None:
+            self.remove_item(old_select)
+
+        self.options = options
+
+        self.select = ShopSelect(
+            self.progression_cog,
+            self.user_id,
+            self.guild_id,
+            options,
+            self,
+        )
+
+        self.select.message = self.message
+
+        self.add_item(self.select)
+
+    async def refresh(self) -> None:
+        """Reload shop balance, items, and dropdown state."""
+
+        repo = self.parent_cog.trading_repo
+
+        items = await repo.get_shop_items()
+
+        if not items:
+            timeout_task = getattr(
+                self,
+                "_timeout_task",
+                None,
+            )
+
+            if timeout_task:
+                timeout_task.cancel()
+
+            self.parent_cog.open_shops.get(
+                self.guild_id,
+                {},
+            ).pop(
+                self.user_id,
+                None,
+            )
+
+            if self.message:
+                await self.message.edit(
+                    content="Shop is empty.",
+                    embed=None,
+                    view=None,
+                )
+
+            return
+
+        balance = await self.progression_cog.get_coins(
+            self.user_id,
+            self.guild_id,
+        )
+
+        embed = discord.Embed(
+            title="?? Minori Bargains",
+            description=(f"Your Coins: **{format_coins(balance)}**"),
+            color=discord.Color.dark_purple(),
+        )
+
+        embed.set_thumbnail(url=TC.SHOP_ICON_URL)
+
+        options = []
+
+        for item in items:
+            name = item["name"]
+            price = item["price"]
+            emoji = item["emoji"]
+
+            embed.add_field(
+                name=f"{emoji} {name}",
+                value=f"{price} coins",
+                inline=False,
+            )
+
+            options.append(
+                discord.SelectOption(
+                    label=name,
+                    description=(f"Buy {name} for {price} coins"),
+                    emoji=emoji,
+                    value=name,
+                )
+            )
+
+        self.reset_select(options)
+
+        if self.message:
+            await self.message.edit(
+                content=None,
+                embed=embed,
+                view=self,
+            )
 
     def start_timeout(self):
         """Initialize or restart the timeout task."""
