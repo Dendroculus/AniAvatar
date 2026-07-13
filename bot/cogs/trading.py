@@ -11,6 +11,7 @@ from bot.utils.donate import DonateView, DonateSelect
 from bot.services.user_repository import UserRepository
 from bot.services.trading_repository import TradingRepository
 from bot.features.trading.item_effects import ItemEffectService
+from bot.features.trading.inventory_workflow import InventoryWorkflow
 from bot.features.trading.donation_service import DonationService
 from bot.features.trading.view_registry import TradingViewRegistry
 
@@ -84,6 +85,7 @@ class Trading(commands.Cog):
         self.trading_repo: Optional[TradingRepository] = None
         self.economy_service: Optional[EconomyServiceWrapper] = None
         self.item_effect_service: Optional[ItemEffectService] = None
+        self.inventory_workflow: Optional[InventoryWorkflow] = None
         self.donation_service: Optional[DonationService] = None
 
         self.view_registry = TradingViewRegistry()
@@ -121,6 +123,11 @@ class Trading(commands.Cog):
             bot=self.bot,
             user_repository=self.user_repo,
             trading_repository=self.trading_repo,
+        )
+        self.inventory_workflow = InventoryWorkflow(
+            user_repository=self.user_repo,
+            trading_repository=self.trading_repo,
+            item_effect_service=self.item_effect_service,
         )
         self.donation_service = DonationService(
             pool=self.bot.pool,
@@ -261,7 +268,7 @@ class Trading(commands.Cog):
         embed.set_thumbnail(url=user.display_avatar.url)
 
         new_view = InventoryView(
-            self,
+            self.inventory_workflow,
             user_id,
             guild_id,
             items,
@@ -406,7 +413,7 @@ class Trading(commands.Cog):
         embed.set_thumbnail(url=ctx.author.display_avatar.url)
 
         view = InventoryView(
-            self,
+            self.inventory_workflow,
             user_id,
             guild_id,
             items,
