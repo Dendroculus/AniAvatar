@@ -9,6 +9,12 @@ from .inventory_workflow import (
     InventoryUseResult,
     InventoryWorkflow,
 )
+from .shop_workflow import (
+    ShopItem,
+    ShopPurchaseResult,
+    ShopPurchaseWorkflow,
+    ShopState,
+)
 from .view_registry import TradingViewRegistry
 
 __all__ = [
@@ -17,5 +23,9 @@ __all__ = [
     "InventoryUseResult",
     "InventoryWorkflow",
     "ItemEffectService",
+    "ShopItem",
+    "ShopPurchaseResult",
+    "ShopPurchaseWorkflow",
+    "ShopState",
     "TradingViewRegistry",
 ]

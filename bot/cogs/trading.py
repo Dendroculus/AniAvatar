@@ -12,6 +12,7 @@ from bot.services.user_repository import UserRepository
 from bot.services.trading_repository import TradingRepository
 from bot.features.trading.item_effects import ItemEffectService
 from bot.features.trading.inventory_workflow import InventoryWorkflow
+from bot.features.trading.shop_workflow import ShopPurchaseWorkflow
 from bot.features.trading.donation_service import DonationService
 from bot.features.trading.view_registry import TradingViewRegistry
 
@@ -21,51 +22,6 @@ trading.py
 Provides shop and inventory functionality for the AniAvatar bot.
 Responsible for item purchasing, inventory management, and user-to-user item trading.
 """
-
-
-class EconomyServiceWrapper:
-    """
-    Adapter class to expose UserRepository methods while mimicking the
-    structure expected by legacy UI components.
-    """
-
-    def __init__(self, user_repo: UserRepository, bot: commands.Bot):
-        """
-        Initialize the wrapper.
-
-        Args:
-            user_repo (UserRepository): The repository for user data access.
-            bot (commands.Bot): The bot instance.
-        """
-        self.user_repo = user_repo
-        self.bot = bot
-
-    async def get_coins(self, user_id: int, guild_id: int) -> int:
-        """
-        Retrieve the coin balance for a user.
-
-        Args:
-            user_id (int): The ID of the user.
-            guild_id (int): The ID of the guild.
-
-        Returns:
-            int: The user's coin balance.
-        """
-        return await self.user_repo.get_coins(user_id, guild_id)
-
-    async def remove_coins(self, user_id: int, guild_id: int, amount: int) -> bool:
-        """
-        Deduct coins from a user's balance.
-
-        Args:
-            user_id (int): The ID of the user.
-            guild_id (int): The ID of the guild.
-            amount (int): The amount of coins to remove.
-
-        Returns:
-            bool: True if the operation was successful, False otherwise.
-        """
-        return await self.user_repo.remove_coins(user_id, guild_id, amount)
 
 
 class Trading(commands.Cog):
@@ -83,9 +39,10 @@ class Trading(commands.Cog):
         self.bot = bot
         self.user_repo: Optional[UserRepository] = None
         self.trading_repo: Optional[TradingRepository] = None
-        self.economy_service: Optional[EconomyServiceWrapper] = None
+
         self.item_effect_service: Optional[ItemEffectService] = None
         self.inventory_workflow: Optional[InventoryWorkflow] = None
+        self.shop_workflow: Optional[ShopPurchaseWorkflow] = None
         self.donation_service: Optional[DonationService] = None
 
         self.view_registry = TradingViewRegistry()
@@ -118,7 +75,6 @@ class Trading(commands.Cog):
         self.user_repo = UserRepository(self.bot.pool)
         self.trading_repo = TradingRepository(self.bot.pool)
 
-        self.economy_service = EconomyServiceWrapper(self.user_repo, self.bot)
         self.item_effect_service = ItemEffectService(
             bot=self.bot,
             user_repository=self.user_repo,
@@ -128,6 +84,10 @@ class Trading(commands.Cog):
             user_repository=self.user_repo,
             trading_repository=self.trading_repo,
             item_effect_service=self.item_effect_service,
+        )
+        self.shop_workflow = ShopPurchaseWorkflow(
+            user_repository=self.user_repo,
+            trading_repository=self.trading_repo,
         )
         self.donation_service = DonationService(
             pool=self.bot.pool,
@@ -316,62 +276,82 @@ class Trading(commands.Cog):
         Args:
             ctx (commands.Context): The command context.
         """
-        if not self.user_repo:
+
+        if self.shop_workflow is None:
             await ctx.send("Services unavailable.")
             return
 
         user_id = ctx.author.id
         guild_id = ctx.guild.id
 
-        if self.view_registry.get_shop(guild_id, user_id) is not None:
+        if (
+            self.view_registry.get_shop(
+                guild_id,
+                user_id,
+            )
+            is not None
+        ):
             await ctx.send(
-                "⚠️ You already have a shop open! Close it first.", ephemeral=True
+                "⚠️ You already have a shop open! Close it first.",
+                ephemeral=True,
             )
             return
 
-        items = await self.trading_repo.get_shop_items()
+        state = await self.shop_workflow.load_shop(
+            user_id=user_id,
+            guild_id=guild_id,
+        )
+        items = state.items
+
         if not items:
             await ctx.send("Shop is empty.")
             return
 
-        user_coins = await self.user_repo.get_coins(user_id, guild_id)
         embed = discord.Embed(
             title="Minori Bargains",
-            description=f"Your Coins: **{format_coins(user_coins)}**",
+            description=(f"Your Coins: **{format_coins(state.balance)}**"),
             color=discord.Color.dark_purple(),
         )
         embed.set_thumbnail(url=TC.SHOP_ICON_URL)
-        for r in items:
+
+        for item in items:
             embed.add_field(
-                name=f"{r['emoji']} {r['name']}",
-                value=f"{r['price']} coins",
+                name=f"{item.emoji} {item.name}",
+                value=f"{item.price} coins",
                 inline=False,
             )
 
         options = [
             discord.SelectOption(
-                label=r["name"],
-                description=f"Buy {r['name']} for {r['price']} coins",
-                emoji=r["emoji"],
-                value=r["name"],
+                label=item.name,
+                description=(f"Buy {item.name} for {item.price} coins"),
+                emoji=item.emoji,
+                value=item.name,
             )
-            for r in items
+            for item in items
         ]
 
         view = ShopView(
-            self.economy_service,
+            self.shop_workflow,
             user_id,
             guild_id,
             options,
-            parent_cog=self,
+            refresh_inventory=self.refresh_open_inventory,
             registry=self.view_registry,
             timeout=180,
         )
-        msg = await ctx.send(embed=embed, view=view)
+        msg = await ctx.send(
+            embed=embed,
+            view=view,
+        )
 
         view.message = msg
         view.select.message = msg
-        self.view_registry.register_shop(guild_id, user_id, view)
+        self.view_registry.register_shop(
+            guild_id,
+            user_id,
+            view,
+        )
 
     @commands.hybrid_command(
         name="inventory", description="Check your inventory and items"

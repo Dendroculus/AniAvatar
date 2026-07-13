@@ -1,15 +1,24 @@
 """Shop purchasing Discord views."""
 
 import asyncio
+from typing import Awaitable, Callable
 
 import discord
 
 from bot.config.configs import TradingConstants as TC
+from bot.features.trading.shop_workflow import (
+    ShopPurchaseWorkflow,
+)
 from bot.features.trading.view_registry import TradingViewRegistry
 from bot.features.trading.views.common import (
     CloseButton,
     format_coins,
 )
+
+InventoryRefreshCallback = Callable[
+    [int, int, object],
+    Awaitable[None],
+]
 
 
 class ShopSelect(discord.ui.Select):
@@ -17,8 +26,13 @@ class ShopSelect(discord.ui.Select):
     A dropdown menu for purchasing items from the shop.
     """
 
-    def __init__(self, progression_cog, user_id, guild_id, options, parent_view):
-        self.progression_cog = progression_cog
+    def __init__(
+        self,
+        user_id: int,
+        guild_id: int,
+        options,
+        parent_view,
+    ) -> None:
         self.user_id = user_id
         self.guild_id = guild_id
         self.parent_view = parent_view
@@ -38,7 +52,7 @@ class ShopSelect(discord.ui.Select):
 
         if interaction.user.id != self.user_id:
             await interaction.response.send_message(
-                ("⚠️ You can only buy items for yourself."),
+                "⚠️ You can only buy items for yourself.",
                 ephemeral=True,
             )
             return
@@ -55,7 +69,7 @@ class ShopSelect(discord.ui.Select):
             False,
         ):
             await interaction.response.send_message(
-                ("A purchase is already being processed. Please wait."),
+                "A purchase is already being processed. Please wait.",
                 ephemeral=True,
             )
             return
@@ -83,56 +97,28 @@ class ShopSelect(discord.ui.Select):
             )
 
         try:
-            parent_cog = self.parent_view.parent_cog
+            result = await self.parent_view.workflow.purchase(
+                user_id=self.user_id,
+                guild_id=self.guild_id,
+                item_name=selected_item,
+            )
 
-            repo = parent_cog.trading_repo
-
-            details = await repo.get_item_details(selected_item)
-
-            if not details:
+            if result.status == "missing":
                 await interaction.followup.send(
-                    ("❌ This item no longer exists in the shop."),
+                    "❌ This item no longer exists in the shop.",
                     ephemeral=True,
                 )
                 return
 
-            price = details["price"]
-            selected_emoji = details["emoji"]
-
-            coins = await self.progression_cog.get_coins(
-                self.user_id,
-                self.guild_id,
-            )
-
-            if coins < price:
+            if result.status == "insufficient":
                 await interaction.followup.send(
                     TC.NOT_ENOUGH_COINS_MSG,
                     ephemeral=True,
                 )
                 return
-
-            removed = await self.progression_cog.remove_coins(
-                self.user_id,
-                self.guild_id,
-                price,
-            )
-
-            if not removed:
-                await interaction.followup.send(
-                    TC.NOT_ENOUGH_COINS_MSG,
-                    ephemeral=True,
-                )
-                return
-
-            await repo.add_item(
-                self.user_id,
-                self.guild_id,
-                selected_item,
-                1,
-            )
 
             await interaction.followup.send(
-                (f"You bought **1x {selected_item}** {selected_emoji}!"),
+                (f"You bought **1x {result.item_name}** {result.emoji}!"),
                 ephemeral=True,
             )
 
@@ -161,7 +147,7 @@ class ShopSelect(discord.ui.Select):
                         pass
 
             try:
-                await self.parent_view.parent_cog.refresh_open_inventory(
+                await self.parent_view.refresh_inventory(
                     self.user_id,
                     self.guild_id,
                     interaction.user,
@@ -181,21 +167,21 @@ class ShopView(discord.ui.View):
 
     def __init__(
         self,
-        progression_cog,
-        user_id,
-        guild_id,
+        workflow: ShopPurchaseWorkflow,
+        user_id: int,
+        guild_id: int,
         options,
-        parent_cog,
         *,
+        refresh_inventory: InventoryRefreshCallback,
         registry: TradingViewRegistry,
-        timeout=180,
-    ):
+        timeout: int = 180,
+    ) -> None:
         super().__init__(timeout=None)
-        self.progression_cog = progression_cog
+        self.workflow = workflow
         self.user_id = user_id
         self.guild_id = guild_id
         self.options = options
-        self.parent_cog = parent_cog
+        self.refresh_inventory = refresh_inventory
         self.registry = registry
         self.message = None
         self.timeout_seconds = timeout
@@ -203,7 +189,10 @@ class ShopView(discord.ui.View):
         self.processing = False
 
         self.select = ShopSelect(
-            self.progression_cog, self.user_id, self.guild_id, self.options, self
+            self.user_id,
+            self.guild_id,
+            self.options,
+            self,
         )
         self.add_item(self.select)
 
@@ -238,7 +227,6 @@ class ShopView(discord.ui.View):
         self.options = options
 
         self.select = ShopSelect(
-            self.progression_cog,
             self.user_id,
             self.guild_id,
             options,
@@ -252,9 +240,11 @@ class ShopView(discord.ui.View):
     async def refresh(self) -> None:
         """Reload shop balance, items, and dropdown state."""
 
-        repo = self.parent_cog.trading_repo
-
-        items = await repo.get_shop_items()
+        state = await self.workflow.load_shop(
+            user_id=self.user_id,
+            guild_id=self.guild_id,
+        )
+        items = state.items
 
         if not items:
             timeout_task = getattr(
@@ -266,7 +256,10 @@ class ShopView(discord.ui.View):
             if timeout_task:
                 timeout_task.cancel()
 
-            self.registry.remove_shop(self.guild_id, self.user_id)
+            self.registry.remove_shop(
+                self.guild_id,
+                self.user_id,
+            )
 
             if self.message:
                 await self.message.edit(
@@ -277,14 +270,9 @@ class ShopView(discord.ui.View):
 
             return
 
-        balance = await self.progression_cog.get_coins(
-            self.user_id,
-            self.guild_id,
-        )
-
         embed = discord.Embed(
             title="🛒 Minori Bargains",
-            description=(f"Your Coins: **{format_coins(balance)}**"),
+            description=(f"Your Coins: **{format_coins(state.balance)}**"),
             color=discord.Color.dark_purple(),
         )
 
@@ -293,22 +281,18 @@ class ShopView(discord.ui.View):
         options = []
 
         for item in items:
-            name = item["name"]
-            price = item["price"]
-            emoji = item["emoji"]
-
             embed.add_field(
-                name=f"{emoji} {name}",
-                value=f"{price} coins",
+                name=f"{item.emoji} {item.name}",
+                value=f"{item.price} coins",
                 inline=False,
             )
 
             options.append(
                 discord.SelectOption(
-                    label=name,
-                    description=(f"Buy {name} for {price} coins"),
-                    emoji=emoji,
-                    value=name,
+                    label=item.name,
+                    description=(f"Buy {item.name} for {item.price} coins"),
+                    emoji=item.emoji,
+                    value=item.name,
                 )
             )
 
@@ -333,12 +317,21 @@ class ShopView(discord.ui.View):
         if self.message:
             try:
                 await self.message.edit(
-                    content="❌ Shop closed.", embed=None, view=None
+                    content="❌ Shop closed.",
+                    embed=None,
+                    view=None,
                 )
-            except (discord.HTTPException, discord.NotFound, discord.Forbidden):
+            except (
+                discord.HTTPException,
+                discord.NotFound,
+                discord.Forbidden,
+            ):
                 pass
 
-        self.registry.remove_shop(self.guild_id, self.user_id)
+        self.registry.remove_shop(
+            self.guild_id,
+            self.user_id,
+        )
 
     def reset_timer(self):
         """Reset the internal timer."""
