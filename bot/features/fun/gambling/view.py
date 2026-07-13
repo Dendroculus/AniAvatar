@@ -4,9 +4,9 @@ This module contains helper classes and functions for the gambling feature. It d
 
 import discord
 from typing import Optional, TYPE_CHECKING
-from bot.config.emojis import ShopEmojis
 from discord.ext import commands
 from bot.config.configs import FunConstants as FC
+from bot.features.fun.gambling.modal import CustomGambleModal
 
 if TYPE_CHECKING:  # NOTE : TYPE_CHECKING ONLY IS USED TOAVOID CIRCULAR IMPORTS
     from bot.cogs.fun import Fun
@@ -178,69 +178,15 @@ class GambleView(discord.ui.View):
         except (discord.HTTPException, discord.Forbidden, discord.NotFound):
             pass
 
-    async def _show_custom_modal(self, interaction: discord.Interaction) -> None:
-        """
-        Present a small inline Modal for entering a custom gamble amount.
+    async def _show_custom_modal(
+        self,
+        interaction: discord.Interaction,
+    ) -> None:
+        """Open the custom gamble amount modal."""
 
-        The inner CustomModal enforces that only the session owner may submit and
-        validates the provided amount against the user's current balance.
-        """
         await self._clear_selection()
 
-        parent = self
-
-        class CustomModal(discord.ui.Modal):
-            def __init__(inner_self):
-                title_text = (
-                    "Custom Gamble"
-                    if parent.initial_coins is None
-                    else f"Custom Gamble (Max {parent.initial_coins})"
-                )
-                super().__init__(title=title_text)
-                inner_self.amount_input = discord.ui.TextInput(
-                    label="Enter amount",
-                    placeholder="Enter a positive number",
-                    style=discord.TextStyle.short,
-                )
-                inner_self.add_item(inner_self.amount_input)
-
-            async def on_submit(inner_self, inter: discord.Interaction):
-                if inter.user.id != parent.user_id:
-                    await parent.fun._send(
-                        parent.ctx, inter, FC.FALSE_GAMBLE_SESSION, ephemeral=True
-                    )
-                    return
-                try:
-                    amount = int(inner_self.amount_input.value)
-                except (ValueError, TypeError):
-                    await parent.fun._send(
-                        parent.ctx, inter, "❌ Invalid number.", ephemeral=True
-                    )
-                    await parent._clear_selection()
-                    return
-                latest = await parent.progression_cog.get_coins(
-                    parent.user_id, parent.guild_id
-                )
-                if amount <= 0 or amount > latest:
-                    await parent.fun._send(
-                        parent.ctx,
-                        inter,
-                        f"❌ Invalid amount. You have {latest} {ShopEmojis['Coins']}.",
-                        ephemeral=True,
-                    )
-                    await parent._clear_selection()
-                    return
-                await parent.fun._process_gamble(
-                    parent.ctx,
-                    inter,
-                    guild_id=parent.guild_id,
-                    user_id=parent.user_id,
-                    progression_cog=parent.progression_cog,
-                    amount=amount,
-                )
-                await parent._clear_selection()
-
-        await interaction.response.send_modal(CustomModal())
+        await interaction.response.send_modal(CustomGambleModal(self))
 
     async def _handle_bet_value(
         self, interaction: discord.Interaction, value: int
