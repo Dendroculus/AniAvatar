@@ -3,7 +3,6 @@ import asyncio
 
 from typing import Optional
 from discord.ext import commands
-from datetime import datetime, timedelta, timezone
 
 from bot.config.emojis import CustomEmojis, MinoriEmojis, ShopEmojis
 from bot.config.configs import TradingConstants as TC
@@ -12,6 +11,7 @@ from bot.utils.donate import DonateView, DonateSelect
 from bot.services.user_repository import UserRepository
 from bot.services.trading_repository import TradingRepository
 from bot.features.trading.item_effects import ItemEffectService
+from bot.features.trading.donation_service import DonationService
 
 """
 trading.py
@@ -83,8 +83,8 @@ class Trading(commands.Cog):
         self.trading_repo: Optional[TradingRepository] = None
         self.economy_service: Optional[EconomyServiceWrapper] = None
         self.item_effect_service: Optional[ItemEffectService] = None
+        self.donation_service: Optional[DonationService] = None
 
-        self.donate_cooldowns = {}
         self.open_inventories = {}
         self.open_shops = {}
         self._maintenance_task = None
@@ -121,6 +121,9 @@ class Trading(commands.Cog):
             bot=self.bot,
             user_repository=self.user_repo,
             trading_repository=self.trading_repo,
+        )
+        self.donation_service = DonationService(
+            pool=self.bot.pool,
         )
 
         await self.trading_repo.initialize_schema()
@@ -409,125 +412,56 @@ class Trading(commands.Cog):
         view.message = msg
         self.open_inventories.setdefault(guild_id, {})[user_id] = view
 
-    async def _execute_donation(
-        self,
-        interaction,
-        view,
-        item_name,
-        amount,
-        donor_id,
-        receiver_id,
-        guild_id,
-        items,
-    ):
-        """
-        Executes the donation DB transaction.
-        Args:
-            interaction: The interaction object.
-            view: The DonateView instance.
-            item_name: The name of the item being donated.
-            amount: The amount of the item being donated.
-            donor_id: The ID of the donor.
-            receiver_id: The ID of the receiver.
-            guild_id: The ID of the guild.
-            items: The list of items in the donor's inventory.
-
-        Returns:
-            None
-        """
-        async with self.bot.pool.acquire() as conn:
-            try:
-                await conn.execute(
-                    f"SET LOCAL statement_timeout = {TC.STMT_TIMEOUT_MS}"
-                )
-            except Exception:
-                pass
-
-            async with conn.transaction():
-                row = await conn.fetchrow(
-                    "SELECT quantity FROM user_inventory WHERE user_id = $1 AND guild_id = $2 AND item_name = $3 FOR UPDATE",
-                    donor_id,
-                    guild_id,
-                    item_name,
-                )
-
-                if not row or row["quantity"] < amount:
-                    error_text = "❌ You don't have enough of this item."
-                    if interaction.response.is_done():
-                        if view.message:
-                            await view.message.edit(content=error_text, view=view)
-                    else:
-                        await interaction.response.edit_message(
-                            content=error_text, view=view
-                        )
-                    return
-
-                await conn.execute(
-                    "UPDATE user_inventory SET quantity = quantity - $1 WHERE user_id = $2 AND guild_id = $3 AND item_name = $4",
-                    amount,
-                    donor_id,
-                    guild_id,
-                    item_name,
-                )
-                await conn.execute(
-                    "DELETE FROM user_inventory WHERE user_id = $1 AND guild_id = $2 AND item_name = $3 AND quantity <= 0",
-                    donor_id,
-                    guild_id,
-                    item_name,
-                )
-                await conn.execute(
-                    """
-                    INSERT INTO user_inventory (user_id, guild_id, item_name, quantity)
-                    VALUES ($1, $2, $3, $4)
-                    ON CONFLICT(user_id, guild_id, item_name) DO UPDATE SET quantity = user_inventory.quantity + EXCLUDED.quantity
-                    """,
-                    receiver_id,
-                    guild_id,
-                    item_name,
-                    amount,
-                )
-
-        self.donate_cooldowns[donor_id] = datetime.now(timezone.utc) + timedelta(
-            hours=2
-        )
-        for child in view.children:
-            child.disabled = True
-
-        emoji = next((em for nm, _, em in items if nm == item_name), "📦")
-        member = interaction.guild.get_member(receiver_id)
-        name = member.display_name if member else "User"
-
-        success_msg = f"You donated {amount}x {emoji} {item_name} to {name}!"
-
-        try:
-            if not interaction.response.is_done():
-                await interaction.response.edit_message(content=success_msg, view=view)
-            elif view.message:
-                await view.message.edit(content=success_msg, view=view)
-        except Exception:
-            pass
-
-    @commands.hybrid_command(name="donate", description="Give an item to another user")
+    @commands.hybrid_command(
+        name="donate",
+        description="Give an item to another user",
+    )
     @commands.guild_only()
-    async def donate(self, ctx: commands.Context, member: discord.Member):
-        """
-        Donate an item from the user's inventory to another member.
-        """
-        if member.bot or ctx.author.id == member.id:
-            return await ctx.send(f"{MinoriEmojis['MinoriConfused']} Invalid target.")
+    async def donate(
+        self,
+        ctx: commands.Context,
+        member: discord.Member,
+    ):
+        """Donate an inventory item to another member."""
+        if self.trading_repo is None or self.donation_service is None:
+            await ctx.send("Services unavailable.")
+            return
 
-        donor_id, guild_id = ctx.author.id, ctx.guild.id
-
-        now = datetime.now(timezone.utc)
-        if donor_id in self.donate_cooldowns and now < self.donate_cooldowns[donor_id]:
-            remaining = self.donate_cooldowns[donor_id] - now
-            return await ctx.send(
-                f"{CustomEmojis['TIME']} You can donate again in {str(remaining).split('.')[0]}"
+        if member.bot:
+            await ctx.send(
+                f"{MinoriEmojis['MinoriConfused']} "
+                "You cannot donate to a bot."
             )
+            return
 
-        items = await self.trading_repo.get_user_inventory(donor_id, guild_id)
+        if ctx.author.id == member.id:
+            await ctx.send(
+                f"{MinoriEmojis['MinoriConfused']} "
+                "You cannot donate to yourself."
+            )
+            return
+        
+        donor_id = ctx.author.id
+        guild_id = ctx.guild.id
+
+        remaining = self.donation_service.remaining_cooldown(donor_id)
+
+        if remaining is not None:
+            await ctx.send(
+                f"{CustomEmojis['TIME']} "
+                "You can donate again in "
+                f"{str(remaining).split('.')[0]}"
+            )
+            return
+
+        items = await self.trading_repo.get_user_inventory(
+            donor_id,
+            guild_id,
+        )
+
         if not items:
-            return await ctx.send("🧯 Your inventory is empty, cannot donate.")
+            await ctx.send("?? Your inventory is empty, cannot donate.")
+            return
 
         caps = {
             TC.MYSTERY_BOX_NAME: 1,
@@ -539,18 +473,34 @@ class Trading(commands.Cog):
 
         options = [
             discord.SelectOption(
-                label=name, description=f"You have {qty}", emoji=emoji, value=name
+                label=name,
+                description=f"You have {quantity}",
+                emoji=emoji,
+                value=name,
             )
-            for name, qty, emoji in items
+            for name, quantity, emoji in items
         ]
 
         view = DonateView(
-            ctx.author.id, self, donor_id, member.id, guild_id, items, timeout=180
+            author_id=ctx.author.id,
+            donation_service=(self.donation_service),
+            donor_id=donor_id,
+            receiver_id=member.id,
+            guild_id=guild_id,
+            items=items,
+            timeout=180,
         )
-        view.add_item(DonateSelect(options, caps))
+
+        view.add_item(
+            DonateSelect(
+                options,
+                caps,
+            )
+        )
 
         view.message = await ctx.send(
-            f"Select an item to donate to {member.display_name}:", view=view
+            (f"Select an item to donate to {member.display_name}:"),
+            view=view,
         )
 
     @commands.Cog.listener()
