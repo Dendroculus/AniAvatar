@@ -1,9 +1,7 @@
 import discord
 from discord.ext import commands
 import random
-import asyncio
 import io
-import time
 import redis.asyncio as redis
 import logging
 from typing import Optional, Tuple
@@ -12,19 +10,16 @@ from discord import MessageReference
 from bot.features.progression.domain.levels import (
     get_title,
     get_title_emoji,
-    required_exp,
 )
 
 from bot.utils.progression.profile_theme import MainThemeView
 from bot.config.configs import (
-    AssetPaths as AP,
     REDIS_CACHING,
     ProgressionConstants as PC,
-    ProfileCardConstants as PCC,
 )
-from bot.utils.trading_ui import format_coins
-from bot.config.emojis import CustomEmojis, TitleEmojis
+from bot.config.emojis import CustomEmojis
 from bot.services.render_manager import RenderManager
+from bot.features.progression.leaderboard_workflow import LeaderboardWorkflow
 from bot.features.progression.profile_workflow import ProfileWorkflow
 from bot.services.user_repository import UserRepository
 
@@ -46,6 +41,7 @@ class Progression(commands.Cog):
         self.repo: Optional[UserRepository] = None  # Initialized in cog_load
         self.render_manager = RenderManager()
         self.profile_workflow: ProfileWorkflow | None = None
+        self.leaderboard_workflow: LeaderboardWorkflow | None = None
 
         self.redis_url = REDIS_CACHING
         self.redis: redis.Redis | None = None
@@ -72,7 +68,17 @@ class Progression(commands.Cog):
 
         self.repo = UserRepository(self.bot.pool)
         await self.repo.initialize_schema()
-        self.profile_workflow = ProfileWorkflow(self.repo, self.render_manager)
+        self.profile_workflow = ProfileWorkflow(
+            self.repo,
+            self.render_manager,
+        )
+        self.leaderboard_workflow = LeaderboardWorkflow(
+            bot=self.bot,
+            repository=self.repo,
+            render_manager=self.render_manager,
+            redis_client=self.redis,
+            avatar_fetcher=(self.profile_workflow.fetch_avatar_bytes),
+        )
 
     async def cog_unload(self):
         """Clean up resources."""
@@ -193,71 +199,6 @@ class Progression(commands.Cog):
         else:
             return await ctx.send(*args, **kwargs)
 
-    async def _build_rows_data(self, ctx, rows, avatar_size=128, avatar_timeout=3.0):
-        """
-        Prepare data structures for leaderboard rendering by fetching names and avatars.
-        """
-        meta = [
-            (idx, user_id, level, exp)
-            for idx, (user_id, level, exp) in enumerate(rows, start=1)
-        ]
-
-        async def get_name_and_avatar(user_id: int) -> tuple[str, bytes]:
-            member = ctx.guild.get_member(user_id)
-            if member:
-                name = member.display_name
-                return name, await self.profile_workflow.fetch_avatar_bytes(
-                    member, size=avatar_size, timeout=avatar_timeout
-                )
-            try:
-                user = await self.bot.fetch_user(user_id)
-                name = user.name
-                return name, await self.profile_workflow.fetch_avatar_bytes(
-                    user, size=avatar_size, timeout=avatar_timeout
-                )
-            except Exception as e:
-                print(f"[avatar_fetch] failed for user {user_id}: {e}")
-                return f"User {user_id}", b""
-
-        tasks = [get_name_and_avatar(user_id) for _, user_id, _, _ in meta]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-
-        rows_data = []
-        for (idx, user_id, level, exp), res in zip(meta, results):
-            if isinstance(res, Exception):
-                print(f"[avatar_fetch] task exception for user {user_id}: {res}")
-                name, avatar_bytes = f"User {user_id}", b""
-            else:
-                name, avatar_bytes = res
-
-            next_exp = None if level >= PC.MAX_LEVEL else (required_exp(level))
-            rows_data.append(
-                {
-                    "rank": idx,
-                    "avatar_bytes": avatar_bytes or b"",
-                    "name": self.truncate(
-                        name, PC.MAX_NAME_WIDTH, ellipsis="...", strip=False
-                    ),
-                    "level": level,
-                    "title": get_title(level),
-                    "exp": exp or 0,
-                    "next_exp": next_exp,
-                }
-            )
-
-        return rows_data
-
-    def truncate(
-        self, text: str, max_len: int, ellipsis: str = "...", strip: bool = False
-    ) -> str:
-        """Truncate a string to a maximum length."""
-        if len(text) <= max_len:
-            return text
-        truncated = text[: max_len - len(ellipsis)]
-        if strip:
-            truncated = truncated.rstrip()
-        return truncated + ellipsis
-
     async def announce_level_up(
         self,
         guild_id: int,
@@ -363,117 +304,34 @@ class Progression(commands.Cog):
                 "âŒ Unexpected error while generating profile. Check console/logs."
             )
 
-    async def _lb_defer(self, ctx):
-        """Helper to defer the interaction safely."""
-        try:
-            await ctx.defer()
-        except Exception as e:
-            print(f"[Leaderboard] Defer failed (non-fatal): {e}")
-
-    async def _lb_get_cache(self, key: str) -> Optional[bytes]:
-        """Helper to retrieve data from Redis."""
-        if not self.redis:
-            return None
-        try:
-            data = await self.redis.get(key)
-            print(f"[Leaderboard] {'Cache hit' if data else 'Cache miss'}")
-            return data
-        except Exception as e:
-            print(f"[Leaderboard] Cache read failed: {e}")
-            return None
-
-    async def _lb_query_rows(self, guild_id: int):
-        """Helper to fetch leaderboard rows from the repository."""
-        print(f"[Leaderboard] Query start (guild={guild_id})")
-        try:
-            rows = await self.repo.get_leaderboard_rows(guild_id, 10)
-            print(f"[Leaderboard] Query done, rows={len(rows)}")
-            return rows
-        except Exception as e:
-            print(f"[Leaderboard] DB query failed: {e}")
-            return None
-
-    async def _lb_build_embed(self, ctx, file_bytes: bytes, embed_color: discord.Color):
-        """Helper to construct the leaderboard embed and file."""
-        user_rank = await self.repo.get_rank(ctx.author.id, ctx.guild.id)
-        user_coins = await self.repo.get_coins(ctx.author.id, ctx.guild.id)
-        formatted_coins = format_coins(user_coins)
-
-        file = discord.File(io.BytesIO(file_bytes), filename="leaderboard.png")
-        embed = discord.Embed(
-            title=f"{ctx.guild.name}'s Top Rank List {TitleEmojis['CHAMPION']}",
-            color=embed_color,
-            description=(
-                f"**Your Rank**\n"
-                f"You are ranked **#{user_rank}** on this server\n"
-                f"with a total of **{formatted_coins}** {PC.coins_emoji()}"
-            ),
-        )
-        if ctx.guild.icon:
-            embed.set_thumbnail(url=ctx.guild.icon.url)
-        embed.set_image(url="attachment://leaderboard.png")
-        return embed, file
-
-    def _lb_fire_cache_set(self, key: str, data: bytes):
-        """Helper to upload to Redis asynchronously."""
-        if not self.redis:
-            return
-        print("[Leaderboard] Upload to Redis (fire-and-forget)")
-        try:
-            self.bot.loop.create_task(self.redis.set(key, data, ex=120))
-        except Exception as e:
-            print(f"[Leaderboard] Redis set failed: {e}")
-
     @commands.hybrid_command(
-        name="leaderboard", description="Show server rankings leaderboard"
+        name="leaderboard",
+        description="Show server rankings leaderboard",
     )
     @commands.guild_only()
     async def leaderboard_image(self, ctx):
         """Generate and display the server leaderboard."""
-        start = time.perf_counter()
-        await self._lb_defer(ctx)
+        if self.leaderboard_workflow is None:
+            raise RuntimeError("Leaderboard workflow is not initialized.")
 
-        cache_key = f"lb_cache:{ctx.guild.id}"
+        result = await self.leaderboard_workflow.execute(ctx)
 
-        cached_bytes = await self._lb_get_cache(cache_key)
-        if cached_bytes:
-            embed, file = await self._lb_build_embed(
-                ctx, cached_bytes, discord.Color.purple()
-            )
-            await self.safe_send(ctx, embed=embed, file=file)
-            print(
-                f"[Leaderboard] FAST CACHE path completed in {time.perf_counter() - start:.3f}s"
-            )
-            return
-
-        rows = await self._lb_query_rows(ctx.guild.id)
-        if rows is None:
+        if result.error_message:
             return await self.safe_send(
-                ctx, "Failed to fetch leaderboard data (check logs)."
+                ctx,
+                result.error_message,
             )
-        if not rows:
-            return await self.safe_send(ctx, "No users found in the leaderboard.")
 
-        rows_data = await self._build_rows_data(ctx, rows)
-        exp_icon_path = AP.ESSENTIAL_ICONS["EXP"]
-        img_bytes = await self.render_manager.render_leaderboard(
-            rows_data, exp_icon_path, str(ctx.guild.id)
-        )
-
-        if not img_bytes:
+        if result.embed is None or result.file is None:
             return await self.safe_send(
-                ctx, "Failed to generate leaderboard image (check logs)."
+                ctx,
+                ("Failed to generate leaderboard response (check logs)."),
             )
 
-        top_title = get_title(rows_data[0]["level"]) if rows_data else "Leaderboard"
-        embed_color = PCC.TITLE_COLORS.get(top_title, discord.Color.purple())
-
-        embed, file = await self._lb_build_embed(ctx, img_bytes, embed_color)
-        await self.safe_send(ctx, embed=embed, file=file)
-
-        self._lb_fire_cache_set(cache_key, img_bytes)
-        print(
-            f"[Leaderboard] Completed command (total {time.perf_counter() - start:.3f}s)\n"
+        await self.safe_send(
+            ctx,
+            embed=result.embed,
+            file=result.file,
         )
 
     @commands.hybrid_command(
