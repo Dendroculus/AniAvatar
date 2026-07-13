@@ -227,9 +227,7 @@ class Progression(commands.Cog):
                 include_rank=True,
             )
             if not result.image_bytes:
-                await ctx.send(
-                    "âŒ Failed to generate profile image â€” check bot logs."
-                )
+                await ctx.send("❌ Failed to generate profile image — check bot logs.")
                 return
 
             file = discord.File(
@@ -248,7 +246,7 @@ class Progression(commands.Cog):
                 "Unexpected error while generating a profile."
             )
             await ctx.send(
-                "âŒ Unexpected error while generating profile. Check console/logs."
+                "❌ Unexpected error while generating profile. Check console/logs."
             )
 
     @commands.hybrid_command(
@@ -296,7 +294,7 @@ class Progression(commands.Cog):
             include_background_label=True,
         )
         if not result.image_bytes:
-            await ctx.send("âŒ Failed to generate profile image â€” check bot logs.")
+            await ctx.send("❌ Failed to generate profile image — check bot logs.")
             return
 
         file = discord.File(
@@ -314,7 +312,11 @@ class Progression(commands.Cog):
         )
         embed.set_image(url=PC.ATTACHMENT_PROFILE)
 
-        view = MainThemeView(ctx.author.id, cog=self)
+        view = MainThemeView(
+            user_id=ctx.author.id,
+            repository=self.repo,
+            profile_workflow=self.profile_workflow,
+        )
         await ctx.send(embed=embed, file=file, view=view)
 
     @commands.hybrid_command(
@@ -332,9 +334,7 @@ class Progression(commands.Cog):
                 ctx.guild.id,
             )
             if not result.image_bytes:
-                await ctx.send(
-                    "âŒ Failed to generate profile image â€” check bot logs."
-                )
+                await ctx.send("❌ Failed to generate profile image — check bot logs.")
                 return
 
             file = discord.File(
@@ -352,7 +352,7 @@ class Progression(commands.Cog):
             logging.getLogger(__name__).exception(
                 "Failed to reset a user's profile theme."
             )
-            await ctx.send("âŒ Failed to reset profile theme. Check console/logs.")
+            await ctx.send("❌ Failed to reset profile theme. Check console/logs.")
 
     @commands.Cog.listener()
     async def on_message(self, message):
