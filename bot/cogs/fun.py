@@ -12,7 +12,7 @@ from bot.config.configs import (
     ExternalAPIs as EC,
 )
 from bot.config.emojis import MinoriEmojis
-from bot.features.fun.gambling import GamblingMixin
+from bot.features.fun.gambling import GambleView, GamblingMixin
 from bot.features.fun.quotes import QuoteManager
 from bot.features.fun.responses import ResponseMixin
 from bot.features.fun.waifu import (
@@ -21,7 +21,6 @@ from bot.features.fun.waifu import (
     WaifuImageMissing,
 )
 from bot.features.polling.modals import PollInputModal
-from bot.utils.gamble_helpers import GambleView
 
 
 class Fun(

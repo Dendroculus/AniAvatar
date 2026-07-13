@@ -11,7 +11,7 @@ from discord.ext import commands
 
 from bot.config.configs import FunConstants as FC
 from bot.config.emojis import MinoriEmojis, ShopEmojis
-from bot.utils.gamble_helpers import GambleView
+from bot.features.fun.gambling.view import GambleView
 
 
 class GamblingMixin:

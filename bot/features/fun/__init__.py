@@ -1,6 +1,6 @@
 """Entertainment feature services."""
 
-from .gambling import GamblingMixin
+from .gambling import GambleView, GamblingMixin
 from .quotes import QuoteManager
 from .responses import ResponseMixin
 from .waifu import (
@@ -10,6 +10,7 @@ from .waifu import (
 )
 
 __all__ = [
+    "GambleView",
     "GamblingMixin",
     "QuoteManager",
     "ResponseMixin",
