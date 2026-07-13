@@ -1,11 +1,15 @@
 import asyncpg
 from typing import List, Optional, Tuple
-from bot.config.configs import  ProgressionConstants as PC
+from bot.config.configs import ProgressionConstants as PC
+from bot.features.progression.domain.levels import required_exp
+
+
 class UserRepository:
     """
     Repository layer for handling all database interactions regarding users,
     progression, economy, and themes.
     """
+
     def __init__(self, pool: asyncpg.Pool):
         self.pool = pool
 
@@ -54,12 +58,14 @@ class UserRepository:
         async with self.pool.acquire() as conn:
             row = await conn.fetchrow(
                 "SELECT coins FROM user_coins WHERE user_id = $1 AND guild_id = $2",
-                user_id, guild_id
+                user_id,
+                guild_id,
             )
             if not row:
                 await conn.execute(
                     "INSERT INTO user_coins (user_id, guild_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
-                    user_id, guild_id
+                    user_id,
+                    guild_id,
                 )
                 return 0
             return int(row["coins"])
@@ -69,29 +75,39 @@ class UserRepository:
         if amount == 0:
             return
         async with self.pool.acquire() as conn:
-            await conn.execute(PC.SQL_INSERT_OR_IGNORE_USER_COINS_ZERO, user_id, guild_id)
+            await conn.execute(
+                PC.SQL_INSERT_OR_IGNORE_USER_COINS_ZERO, user_id, guild_id
+            )
             await conn.execute(
                 """
                 INSERT INTO user_coins (user_id, guild_id, coins) VALUES ($1, $2, $3)
                 ON CONFLICT(user_id, guild_id) DO UPDATE SET coins = user_coins.coins + EXCLUDED.coins
                 """,
-                user_id, guild_id, amount
+                user_id,
+                guild_id,
+                amount,
             )
 
     async def ensure_user_row(self, user_id: int, guild_id: int):
         """Ensure a user exists in the coin database."""
         async with self.pool.acquire() as conn:
-            await conn.execute(PC.SQL_INSERT_OR_IGNORE_USER_COINS_ZERO, user_id, guild_id)
+            await conn.execute(
+                PC.SQL_INSERT_OR_IGNORE_USER_COINS_ZERO, user_id, guild_id
+            )
 
     async def remove_coins(self, user_id: int, guild_id: int, amount: int) -> bool:
         """Remove coins from a user's balance safely."""
         if amount <= 0:
             return False
         async with self.pool.acquire() as conn:
-            await conn.execute(PC.SQL_INSERT_OR_IGNORE_USER_COINS_ZERO, user_id, guild_id)
+            await conn.execute(
+                PC.SQL_INSERT_OR_IGNORE_USER_COINS_ZERO, user_id, guild_id
+            )
             result = await conn.execute(
                 "UPDATE user_coins SET coins = coins - $1 WHERE user_id = $2 AND guild_id = $3 AND coins >= $1",
-                amount, user_id, guild_id
+                amount,
+                user_id,
+                guild_id,
             )
             try:
                 updated = int(result.split()[-1])
@@ -104,17 +120,23 @@ class UserRepository:
         async with self.pool.acquire() as conn:
             row = await conn.fetchrow(
                 "SELECT theme_name, bg_file, font_color FROM profile_theme WHERE user_id = $1",
-                user_id
+                user_id,
             )
             if not row:
                 await conn.execute(
                     "INSERT INTO profile_theme (user_id) VALUES ($1) ON CONFLICT DO NOTHING",
-                    user_id
+                    user_id,
                 )
                 return "galaxy", "GALAXY.PNG", "white"
             return (row["theme_name"], row["bg_file"], row["font_color"])
 
-    async def set_user_theme(self, user_id: int, theme_name: str, bg_file: Optional[str], font_color: str = "white"):
+    async def set_user_theme(
+        self,
+        user_id: int,
+        theme_name: str,
+        bg_file: Optional[str],
+        font_color: str = "white",
+    ):
         """Update the user's profile theme configuration."""
         async with self.pool.acquire() as conn:
             await conn.execute(
@@ -126,7 +148,10 @@ class UserRepository:
                     bg_file = EXCLUDED.bg_file,
                     font_color = EXCLUDED.font_color
                 """,
-                user_id, theme_name, bg_file, font_color
+                user_id,
+                theme_name,
+                bg_file,
+                font_color,
             )
 
     async def get_user(self, user_id: int, guild_id: int) -> Tuple[int, int]:
@@ -134,17 +159,21 @@ class UserRepository:
         async with self.pool.acquire() as conn:
             row = await conn.fetchrow(
                 "SELECT exp, level FROM users WHERE user_id = $1 AND guild_id = $2",
-                user_id, guild_id
+                user_id,
+                guild_id,
             )
             if row is None:
                 await conn.execute(
                     "INSERT INTO users (user_id, guild_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
-                    user_id, guild_id
+                    user_id,
+                    guild_id,
                 )
                 return 0, 1
             return (row["exp"], row["level"])
 
-    async def add_exp(self, user_id: int, guild_id: int, amount: int) -> Tuple[int, int, bool]:
+    async def add_exp(
+        self, user_id: int, guild_id: int, amount: int
+    ) -> Tuple[int, int, bool]:
         """Add experience points to a user and handle leveling up."""
         async with self.pool.acquire() as conn:
             async with conn.transaction():
@@ -155,7 +184,8 @@ class UserRepository:
                     WHERE user_id = $1 AND guild_id = $2
                     FOR UPDATE
                     """,
-                    user_id, guild_id,
+                    user_id,
+                    guild_id,
                 )
 
                 if row is None:
@@ -165,7 +195,8 @@ class UserRepository:
                         VALUES ($1, $2, 0, 1)
                         ON CONFLICT DO NOTHING
                         """,
-                        user_id, guild_id,
+                        user_id,
+                        guild_id,
                     )
                     row = await conn.fetchrow(
                         """
@@ -174,7 +205,8 @@ class UserRepository:
                         WHERE user_id = $1 AND guild_id = $2
                         FOR UPDATE
                         """,
-                        user_id, guild_id,
+                        user_id,
+                        guild_id,
                     )
 
                 exp, level = row["exp"], row["level"]
@@ -182,7 +214,7 @@ class UserRepository:
                 leveled_up = False
 
                 while level < PC.MAX_LEVEL:
-                    next_exp = 50 * level + 20 * level**2
+                    next_exp = required_exp(level)
                     if new_exp >= next_exp:
                         new_exp -= next_exp
                         level += 1
@@ -200,7 +232,10 @@ class UserRepository:
                     SET exp = $1, level = $2
                     WHERE user_id = $3 AND guild_id = $4
                     """,
-                    new_exp, level, user_id, guild_id,
+                    new_exp,
+                    level,
+                    user_id,
+                    guild_id,
                 )
 
                 return level, new_exp, leveled_up
@@ -221,7 +256,8 @@ class UserRepository:
                     )
                     )
                 """,
-                guild_id, user_id
+                guild_id,
+                user_id,
             )
             return int(row["rnk"]) if row and row["rnk"] is not None else 1
 
@@ -230,11 +266,15 @@ class UserRepository:
         async with self.pool.acquire() as conn:
             row = await conn.fetchrow(
                 "SELECT COUNT(*) + 1 AS rnk FROM users WHERE guild_id = $1 AND (level > $2 OR (level = $2 AND exp > $3))",
-                guild_id, level, exp
+                guild_id,
+                level,
+                exp,
             )
             return int(row["rnk"]) if row and row["rnk"] is not None else 1
 
-    async def get_leaderboard_rows(self, guild_id: int, limit: int = 10) -> List[Tuple[int, int, int]]:
+    async def get_leaderboard_rows(
+        self, guild_id: int, limit: int = 10
+    ) -> List[Tuple[int, int, int]]:
         """Fetch the top users for the leaderboard."""
         async with self.pool.acquire() as conn:
             rows = await conn.fetch(
@@ -246,6 +286,8 @@ class UserRepository:
                 ORDER BY level DESC, exp DESC
                 LIMIT $3
                 """,
-                guild_id, PC.MAX_LEVEL, limit
+                guild_id,
+                PC.MAX_LEVEL,
+                limit,
             )
             return [(r["user_id"], r["level"], r["exp"]) for r in rows]
