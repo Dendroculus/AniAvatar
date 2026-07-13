@@ -1,9 +1,7 @@
 import discord
 from discord.ext import commands
-import os
 import random
 import asyncio
-import traceback
 import io
 import time
 import redis.asyncio as redis
@@ -26,8 +24,8 @@ from bot.config.configs import (
 )
 from bot.utils.trading_ui import format_coins
 from bot.config.emojis import CustomEmojis, TitleEmojis
-from bot.config.assets import asset_catalog
-from bot.services.render_manager import RenderManager, RenderContext
+from bot.services.render_manager import RenderManager
+from bot.features.progression.profile_workflow import ProfileWorkflow
 from bot.services.user_repository import UserRepository
 
 """
@@ -47,6 +45,7 @@ class Progression(commands.Cog):
         self.bot = bot
         self.repo: Optional[UserRepository] = None  # Initialized in cog_load
         self.render_manager = RenderManager()
+        self.profile_workflow: ProfileWorkflow | None = None
 
         self.redis_url = REDIS_CACHING
         self.redis: redis.Redis | None = None
@@ -73,6 +72,7 @@ class Progression(commands.Cog):
 
         self.repo = UserRepository(self.bot.pool)
         await self.repo.initialize_schema()
+        self.profile_workflow = ProfileWorkflow(self.repo, self.render_manager)
 
     async def cog_unload(self):
         """Clean up resources."""
@@ -193,21 +193,6 @@ class Progression(commands.Cog):
         else:
             return await ctx.send(*args, **kwargs)
 
-    async def _fetch_avatar_bytes(self, member_or_user, size=128, timeout=3.0) -> bytes:
-        """
-        Fetch the user's avatar as bytes.
-        """
-        try:
-            return await asyncio.wait_for(
-                member_or_user.display_avatar.with_size(size).read(), timeout=timeout
-            )
-        except Exception as e:
-            # Log specific error before returning empty bytes
-            print(
-                f"[avatar_fetch] failed for {getattr(member_or_user, 'id', None)}: {e}"
-            )
-            return b""
-
     async def _build_rows_data(self, ctx, rows, avatar_size=128, avatar_timeout=3.0):
         """
         Prepare data structures for leaderboard rendering by fetching names and avatars.
@@ -221,13 +206,13 @@ class Progression(commands.Cog):
             member = ctx.guild.get_member(user_id)
             if member:
                 name = member.display_name
-                return name, await self._fetch_avatar_bytes(
+                return name, await self.profile_workflow.fetch_avatar_bytes(
                     member, size=avatar_size, timeout=avatar_timeout
                 )
             try:
                 user = await self.bot.fetch_user(user_id)
                 name = user.name
-                return name, await self._fetch_avatar_bytes(
+                return name, await self.profile_workflow.fetch_avatar_bytes(
                     user, size=avatar_size, timeout=avatar_timeout
                 )
             except Exception as e:
@@ -330,18 +315,12 @@ class Progression(commands.Cog):
         await self.repo.delete_guild_data(guild.id)
         print(f"[Progression] Cleaned up DB for guild {guild.id} ({guild.name})")
 
-    def _check_badge_exists_safe(self, path: str) -> bool:
-        """Thread-safe helper to check if a badge file exists."""
-        return bool(path and os.path.exists(path))
-
     @commands.hybrid_command(
         name="profile", description="Check your level, EXP, and title"
     )
     @commands.guild_only()
     async def profile(self, ctx, member: discord.Member = None):
-        """
-        Display a rendered profile card for the user.
-        """
+        """Display a rendered profile card for the selected member."""
         member = member or ctx.author
         if member.bot:
             await ctx.send(f"{member.display_name} is a bot and cannot have a profile.")
@@ -351,55 +330,37 @@ class Progression(commands.Cog):
             if ctx.interaction:
                 await ctx.defer()
 
-            exp, level = await self.repo.get_user(member.id, ctx.guild.id)
-            title_name = get_title(level)
-            next_exp = None if level >= PC.MAX_LEVEL else (required_exp(level))
+            if self.profile_workflow is None:
+                raise RuntimeError("Profile workflow is not initialized.")
 
-            avatar_bytes = await self._fetch_avatar_bytes(member, size=128, timeout=3.0)
-
-            theme_name, bg_file, font_color = await self.repo.get_user_theme(member.id)
-            user_rank = await self.repo.get_rank(member.id, ctx.guild.id)
-
-            # Create context object for clean passing
-            render_ctx = RenderContext(
-                avatar_bytes=avatar_bytes,
-                display_name=member.display_name,
-                title_name=title_name,
-                level=level,
-                exp=exp,
-                next_exp=next_exp,
-                bg_file=bg_file,
-                theme_name=theme_name,
-                font_color=font_color,
-                user_rank=user_rank,
+            result = await self.profile_workflow.render(
+                member,
+                ctx.guild.id,
+                include_rank=True,
             )
-
-            img_bytes = await self.render_manager.render_profile(render_ctx)
-
-            if not img_bytes:
-                await ctx.send("❌ Failed to generate profile image — check bot logs.")
+            if not result.image_bytes:
+                await ctx.send(
+                    "âŒ Failed to generate profile image â€” check bot logs."
+                )
                 return
 
-            file = discord.File(io.BytesIO(img_bytes), filename=PC.PROFILE_PNG)
-
-            badge_path = AP.TITLE_EMOJI_FILES.get(title_name)
-
-            # Offload file check to thread
-            badge_exists = await asyncio.to_thread(
-                self._check_badge_exists_safe, badge_path
+            file = discord.File(
+                io.BytesIO(result.image_bytes),
+                filename=PC.PROFILE_PNG,
             )
-
-            badge_text = "" if badge_exists else get_title_emoji(level)
-            content = f"{member.display_name} {badge_text}".strip()
+            content = f"{member.display_name} {result.badge_text}".strip()
 
             await self.safe_send(
-                ctx, content=content if badge_text else None, file=file
+                ctx,
+                content=content if result.badge_text else None,
+                file=file,
             )
-
         except Exception:
-            traceback.print_exc()
+            logging.getLogger(__name__).exception(
+                "Unexpected error while generating a profile."
+            )
             await ctx.send(
-                "❌ Unexpected error while generating profile. Check console/logs."
+                "âŒ Unexpected error while generating profile. Check console/logs."
             )
 
     async def _lb_defer(self, ctx):
@@ -515,54 +476,33 @@ class Progression(commands.Cog):
             f"[Leaderboard] Completed command (total {time.perf_counter() - start:.3f}s)\n"
         )
 
-    def _get_theme_sub_label_safe(self, bg_file: str, theme_name: str) -> str:
-        """Return the catalog label for a stored background selection."""
-        return asset_catalog.background_label(theme_name, bg_file)
-
     @commands.hybrid_command(
         name="profiletheme", description="Choose your profile card background theme"
     )
     @commands.guild_only()
     async def profiletheme(self, ctx):
-        """Interactive command to change profile theme."""
-        exp, level = await self.repo.get_user(ctx.author.id, ctx.guild.id)
-        title_name = get_title(level)
-        next_exp = required_exp(level) if level < PC.MAX_LEVEL else None
+        """Show the current profile theme and its interactive selector."""
+        if self.profile_workflow is None:
+            raise RuntimeError("Profile workflow is not initialized.")
 
-        avatar_asset = ctx.author.display_avatar.with_size(128)
-        buffer_avatar = io.BytesIO()
-        await avatar_asset.save(buffer_avatar)
-        buffer_avatar.seek(0)
-        avatar_bytes = buffer_avatar.getvalue()
-
-        theme_name, bg_file, font_color = await self.repo.get_user_theme(ctx.author.id)
-
-        # Create context object
-        render_ctx = RenderContext(
-            avatar_bytes=avatar_bytes,
-            display_name=ctx.author.display_name,
-            title_name=title_name,
-            level=level,
-            exp=exp,
-            next_exp=next_exp,
-            bg_file=bg_file,
-            theme_name=theme_name,
-            font_color=font_color,
+        result = await self.profile_workflow.render(
+            ctx.author,
+            ctx.guild.id,
+            include_background_label=True,
         )
+        if not result.image_bytes:
+            await ctx.send("âŒ Failed to generate profile image â€” check bot logs.")
+            return
 
-        img_bytes = await self.render_manager.render_profile(render_ctx)
-
-        file = discord.File(io.BytesIO(img_bytes), filename=PC.PROFILE_PNG)
-
-        sub_label = await asyncio.to_thread(
-            self._get_theme_sub_label_safe, bg_file, theme_name
+        file = discord.File(
+            io.BytesIO(result.image_bytes),
+            filename=PC.PROFILE_PNG,
         )
-
         embed = discord.Embed(
             title="Your current profile theme: ",
             description=(
-                f"Main theme: `{theme_name.capitalize()}`\n"
-                f"Background: `{sub_label}`\n\n"
+                f"Main theme: `{result.theme_name.capitalize()}`\n"
+                f"Background: `{result.background_label}`\n\n"
                 "Below is your current profile card theme. "
                 "You can change it by selecting a theme from the dropdown menu."
             ),
@@ -577,34 +517,25 @@ class Progression(commands.Cog):
     )
     @commands.guild_only()
     async def resetprofiletheme(self, ctx):
-        """Reset the user's profile theme to default settings."""
+        """Reset the user's profile theme to its default settings."""
         try:
-            await self.repo.set_user_theme(ctx.author.id, "default", None, "white")
+            if self.profile_workflow is None:
+                raise RuntimeError("Profile workflow is not initialized.")
 
-            exp, level = await self.repo.get_user(ctx.author.id, ctx.guild.id)
-            title_name = get_title(level)
-            next_exp = required_exp(level) if level < PC.MAX_LEVEL else None
-            avatar_asset = ctx.author.display_avatar.with_size(128)
-            buffer_avatar = io.BytesIO()
-            await avatar_asset.save(buffer_avatar)
-            buffer_avatar.seek(0)
-            avatar_bytes = buffer_avatar.getvalue()
-
-            render_ctx = RenderContext(
-                avatar_bytes=avatar_bytes,
-                display_name=ctx.author.display_name,
-                title_name=title_name,
-                level=level,
-                exp=exp,
-                next_exp=next_exp,
-                bg_file=None,
-                theme_name="default",
-                font_color="white",
+            result = await self.profile_workflow.reset_and_render(
+                ctx.author,
+                ctx.guild.id,
             )
+            if not result.image_bytes:
+                await ctx.send(
+                    "âŒ Failed to generate profile image â€” check bot logs."
+                )
+                return
 
-            img_bytes = await self.render_manager.render_profile(render_ctx)
-
-            file = discord.File(io.BytesIO(img_bytes), filename="profile.png")
+            file = discord.File(
+                io.BytesIO(result.image_bytes),
+                filename=PC.PROFILE_PNG,
+            )
             embed = discord.Embed(
                 title="Profile Theme Reset",
                 description="Your profile card theme has been reset to default.",
@@ -612,10 +543,11 @@ class Progression(commands.Cog):
             embed.set_image(url=PC.ATTACHMENT_PROFILE)
 
             await ctx.send(embed=embed, file=file)
-
         except Exception:
-            traceback.print_exc()
-            await ctx.send("❌ Failed to reset profile theme. Check console/logs.")
+            logging.getLogger(__name__).exception(
+                "Failed to reset a user's profile theme."
+            )
+            await ctx.send("âŒ Failed to reset profile theme. Check console/logs.")
 
     @commands.Cog.listener()
     async def on_message(self, message):
