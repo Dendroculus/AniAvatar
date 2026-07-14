@@ -228,6 +228,9 @@ REDIS_URL=redis://localhost:6379/0
 
 # Optional: PostgreSQL statement timeout
 PG_STATEMENT_TIMEOUT_MS=2000
+
+# Optional: external or mounted asset directory
+ASSET_ROOT=
 ```
 
 `DISCORD_TOKEN` and `DATABASE_URL` are required at runtime. Google credentials, Redis, and the owner ID are optional. The bot initializes its required PostgreSQL schemas when the relevant extensions load.

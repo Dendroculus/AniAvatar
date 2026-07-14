@@ -228,6 +228,9 @@ REDIS_URL=redis://localhost:6379/0
 
 # 可选：PostgreSQL 语句超时
 PG_STATEMENT_TIMEOUT_MS=2000
+
+# 可选：外部或挂载的资源目录
+ASSET_ROOT=
 ```
 
 运行时必须配置 `DISCORD_TOKEN` 和 `DATABASE_URL`。Google 凭据、Redis 和 `OWNER_ID` 都是可选项。相关功能扩展加载时，机器人会自动初始化所需的 PostgreSQL 表结构。

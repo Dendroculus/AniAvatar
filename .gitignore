@@ -56,3 +56,23 @@ logs/
 api_test.py
 _refactor_backup/
 apply_aniavatar_refactor*.py
+
+# --- AniAvatar generated files ---
+.env
+!.env.example
+
+.venv/
+venv/
+env/
+
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+
+logs/
+*.log
+*.log.*
+*.jsonl
+*.jsonl.*
+# --- End AniAvatar generated files ---
