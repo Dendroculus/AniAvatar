@@ -3,13 +3,9 @@ from discord.ext import commands
 from discord import app_commands
 import random
 import asyncio
-import json
 import logging
-from itertools import cycle
-from pathlib import Path
-from abc import ABC, abstractmethod
-from typing import Dict, List, Any
 
+from bot.features.games import JsonTriviaLoader, TriviaService
 from bot.utils.anime_api import fetch_random_character, build_character_select_options
 from bot.utils.game_texts import (
     random_win_message,
@@ -53,53 +49,6 @@ Design notes (important):
 # --- Trivia Data Adapter Interface ---
 
 
-class TriviaLoader(ABC):
-    """
-    Abstract interface for loading trivia questions.
-    Allows swapping the underlying data source (JSON, DB, API) without changing game logic.
-    """
-
-    @abstractmethod
-    async def load_data(self) -> Dict[str, List[Dict[str, Any]]]:
-        """
-        Load trivia questions and return them in a normalized dictionary format:
-        {'CategoryName': [{'question': '...', 'answer': '...', 'options': []}, ...]}
-        """
-        pass
-
-
-class JsonTriviaLoader(TriviaLoader):
-    """
-    Concrete implementation of TriviaLoader for local JSON files.
-    """
-
-    def __init__(self, file_path: str | Path):
-        self.file_path = Path(file_path)
-
-    async def load_data(self) -> Dict[str, List[Dict[str, Any]]]:
-        def _read_file():
-            try:
-                with open(self.file_path, "r", encoding="utf-8") as f:
-                    return json.load(f)
-            except FileNotFoundError:
-                logger.warning("Trivia file not found: %s", self.file_path)
-                return {}
-            except json.JSONDecodeError:
-                logger.error("Invalid JSON in trivia file: %s", self.file_path)
-                return {}
-
-        # Offload blocking I/O to executor
-        data = await asyncio.to_thread(_read_file)
-
-        # Normalize structure to Dict[str, List]
-        if isinstance(data, dict):
-            return data
-        elif isinstance(data, list):
-            return {"Mixed": data}
-        else:
-            return {"Mixed": []}
-
-
 # --- Games Cog ---
 
 
@@ -116,66 +65,25 @@ class Games(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-        # Use the canonical repository-level data directory.
         trivia_path = DATA_PATH / "trivia.json"
-        self.trivia_loader: TriviaLoader = JsonTriviaLoader(trivia_path)
-
-        # Initialize with safe defaults; data is loaded in cog_load
-        self.trivia_dict = {"Mixed": []}
-
-        # used_questions prevents immediate repetition across quiz runs; it's intentionally
-        # kept in-memory so it resets on bot restart.
-        self.used_questions = set()
+        self.trivia_service = TriviaService(JsonTriviaLoader(trivia_path))
 
     async def cog_load(self):
         """
         Asynchronously load trivia data using the configured loader.
         """
-        self.trivia_dict = await self.trivia_loader.load_data()
+        total_questions = await self.trivia_service.load()
+        logger.info(
+            "Loaded %d trivia questions.",
+            total_questions,
+        )
 
-        total_q = sum(len(qs) for qs in self.trivia_dict.values())
-        logger.info("Loaded %d trivia questions.", total_q)
-
-    def get_balanced_questions(self, num_questions: int):
-        """
-        Return up to `num_questions` sampled across available categories.
-
-        Args:
-            num_questions (int): The number of unique questions to retrieve.
-
-        Returns:
-            list: A list of question dictionaries.
-        """
-        titles = list(self.trivia_dict.keys())
-        if not titles:
-            return []
-
-        random.shuffle(titles)
-        questions = []
-        title_cycle = cycle(titles)
-
-        # Safety: avoid infinite loop if no questions exist
-        total_available = sum(len(qs) for qs in self.trivia_dict.values())
-        if total_available == 0:
-            return []
-
-        while len(questions) < num_questions:
-            title = next(title_cycle)
-            available = [
-                q
-                for q in self.trivia_dict[title]
-                if q["question"] not in self.used_questions
-            ]
-            if available:
-                q = random.choice(available)
-                self.used_questions.add(q["question"])
-                questions.append(q)
-
-            # If we've used all questions, clear history to allow repeats
-            if len(self.used_questions) >= total_available:
-                self.used_questions.clear()
-
-        return questions
+    def get_balanced_questions(
+        self,
+        num_questions: int,
+    ):
+        """Delegate balanced question selection to the trivia service."""
+        return self.trivia_service.get_balanced_questions(num_questions)
 
     async def _handle_correct_answer(
         self,
