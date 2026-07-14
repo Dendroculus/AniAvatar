@@ -7,7 +7,7 @@ from discord.ext import commands
 
 from bot.config.configs import ProfileCardConstants as PCC
 from bot.config.configs import RolesConstants as RC
-from bot.utils.progression.profile_cards import get_title
+from bot.features.progression.domain.levels import get_title
 
 
 class ProgressionRoleService:

@@ -12,11 +12,11 @@ from bot.features.games import (
     TriviaQuizRunner,
     TriviaService,
 )
-from bot.utils.anime_api import (
+from bot.features.anime import (
     build_character_select_options,
     fetch_random_character,
 )
-from bot.utils.discord_helpers import create_same_choices
+from bot.core.discord.helpers import create_same_choices
 
 logger = logging.getLogger(__name__)
 

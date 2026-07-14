@@ -1,8 +1,11 @@
 import discord
 import logging
 
+
 class AnnounceModal(discord.ui.Modal):
-    def __init__(self, channel: discord.TextChannel, author: discord.Member, mention: bool):
+    def __init__(
+        self, channel: discord.TextChannel, author: discord.Member, mention: bool
+    ):
         super().__init__(title="📢 Create Announcement")
         self.channel = channel
         self.author = author
@@ -20,7 +23,7 @@ class AnnounceModal(discord.ui.Modal):
             style=discord.TextStyle.paragraph,
             placeholder="Type your announcement here",
             required=True,
-            max_length=4000
+            max_length=4000,
         )
         self.add_item(self.message)
 
@@ -44,10 +47,16 @@ class AnnounceModal(discord.ui.Modal):
         try:
             await self.channel.send(
                 content=content,
-                allowed_mentions=discord.AllowedMentions(everyone=self.mention)
+                allowed_mentions=discord.AllowedMentions(everyone=self.mention),
             )
         except discord.HTTPException as e:
-            await interaction.followup.send(f"❌ Failed to send announcement: {e}", ephemeral=True)
+            await interaction.followup.send(
+                f"❌ Failed to send announcement: {e}", ephemeral=True
+            )
         except Exception as e:
-            logging.getLogger("announce_modal").error(f"Unexpected error sending announcement: {e}")
-            await interaction.followup.send(f"❌ Failed to send announcement: {e}", ephemeral=True)
+            logging.getLogger("announce_modal").error(
+                f"Unexpected error sending announcement: {e}"
+            )
+            await interaction.followup.send(
+                f"❌ Failed to send announcement: {e}", ephemeral=True
+            )

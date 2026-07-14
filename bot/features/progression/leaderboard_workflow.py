@@ -22,9 +22,9 @@ from bot.features.progression.domain.levels import (
     get_title,
     required_exp,
 )
-from bot.services.render_manager import RenderManager
-from bot.services.user_repository import UserRepository
-from bot.utils.trading_ui import format_coins
+from bot.core.rendering.render_manager import RenderManager
+from bot.core.repositories.user_repository import UserRepository
+from bot.features.trading.views import format_coins
 
 AvatarFetcher = Callable[..., Awaitable[bytes]]
 

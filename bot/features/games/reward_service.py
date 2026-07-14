@@ -4,7 +4,7 @@ from collections.abc import Awaitable, Callable
 
 from discord.ext import commands
 
-from bot.utils.game_texts import (
+from bot.features.games.texts import (
     award_rewards,
     compute_rewards,
     random_win_message,

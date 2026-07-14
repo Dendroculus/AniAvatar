@@ -9,7 +9,7 @@ from bot.config.assets import AssetCatalog, asset_catalog
 from bot.config.configs import ProgressionConstants as PC
 from bot.config.emojis import MinoriEmojis
 from bot.features.progression.profile_workflow import ProfileWorkflow
-from bot.services.user_repository import UserRepository
+from bot.core.repositories.user_repository import UserRepository
 
 
 class MainThemeSelect(discord.ui.Select):

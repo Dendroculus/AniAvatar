@@ -29,12 +29,13 @@ setup_logging(
     text_log_file="bot.log",
     text_use_timed_rotation=True,
     json_enabled=True,
-    json_log_file="bot.jsonl",  
+    json_log_file="bot.jsonl",
 )
 
 intents = discord.Intents.default()
 intents.members = True
 intents.message_content = True
+
 
 class Minori(commands.AutoShardedBot):
     """
@@ -46,11 +47,12 @@ class Minori(commands.AutoShardedBot):
     - Loads extensions and attempts to sync application (slash) commands.
     - Cleans up resources in close().
     """
+
     def __init__(self):
-        super().__init__(command_prefix='!', intents=intents, help_command=None)
+        super().__init__(command_prefix="!", intents=intents, help_command=None)
         self.logger = logging.getLogger("Minori")
         self.logger.setLevel(logging.INFO)
-        
+
         self.session: aiohttp.ClientSession = None
         self.pool: asyncpg.Pool = None
 
@@ -92,18 +94,24 @@ class Minori(commands.AutoShardedBot):
             "bot.cogs.errors",
             "bot.cogs.trading",
             "bot.cogs.admin",
-            "bot.utils.dev_commands"
+            "bot.cogs.dev",
         ]
         for ext in extensions:
             try:
                 await self.load_extension(ext)
                 self.logger.info("Loaded %s", ext, extra={"extension": ext})
             except Exception:
-                self.logger.exception("Failed to load extension", extra={"extension": ext})
+                self.logger.exception(
+                    "Failed to load extension", extra={"extension": ext}
+                )
 
         try:
             synced = await self.tree.sync()
-            self.logger.info("Synced %d slash commands.", len(synced), extra={"synced_count": len(synced)})
+            self.logger.info(
+                "Synced %d slash commands.",
+                len(synced),
+                extra={"synced_count": len(synced)},
+            )
         except Exception:
             self.logger.exception("Failed to sync slash commands")
 
@@ -114,11 +122,11 @@ class Minori(commands.AutoShardedBot):
         if self.session:
             await self.session.close()
             self.logger.info("aiohttp.ClientSession closed.")
-        
+
         if self.pool:
             await self.pool.close()
             self.logger.info("asyncpg Connection Pool closed.")
-            
+
         await super().close()
 
     async def on_ready(self):
@@ -126,6 +134,7 @@ class Minori(commands.AutoShardedBot):
         Event handler called when the bot has connected and is ready.
         """
         self.logger.info("Logged in as %s", self.user, extra={"user": str(self.user)})
+
 
 if __name__ == "__main__":
     bot = Minori()

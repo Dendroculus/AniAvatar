@@ -16,8 +16,8 @@ from bot.features.progression.domain.levels import (
     get_title_emoji,
     required_exp,
 )
-from bot.services.render_manager import RenderContext, RenderManager
-from bot.services.user_repository import UserRepository
+from bot.core.rendering.render_manager import RenderContext, RenderManager
+from bot.core.repositories.user_repository import UserRepository
 
 logger = logging.getLogger(__name__)
 

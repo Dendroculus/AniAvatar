@@ -12,8 +12,8 @@ from bot.config.configs import (
     TradingConstants as TC,
 )
 from bot.features.trading.item_effects import ItemEffectService
-from bot.services.trading_repository import TradingRepository
-from bot.services.user_repository import UserRepository
+from bot.features.trading.repository import TradingRepository
+from bot.core.repositories.user_repository import UserRepository
 
 
 InventoryUseStatus = Literal["success", "max_level", "missing"]

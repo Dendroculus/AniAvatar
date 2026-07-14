@@ -14,8 +14,8 @@ from bot.features.trading.views import (
     format_coins,
 )
 
-from bot.services.user_repository import UserRepository
-from bot.services.trading_repository import TradingRepository
+from bot.core.repositories.user_repository import UserRepository
+from bot.features.trading.repository import TradingRepository
 from bot.features.trading.item_effects import ItemEffectService
 from bot.features.trading.inventory_workflow import InventoryWorkflow
 from bot.features.trading.shop_workflow import ShopPurchaseWorkflow

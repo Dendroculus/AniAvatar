@@ -1,8 +1,8 @@
 import discord
 from discord.ext import commands
 from discord import app_commands
-from bot.utils.discord_helpers import create_choices, is_admin
-from bot.utils.announce_modal import AnnounceModal
+from bot.core.discord.helpers import create_choices, is_admin
+from bot.features.administration.announce_modal import AnnounceModal
 
 """
 Purpose:
@@ -17,6 +17,7 @@ Design considerations:
   diagnose permission or delivery issues without spamming public channels.
 """
 
+
 class Admin(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -27,28 +28,33 @@ class Admin(commands.Cog):
         Security and UX:
         - Ephemeral responses prevent cluttering channels with denial messages.
         - Interaction checks ensure proper response methods are used.
-        
+
         Args:
             ctx (commands.Context): The command context.
             message (str): The denial message to send.
-        
+
         Returns:
             None
         """
         await ctx.send(message, ephemeral=True, mention_author=False)
-            
+
     @commands.hybrid_command(
         name="announce",
-        description="Announce something in a channel (Admin only, modal input)"
+        description="Announce something in a channel (Admin only, modal input)",
     )
     @app_commands.describe(
         mention="Choose whether to mention @everyone",
-        channel="The channel where the announcement will be sent"
+        channel="The channel where the announcement will be sent",
     )
-    @app_commands.choices(mention=create_choices({"Yes": "yes", "No" : "no"}))
+    @app_commands.choices(mention=create_choices({"Yes": "yes", "No": "no"}))
     @commands.guild_only()
     @is_admin()
-    async def announce(self, ctx: commands.Context, mention: app_commands.Choice[str], channel: discord.TextChannel):
+    async def announce(
+        self,
+        ctx: commands.Context,
+        mention: app_commands.Choice[str],
+        channel: discord.TextChannel,
+    ):
         """
         Open an announcement modal for authorized users.
 
@@ -61,12 +67,13 @@ class Admin(commands.Cog):
         mention_bool = mention.value == "yes"
 
         if ctx.interaction:
-            modal = AnnounceModal(channel=channel, author=ctx.author, mention=mention_bool)
+            modal = AnnounceModal(
+                channel=channel, author=ctx.author, mention=mention_bool
+            )
             return await ctx.interaction.response.send_modal(modal)
 
         return await self._deny(
-            ctx,
-            "❌ Please use the slash version of this command to open the modal."
+            ctx, "❌ Please use the slash version of this command to open the modal."
         )
 
     @announce.error
@@ -76,6 +83,7 @@ class Admin(commands.Cog):
         """
         if isinstance(error, commands.CheckFailure):
             await self._deny(ctx, "❌ You don’t have permission to use this command.")
+
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(Admin(bot))

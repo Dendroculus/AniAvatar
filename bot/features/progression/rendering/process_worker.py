@@ -1,12 +1,13 @@
 import asyncpg
 from typing import Any, Optional, Iterable
-from bot.utils.progression.profile_cards import ImageRenderer
+from bot.features.progression.rendering import ImageRenderer
 from bot.config.configs import AssetPaths as AP, ProgressionConstants as PC
 
 # Module-level global to hold the renderer instance within the worker process.
 # This replaces the dictionary context to ensure explicit state handling
 # compatible with 'spawn' multiprocessing contexts.
 _renderer: Optional[ImageRenderer] = None
+
 
 def initialize_worker_safe(cache_size: int):
     """
@@ -15,7 +16,8 @@ def initialize_worker_safe(cache_size: int):
     """
     global _renderer
     _renderer = ImageRenderer(cache_size=cache_size)
-    
+
+
 def render_profile_in_process(
     avatar_bytes: bytes,
     display_name: str,
@@ -71,13 +73,16 @@ def render_leaderboard_in_process(
         cache_ttl=cache_ttl,
     )
 
+
 async def pool_init(conn: asyncpg.Connection):
     """
     Apply per-connection settings (statement timeout, optional app name).
     Keeps long/blocked queries from piling up.
     """
     try:
-        await conn.execute(f"SET statement_timeout TO {PC.DEFAULT_STATEMENT_TIMEOUT_MS}")
+        await conn.execute(
+            f"SET statement_timeout TO {PC.DEFAULT_STATEMENT_TIMEOUT_MS}"
+        )
         await conn.execute("SET application_name TO 'minori-progression'")
     except Exception:
         # Best-effort; don't block pool init

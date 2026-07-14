@@ -187,14 +187,29 @@ class Fun(
         ctx: commands.Context,
     ) -> None:
         """Fetch and display a random waifu image."""
+        interaction = getattr(
+            ctx,
+            "interaction",
+            None,
+        )
+
+        if interaction is not None and not interaction.response.is_done():
+            await interaction.response.defer()
 
         try:
             image_url = await self.waifu_client.fetch_image_url()
-        except WaifuAPIError:
-            await ctx.send("❌ Couldn't fetch a waifu image. Try again.")
-            return
         except WaifuImageMissing:
-            await ctx.send("❌ No image found!")
+            await ctx.send("❌ No image was returned by the waifu service.")
+            return
+        except WaifuAPIError as error:
+            print(f"[Fun] waifu service error: {error}")
+            await ctx.send(
+                "❌ The waifu image service is unavailable. Please try again later."
+            )
+            return
+        except Exception as error:
+            print(f"[Fun] unexpected waifu error: {error}")
+            await ctx.send("❌ Something went wrong while fetching the waifu image.")
             return
 
         embed = discord.Embed(title="Here's a random waifu for you!")

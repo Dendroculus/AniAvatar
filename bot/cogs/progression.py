@@ -6,15 +6,15 @@ import logging
 from typing import Optional, Tuple
 
 
-from bot.utils.progression.profile_theme import MainThemeView
+from bot.features.progression.views.profile_theme import MainThemeView
 from bot.config.configs import (
     REDIS_CACHING,
     ProgressionConstants as PC,
 )
-from bot.services.render_manager import RenderManager
+from bot.core.rendering.render_manager import RenderManager
 from bot.features.progression.leaderboard_workflow import LeaderboardWorkflow
 from bot.features.progression.profile_workflow import ProfileWorkflow
-from bot.services.user_repository import UserRepository
+from bot.core.repositories.user_repository import UserRepository
 from bot.features.progression.experience_workflow import ExperienceWorkflow
 
 """

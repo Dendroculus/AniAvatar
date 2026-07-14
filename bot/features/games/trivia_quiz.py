@@ -9,7 +9,7 @@ import discord
 from discord.ext import commands
 
 from bot.config.emojis import CustomEmojis
-from bot.utils.game_texts import random_lose_message
+from bot.features.games.texts import random_lose_message
 
 from .reward_service import GameRewardService
 

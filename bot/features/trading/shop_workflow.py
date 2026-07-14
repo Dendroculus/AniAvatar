@@ -5,8 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-from bot.services.trading_repository import TradingRepository
-from bot.services.user_repository import UserRepository
+from bot.features.trading.repository import TradingRepository
+from bot.core.repositories.user_repository import UserRepository
 
 
 ShopPurchaseStatus = Literal["success", "missing", "insufficient"]

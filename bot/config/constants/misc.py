@@ -5,7 +5,7 @@ import aiohttp
 
 class ExternalAPIs:
     ANILIST_API = "https://graphql.anilist.co"
-    WAIFU_API = "https://api.waifu.pics/sfw/waifu"
+    WAIFU_API = "https://api.waifu.im/images"
     JIKAN_TOP_CHAR_URL = "https://api.jikan.moe/v4/top/characters"
     JIKAN_SEARCH_CHAR_URL = "https://api.jikan.moe/v4/characters"
 

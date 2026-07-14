@@ -9,6 +9,7 @@ Data access layer for the Trading subsystem.
 Handles schema initialization and CRUD operations for shop items and user inventory.
 """
 
+
 class TradingRepository:
     def __init__(self, pool: asyncpg.Pool):
         self.pool = pool
@@ -35,10 +36,14 @@ class TradingRepository:
                     PRIMARY KEY(user_id, guild_id, item_name)
                 )
             """)
-            
+
             try:
-                await conn.execute("CREATE INDEX IF NOT EXISTS user_inventory_guild_user_idx ON user_inventory (guild_id, user_id)")
-                await conn.execute("CREATE INDEX IF NOT EXISTS user_inventory_guild_item_idx ON user_inventory (guild_id, item_name)")
+                await conn.execute(
+                    "CREATE INDEX IF NOT EXISTS user_inventory_guild_user_idx ON user_inventory (guild_id, user_id)"
+                )
+                await conn.execute(
+                    "CREATE INDEX IF NOT EXISTS user_inventory_guild_item_idx ON user_inventory (guild_id, item_name)"
+                )
             except Exception as e:
                 print(f"[TradingRepository] Index creation warning: {e}")
 
@@ -49,7 +54,10 @@ class TradingRepository:
             for name, type_, price, emoji in items:
                 await conn.execute(
                     "INSERT INTO shop_items (name, type, price, emoji) VALUES ($1, $2, $3, $4) ON CONFLICT (name) DO NOTHING",
-                    name, type_, price, emoji
+                    name,
+                    type_,
+                    price,
+                    emoji,
                 )
 
     async def cleanup_zero_quantity_items(self):
@@ -62,7 +70,9 @@ class TradingRepository:
         """Remove all inventory items for a specific guild."""
         async with self.pool.acquire() as conn:
             await self._set_stmt_timeout(conn)
-            await conn.execute("DELETE FROM user_inventory WHERE guild_id = $1", guild_id)
+            await conn.execute(
+                "DELETE FROM user_inventory WHERE guild_id = $1", guild_id
+            )
 
     async def get_shop_items(self) -> List[dict]:
         """Fetch all items available in the shop."""
@@ -74,30 +84,42 @@ class TradingRepository:
         """Fetch price and emoji for a specific item."""
         async with self.pool.acquire() as conn:
             await self._set_stmt_timeout(conn)
-            return await conn.fetchrow("SELECT price, emoji FROM shop_items WHERE name = $1", item_name)
+            return await conn.fetchrow(
+                "SELECT price, emoji FROM shop_items WHERE name = $1", item_name
+            )
 
-    async def get_user_inventory(self, user_id: int, guild_id: int) -> List[Tuple[str, int, str]]:
+    async def get_user_inventory(
+        self, user_id: int, guild_id: int
+    ) -> List[Tuple[str, int, str]]:
         """Fetch a user's inventory with emojis."""
         async with self.pool.acquire() as conn:
             await self._set_stmt_timeout(conn)
             rows = await conn.fetch(TC.SQL_USER_INV_SELECT, user_id, guild_id)
-            
+
             results = []
             for name, qty in rows:
                 if qty <= 0:
                     continue
-                erow = await conn.fetchrow("SELECT emoji FROM shop_items WHERE name = $1", name)
+                erow = await conn.fetchrow(
+                    "SELECT emoji FROM shop_items WHERE name = $1", name
+                )
                 emoji = erow["emoji"] if erow else "📦"
                 results.append((name, qty, emoji))
             return results
 
-    async def add_item(self, user_id: int, guild_id: int, item_name: str, quantity: int):
+    async def add_item(
+        self, user_id: int, guild_id: int, item_name: str, quantity: int
+    ):
         """Add items to a user's inventory."""
         async with self.pool.acquire() as conn:
             await self._set_stmt_timeout(conn)
-            await conn.execute(TC.SQL_UPSERT_USER_INV, user_id, guild_id, item_name, quantity)
+            await conn.execute(
+                TC.SQL_UPSERT_USER_INV, user_id, guild_id, item_name, quantity
+            )
 
-    async def use_item(self, user_id: int, guild_id: int, item_name: str) -> Optional[int]:
+    async def use_item(
+        self, user_id: int, guild_id: int, item_name: str
+    ) -> Optional[int]:
         """
         Decrement item quantity by 1. Returns the new quantity, or None if item not found/empty.
         Automatically cleans up if quantity reaches 0.
@@ -112,19 +134,23 @@ class TradingRepository:
                     WHERE user_id = $1 AND guild_id = $2 AND item_name = $3 AND quantity > 0
                     RETURNING quantity
                     """,
-                    user_id, guild_id, item_name
+                    user_id,
+                    guild_id,
+                    item_name,
                 )
-                
+
                 if not row:
                     return None
-                
+
                 new_qty = row["quantity"]
                 if new_qty <= 0:
                     await conn.execute(
                         "DELETE FROM user_inventory WHERE user_id = $1 AND guild_id = $2 AND item_name = $3",
-                        user_id, guild_id, item_name
+                        user_id,
+                        guild_id,
+                        item_name,
                     )
-                
+
                 return new_qty
 
     async def _set_stmt_timeout(self, conn):
