@@ -1,1 +1,1 @@
-"""Package initializer."""
+"""Feature-oriented bot packages."""

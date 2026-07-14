@@ -3,7 +3,11 @@ from discord.ext import commands
 from discord.ui import View, Select
 import logging
 
-from bot.utils.anime_api import search_anime, fetch_character_by_name, char_has_anime_media
+from bot.features.anime import (
+    search_anime,
+    fetch_character_by_name,
+    char_has_anime_media,
+)
 from bot.features.animepfp.search_engine.config import settings
 from bot.features.animepfp.search_engine.database.connection import DatabasePool
 from bot.features.animepfp.search_engine.database.queries import INSERT_SEARCH_HISTORY
@@ -11,15 +15,19 @@ from bot.features.animepfp.search_engine.services.cache_service import CacheServ
 from bot.features.animepfp.search_engine.services.orchestrator import SearchOrchestrator
 from bot.features.animepfp.search_engine.workers.pinterest import PinterestWorker
 from bot.features.animepfp.search_engine.workers.google import GoogleWorker
-from bot.features.animepfp.search_engine.utils.rate_limiter import TokenBucketRateLimiter
+from bot.features.animepfp.search_engine.utils.rate_limiter import (
+    TokenBucketRateLimiter,
+)
 from bot.features.animepfp.search_engine.utils.http_validator import HTTPValidator
 
 logger = logging.getLogger(__name__)
+
 
 class Search(commands.Cog):
     """
     Cog providing anime metadata search and the smart Pinterest PFP Search Engine.
     """
+
     def __init__(self, bot):
         self.bot = bot
         self.db = None
@@ -30,34 +38,29 @@ class Search(commands.Cog):
     async def cog_load(self):
         """Initialize the Search Engine services."""
         logger.info("⚙️ Loading Search Engine components...")
-        
+
         if not self.bot.session:
             logger.error("Bot session is not initialized. Search engine may fail.")
-        
+
         self.db = await DatabasePool.get_instance(
-            settings.database_url, 
-            settings.min_pool_size, 
-            settings.max_pool_size
+            settings.database_url, settings.min_pool_size, settings.max_pool_size
         )
-        
+
         cache = CacheService(self.db)
         validator = HTTPValidator()
         limiter = TokenBucketRateLimiter(rate=2.0, burst=5)
-        
+
         self.pinterest_worker = PinterestWorker(limiter)
         await self.pinterest_worker.initialize()
-        
+
         self.google_worker = GoogleWorker(
             session=self.bot.session,
             api_key=settings.google_api_key,
-            cx=settings.google_search_engine_id
+            cx=settings.google_search_engine_id,
         )
 
         self.orchestrator = SearchOrchestrator(
-            cache, 
-            self.pinterest_worker, 
-            self.google_worker, 
-            validator
+            cache, self.pinterest_worker, self.google_worker, validator
         )
         logger.info("✅ Search Engine Ready.")
 
@@ -91,9 +94,7 @@ class Search(commands.Cog):
             return
 
         response = await self.orchestrator.search(
-            query=search_query,
-            user_id=ctx.author.id,
-            count=count
+            query=search_query, user_id=ctx.author.id, count=count
         )
 
         error_message = self._get_empty_response_message(response, search_query)
@@ -103,11 +104,12 @@ class Search(commands.Cog):
         embeds = self._build_image_embeds(response, search_query, count)
         await ctx.send(embeds=embeds)
 
-
     async def _validate_character(self, ctx: commands.Context, name: str) -> str | None:
         """Validate character exists on AniList and is from an anime. Returns search query or None."""
         try:
-            char = await fetch_character_by_name(name, session=self.bot.session, prefer="AniList")
+            char = await fetch_character_by_name(
+                name, session=self.bot.session, prefer="AniList"
+            )
 
             if not char:
                 await ctx.send(f"❌ Could not find character **{name}** on AniList.")
@@ -124,7 +126,6 @@ class Search(commands.Cog):
             logger.error(f"Validation error: {e}")
             return name
 
-
     def _get_empty_response_message(self, response, search_query: str) -> str | None:
         """Return error message if response has no images, or None if images exist."""
         if response.images:
@@ -137,7 +138,6 @@ class Search(commands.Cog):
             )
 
         return f"❌ No images found for **{search_query}**."
-
 
     def _build_image_embeds(self, response, search_query: str, count: int) -> list:
         """Build embed objects for the image response."""
@@ -154,7 +154,6 @@ class Search(commands.Cog):
 
         return embeds
 
-
     def _build_source_text(self, img, from_cache: bool) -> str:
         """Build the footer source text for an image embed."""
         cache_status = " • Cached (New for you)" if from_cache else " • Freshly Scraped"
@@ -166,39 +165,71 @@ class Search(commands.Cog):
         title_dict = anime_data.get("title", {})
         title = title_dict.get("english") or title_dict.get("romaji") or "Unknown Title"
         url = anime_data.get("siteUrl", "")
-        
+
         description = anime_data.get("description") or "No description available."
-        description = description.replace("<br>", "\n").replace("<i>", "").replace("</i>", "")
+        description = (
+            description.replace("<br>", "\n").replace("<i>", "").replace("</i>", "")
+        )
         if len(description) > 4096:
             description = description[:4093] + "..."
 
-        embed = discord.Embed(title=title, url=url, description=description, color=discord.Color.blurple())
-        
+        embed = discord.Embed(
+            title=title, url=url, description=description, color=discord.Color.blurple()
+        )
+
         if anime_data.get("coverImage", {}).get("medium"):
             embed.set_thumbnail(url=anime_data["coverImage"]["medium"])
         if anime_data.get("bannerImage"):
             embed.set_image(url=anime_data["bannerImage"])
 
-        embed.add_field(name="Episodes", value=str(anime_data.get("episodes", "N/A")), inline=True)
-        embed.add_field(name="Status", value=anime_data.get("status", "N/A").title(), inline=True)
+        embed.add_field(
+            name="Episodes", value=str(anime_data.get("episodes", "N/A")), inline=True
+        )
+        embed.add_field(
+            name="Status", value=anime_data.get("status", "N/A").title(), inline=True
+        )
 
         start = anime_data.get("startDate", {})
         end = anime_data.get("endDate", {})
-        start_str = f"{start.get('year','N/A')}-{start.get('month','??')}-{start.get('day','??')}" if start.get("year") else "N/A"
-        end_str = f"{end.get('year','N/A')}-{end.get('month','??')}-{end.get('day','??')}" if end.get("year") else "N/A"
-        
+        start_str = (
+            f"{start.get('year', 'N/A')}-{start.get('month', '??')}-{start.get('day', '??')}"
+            if start.get("year")
+            else "N/A"
+        )
+        end_str = (
+            f"{end.get('year', 'N/A')}-{end.get('month', '??')}-{end.get('day', '??')}"
+            if end.get("year")
+            else "N/A"
+        )
+
         embed.add_field(name="Start Date", value=start_str, inline=True)
         embed.add_field(name="End Date", value=end_str, inline=True)
-        embed.add_field(name="Duration", value=f"{anime_data.get('duration', 'N/A')} min/ep", inline=True)
-        
+        embed.add_field(
+            name="Duration",
+            value=f"{anime_data.get('duration', 'N/A')} min/ep",
+            inline=True,
+        )
+
         studios = anime_data.get("studios", {}).get("nodes", [])
         studio_name = studios[0]["name"] if studios else "N/A"
         embed.add_field(name="Studio", value=studio_name, inline=True)
-        
-        embed.add_field(name="Source", value=anime_data.get("source", "N/A"), inline=True)
-        embed.add_field(name="Score", value=f"{anime_data.get('averageScore', 'N/A')}%", inline=True)
-        embed.add_field(name="Popularity", value=str(anime_data.get("popularity", "N/A")), inline=True)
-        embed.add_field(name="Favourites", value=str(anime_data.get("favourites", "N/A")), inline=True)
+
+        embed.add_field(
+            name="Source", value=anime_data.get("source", "N/A"), inline=True
+        )
+        embed.add_field(
+            name="Score", value=f"{anime_data.get('averageScore', 'N/A')}%", inline=True
+        )
+        embed.add_field(
+            name="Popularity",
+            value=str(anime_data.get("popularity", "N/A")),
+            inline=True,
+        )
+        embed.add_field(
+            name="Favourites",
+            value=str(anime_data.get("favourites", "N/A")),
+            inline=True,
+        )
 
         genres = anime_data.get("genres", [])
         genres_str = " ".join(f"`{g}`" for g in genres) if genres else "N/A"
@@ -221,8 +252,14 @@ class Search(commands.Cog):
 
         options = [
             discord.SelectOption(
-                label=(a.get("title", {}).get("english") or a.get("title", {}).get("romaji") or "Unknown")[:100],
-                description=f"Episodes: {a.get('episodes', 'N/A')} | Season: {a.get('season', 'N/A')}"[:100],
+                label=(
+                    a.get("title", {}).get("english")
+                    or a.get("title", {}).get("romaji")
+                    or "Unknown"
+                )[:100],
+                description=f"Episodes: {a.get('episodes', 'N/A')} | Season: {a.get('season', 'N/A')}"[
+                    :100
+                ],
                 value=str(a["id"]),
             )
             for a in results
@@ -230,7 +267,9 @@ class Search(commands.Cog):
 
         async def select_callback(interaction: discord.Interaction):
             if interaction.user != ctx.author:
-                await interaction.response.send_message("This is not your command!", ephemeral=True)
+                await interaction.response.send_message(
+                    "This is not your command!", ephemeral=True
+                )
                 return
 
             await interaction.response.defer()
@@ -238,15 +277,20 @@ class Search(commands.Cog):
                 anime_id = int(interaction.data["values"][0])
                 anime_data = next(a for a in results if a["id"] == anime_id)
                 embed = self._create_anime_embed(anime_data)
-                await interaction.edit_original_response(content=None, embed=embed, view=None)
+                await interaction.edit_original_response(
+                    content=None, embed=embed, view=None
+                )
             except Exception:
-                await interaction.edit_original_response(content="❌ Failed to load anime data.", view=None)
+                await interaction.edit_original_response(
+                    content="❌ Failed to load anime data.", view=None
+                )
 
         select = Select(placeholder="Choose an anime...", options=options)
         select.callback = select_callback
         view = View()
         view.add_item(select)
         await ctx.send("Select an anime from the search results:", view=view)
+
 
 async def setup(bot):
     await bot.add_cog(Search(bot))

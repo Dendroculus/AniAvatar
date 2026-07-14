@@ -1,14 +1,15 @@
-import os
+import asyncio
 import random
 import discord
 from discord.ext import commands, tasks
 
-from bot.utils.pollings_db import (
+from bot.features.polling.recovery import reconstruct_poll
+from bot.features.polling.repository import (
     init_db,
     load_active_polls,
     purge_finished_polls,
 )
-from bot.utils.pollings import reconstruct_poll
+from bot.config.paths import DATA_PATH
 """
 Events Cog - Poll restoration and presence rotation.
 
@@ -56,9 +57,7 @@ class Events(commands.Cog):
         """
         Async initialization: load anime list from file without blocking the event loop.
         """
-        self.anime_list_path = os.path.join(
-            os.path.dirname(os.path.dirname(__file__)), "data", "animelist.txt"
-        )
+        self.anime_list_path = DATA_PATH / "animelist.txt"
         def load_anime_file():
             try:
                 with open(self.anime_list_path, "r", encoding="utf-8") as f:
@@ -68,7 +67,7 @@ class Events(commands.Cog):
                 return []
 
         # Offload file I/O to a thread
-        self.anime_list = await self.bot.loop.run_in_executor(None, load_anime_file)
+        self.anime_list = await asyncio.to_thread(load_anime_file)
 
     @commands.Cog.listener()
     async def on_ready(self):

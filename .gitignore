@@ -54,3 +54,5 @@ logs/
 
 # personal testing
 api_test.py
+_refactor_backup/
+apply_aniavatar_refactor*.py
