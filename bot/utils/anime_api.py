@@ -1,6 +1,5 @@
 import random
 import asyncio
-import logging
 from typing import Dict, List, Optional
 import aiohttp
 import discord
@@ -241,44 +240,6 @@ async def search_anime(session: aiohttp.ClientSession, query: str) -> List[Dict]
         return []
 
 
-async def search_characters(session: aiohttp.ClientSession, name: str) -> List[Dict]:
-    """
-    Search for characters by name using AniList.
-
-    Args:
-        session: Shared aiohttp.ClientSession.
-        name: Name of the character to search for.
-
-    Returns:
-        List[Dict]: A list of character dictionaries containing names, images, and media info.
-    """
-    query_str = """
-    query ($search: String) {
-        Page(perPage: 5) {
-            characters(search: $search) {
-                id
-                name { full native alternative }
-                image { large medium }
-                media(perPage: 1, sort: POPULARITY_DESC) {
-                    nodes { id type }
-                }
-            }
-        }
-    }
-    """
-    variables = {"search": name}
-
-    try:
-        async with asyncio.timeout(AC.TIMEOUT_SECONDS):
-            async with session.post(EA.ANILIST_API, json={"query": query_str, "variables": variables}) as resp:
-                if resp.status != 200:
-                    return []
-                data = await resp.json()
-            return data.get("data", {}).get("Page", {}).get("characters", [])
-    except Exception:
-        return []
-
-
 def char_has_anime_media(char_obj: Optional[Dict]) -> bool:
     """
     Determine if the provided character object has at least one associated ANIME media node.
@@ -368,108 +329,3 @@ async def build_character_select_options(correct_name: str, source: str, session
     opts.extend(wrong)
     random.shuffle(opts)
     return [discord.SelectOption(label=o, value=o) for o in opts]
-
-
-def _check(resp):
-    """
-    Synchronous helper to validate response headers.
-    """
-    if resp.status != 200:
-        return False
-    ct = resp.headers.get("Content-Type", "")
-    if not ct.startswith("image/"):
-        return False
-    try:
-        clen = int(resp.headers.get("Content-Length", "0"))
-    except Exception:
-        clen = 0
-    return clen > 1000  # basic size guard: at least 1KB
-
-
-async def is_image_url_ok(session: aiohttp.ClientSession, url: str) -> bool:
-    if not url:
-        return False
-
-    try:
-        async with asyncio.timeout(AC.TIMEOUT_SECONDS):
-            await asyncio.sleep(0)
-            async with session.head(url, allow_redirects=True) as resp:
-                if _check(resp):
-                    return True
-
-    except asyncio.TimeoutError:
-        logging.debug("HEAD timeout: %s", url)
-
-    except aiohttp.ClientError as e:
-        logging.debug("HEAD client error %s: %s", url, e)
-
-    except Exception:
-        logging.exception("Unexpected HEAD error for %s", url)
-
-
-    try:
-        async with asyncio.timeout(AC.TIMEOUT_SECONDS):
-            await asyncio.sleep(0)
-            async with session.get(url, allow_redirects=True) as resp:
-                return _check(resp)
-
-    except asyncio.TimeoutError:
-        logging.debug("GET timeout: %s", url)
-
-    except aiohttp.ClientError as e:
-        logging.debug("GET client error %s: %s", url, e)
-
-    except Exception:
-        logging.exception("Unexpected GET error for %s", url)
-
-    return False
-
-
-
-async def google_image_search(query: str, api_key: str, cx: str, session: aiohttp.ClientSession) -> List[str]:
-    """
-    Query Google Custom Search (image type) and return a filtered list of image links.
-    Requires an active aiohttp.ClientSession.
-    """
-    from urllib.parse import quote
-    url = (
-        f"https://www.googleapis.com/customsearch/v1?"
-        f"key={api_key}&cx={cx}&searchType=image&q={quote(query)}"
-    )
-    
-    try:
-        async with asyncio.timeout(AC.TIMEOUT_SECONDS):
-            async with session.get(url) as resp:
-                data = {}
-                try:
-                    data = await resp.json()
-                except Exception:
-                    pass
-            items = data.get("items") or []
-            image_extensions = (".png", ".jpg", ".jpeg", ".webp")
-            links = [
-                item.get("link") for item in items
-                if isinstance(item.get("link"), str) and item["link"].lower().endswith(image_extensions)
-            ]
-            return links
-    except Exception as e:
-        logging.warning(f"Google Image Search failed for query '{query}': {e}")
-        return []
-
-
-async def first_reachable_image(links: List[str], session: aiohttp.ClientSession) -> Optional[str]:
-    """
-    Return the first reachable image URL from a list of links.
-    Uses the provided session for all checks.
-    """
-    if not links:
-        return None
-    for link in links:
-        try:
-            async with asyncio.timeout(AC.TIMEOUT_SECONDS):
-                ok = await is_image_url_ok(session, link)
-                if ok:
-                    return link
-        except Exception:
-            continue
-    return None
