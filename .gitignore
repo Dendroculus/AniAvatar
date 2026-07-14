@@ -76,3 +76,6 @@ logs/
 *.jsonl
 *.jsonl.*
 # --- End AniAvatar generated files ---
+
+# Runtime-generated AniList presence cache
+data/cache/

@@ -9,7 +9,8 @@ from bot.features.polling.repository import (
     load_active_polls,
     purge_finished_polls,
 )
-from bot.config.paths import DATA_PATH
+from bot.features.anime.presence_provider import AnimePresenceProvider
+
 """
 Events Cog - Poll restoration and presence rotation.
 
@@ -17,7 +18,7 @@ This module is responsible for:
 - Rehydrating active polls from persistent storage on bot startup, attaching
   interactive views to existing messages where possible.
 - Finalizing polls that have expired while the bot was offline (recording results).
-- Rotating presence by sampling from a local anime list file.
+- Rotating presence from AniList-backed cached titles.
 
 Operational notes and guarantees:
 - Restoration is best-effort: missing guilds/channels/messages are logged and
@@ -32,12 +33,13 @@ Operational notes and guarantees:
   issues).
 """
 
+
 class Events(commands.Cog):
     """
     Cog managing event-like background behavior.
 
     Responsibilities:
-    - Load a curated list of anime titles for periodic presence rotation.
+    - Load AniList-backed titles for periodic presence rotation.
     - On bot ready, initialize poll DB, reload active polls, attach PollView objects,
       finalize expired polls, and purge finished entries from storage.
     - Provide helper functions used during poll reconstruction and validation.
@@ -48,26 +50,15 @@ class Events(commands.Cog):
     - All I/O with Discord (fetching members/messages) is awaited and isolated to
       prevent a single failing poll from stopping the overall restoration process.
     """
+
     def __init__(self, bot: commands.Bot):
         self.bot = bot
-        self.anime_list_path = None
-        self.anime_list = []
+        self.presence_provider = AnimePresenceProvider(bot)
+        self.anime_titles: list[str] = []
 
-    async def cog_load(self):
-        """
-        Async initialization: load anime list from file without blocking the event loop.
-        """
-        self.anime_list_path = DATA_PATH / "animelist.txt"
-        def load_anime_file():
-            try:
-                with open(self.anime_list_path, "r", encoding="utf-8") as f:
-                    # Expect lines like "1. Title", extract the portion after the first dot-space
-                    return [line.split(". ")[1].strip() for line in f.readlines() if ". " in line]
-            except Exception:
-                return []
-
-        # Offload file I/O to a thread
-        self.anime_list = await asyncio.to_thread(load_anime_file)
+    async def cog_load(self) -> None:
+        """Load cached or freshly fetched AniList presence titles."""
+        self.anime_titles = await self.presence_provider.load_titles()
 
     @commands.Cog.listener()
     async def on_ready(self):
@@ -114,41 +105,57 @@ class Events(commands.Cog):
 
         if not self.status_task.is_running():
             self.status_task.start()
-        print(f"🟣 Presence rotation started as {self.bot.user} | {len(self.anime_list)} titles loaded")
 
-    @tasks.loop(seconds=1200)
-    async def status_task(self):
-        """
-        Periodically rotate bot presence.
+        if not self.refresh_presence_titles.is_running():
+            self.refresh_presence_titles.start()
 
-        Behavior:
-        - If anime_list is empty the task becomes a no-op to avoid changing presence.
-        - Uses a WATCHING activity for consistent appearance.
-        - Exceptions when changing presence are suppressed because failures here are
-          cosmetic and should not affect other functionalities.
-        """
-        if not self.anime_list:
+        print(
+            f"🟣 Presence rotation started as {self.bot.user} | "
+            f"{len(self.anime_titles)} AniList titles loaded"
+        )
+
+    @tasks.loop(minutes=20)
+    async def status_task(self) -> None:
+        """Rotate the bot presence from the locally cached title pool."""
+        if not self.anime_titles:
             return
-        anime = random.choice(self.anime_list)
+
+        anime = random.choice(self.anime_titles)
+
         try:
             await self.bot.change_presence(
-                activity=discord.Activity(type=discord.ActivityType.watching, name=anime)
+                activity=discord.Activity(
+                    type=discord.ActivityType.watching,
+                    name=anime,
+                )
             )
         except Exception:
-            # Ignore presence-setting errors (rate limits, missing intents, etc.)
             pass
 
-    def cog_unload(self):
-        """
-        Clean shutdown for the cog: cancel the periodic status task.
+    @tasks.loop(hours=24)
+    async def refresh_presence_titles(self) -> None:
+        """Refresh the local presence title pool from AniList."""
+        titles = await self.presence_provider.refresh_titles()
 
-        The method swallows exceptions as the bot teardown sequence may already
-        be in an inconsistent state where cancelling tasks can raise.
-        """
-        try:
-            self.status_task.cancel()
-        except Exception:
-            pass
+        if titles:
+            self.anime_titles = titles
+            print(f"[Events] Refreshed {len(titles)} AniList presence titles.")
+
+    @refresh_presence_titles.before_loop
+    async def before_refresh_presence_titles(self) -> None:
+        """Delay the first scheduled refresh after startup."""
+        await self.bot.wait_until_ready()
+        await asyncio.sleep(24 * 60 * 60)
+
+    def cog_unload(self) -> None:
+        """Cancel background presence tasks during extension unload."""
+        for loop in (
+            self.status_task,
+            self.refresh_presence_titles,
+        ):
+            if loop.is_running():
+                loop.cancel()
+
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(Events(bot))
