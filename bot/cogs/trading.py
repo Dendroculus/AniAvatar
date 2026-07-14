@@ -6,8 +6,14 @@ from discord.ext import commands
 
 from bot.config.emojis import CustomEmojis, MinoriEmojis, ShopEmojis
 from bot.config.configs import TradingConstants as TC
-from bot.utils.trading_ui import format_coins, ShopView, InventoryView
-from bot.utils.donate import DonateView, DonateSelect
+from bot.features.trading.views import (
+    DonateSelect,
+    DonateView,
+    InventoryView,
+    ShopView,
+    format_coins,
+)
+
 from bot.services.user_repository import UserRepository
 from bot.services.trading_repository import TradingRepository
 from bot.features.trading.item_effects import ItemEffectService
