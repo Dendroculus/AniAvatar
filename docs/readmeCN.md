@@ -240,7 +240,7 @@ ASSET_ROOT=
 ### 1) 克隆仓库
 
 ```bash
-git clone https://github.com/Dendroculus/AniAvatar.git
+git clone https://github.com/Yoruxyv/AniAvatar.git
 cd AniAvatar
 ```
 
@@ -349,8 +349,8 @@ AniAvatar 是独立项目，与 Discord、AniList、Jikan、Pinterest、Google �
 <table>
   <tr>
     <td align="center" width="180">
-      <a href="https://github.com/Dendroculus">
-        <img src="https://github.com/Dendroculus.png?size=96" width="96" alt="Hans 头像"><br>
+      <a href="https://github.com/Yoruxyv">
+        <img src="https://github.com/Yoruxyv.png?size=96" width="96" alt="Hans 头像"><br>
         <b>Hans Valerie</b>
       </a>
       <br>

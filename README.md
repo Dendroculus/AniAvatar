@@ -240,7 +240,7 @@ ASSET_ROOT=
 ### 1) Clone the repository
 
 ```bash
-git clone https://github.com/Dendroculus/AniAvatar.git
+git clone https://github.com/Yoruxyv/AniAvatar.git
 cd AniAvatar
 ```
 
@@ -349,8 +349,8 @@ AniAvatar is an independent project and is not affiliated with, supported by, or
 <table>
   <tr>
     <td align="center" width="180">
-      <a href="https://github.com/Dendroculus">
-        <img src="https://github.com/Dendroculus.png?size=96" width="96" alt="Hans avatar"><br>
+      <a href="https://github.com/Yoruxyv">
+        <img src="https://github.com/Yoruxyv.png?size=96" width="96" alt="Hans avatar"><br>
         <b>Hans Valerie</b>
       </a>
       <br>
